@@ -9,6 +9,7 @@ import {
 import { rememberNotificationProjects } from "../model/notificationProjects";
 import { ProjectNotificationSettings } from "./ProjectNotificationSettings";
 import { invoke } from "@tauri-apps/api/core";
+import { saveJiraInboxFilter } from "../../inbox/model/jira";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockRejectedValue(new Error("No native bridge")),
@@ -62,6 +63,78 @@ function categoriesButton(project: string): HTMLButtonElement {
     `button[aria-label="Notification categories for ${project}"]`,
   )!;
 }
+
+const jiraProject = {
+  id: "jira:acme.atlassian.net:project:10000",
+  name: "Engineering",
+  detail: "Jira · acme.atlassian.net",
+  kind: "jira" as const,
+  paths: [],
+};
+
+it("hides Jira rows in saved JQL mode and restores their preferences in Project mode", async () => {
+  rememberNotificationProjects([jiraProject]);
+  updateNotificationPreferences([jiraProject.id], {
+    disabled: ["issues"],
+    mutedUntil: null,
+  });
+  saveJiraInboxFilter({ mode: "jql", jql: "project = ENG" });
+  await act(async () =>
+    root.render(createElement(ProjectNotificationSettings, { cwd: "" })),
+  );
+  expect(categoriesButton("Engineering")).toBeNull();
+  expect(categoriesButton("me/private")).not.toBeNull();
+  await act(async () =>
+    saveJiraInboxFilter({ mode: "project", jql: "project = ENG" }),
+  );
+  act(() => categoriesButton("Engineering").click());
+  expect(checkbox("Issues and Linear tasks for Engineering").checked).toBe(
+    false,
+  );
+  expect(loadNotificationPreferences()[jiraProject.id]).toEqual({
+    disabled: ["issues"],
+    mutedUntil: null,
+  });
+});
+
+it("excludes a Jira project selected before switching to JQL from bulk mute", async () => {
+  rememberNotificationProjects([jiraProject]);
+  await act(async () =>
+    root.render(createElement(ProjectNotificationSettings, { cwd: "" })),
+  );
+  act(() =>
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Select projects")!
+      .click(),
+  );
+  act(() => checkbox("Select all projects").click());
+  await act(async () =>
+    root.render(
+      createElement(ProjectNotificationSettings, {
+        cwd: "",
+        jiraFilterMode: "jql",
+      }),
+    ),
+  );
+  expect(categoriesButton("Engineering")).toBeNull();
+  expect(container.textContent).toContain("2 selected");
+  act(() =>
+    container
+      .querySelector<HTMLButtonElement>(
+        '[aria-label="Mute selected projects"] [aria-label="Mute notifications"]',
+      )!
+      .click(),
+  );
+  const manual = [
+    ...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+  ].find((button) => button.textContent === "Until resumed")!;
+  act(() => manual.click());
+  expect(loadNotificationPreferences()[jiraProject.id]).toBeUndefined();
+  expect(
+    loadNotificationPreferences()["repository:github.com/me/private"]
+      ?.mutedUntil,
+  ).toBeNull();
+});
 
 it("saves only the selected project's categories while preserving its mute deadline", async () => {
   updateNotificationPreferences(["repository:github.com/me/private"], {

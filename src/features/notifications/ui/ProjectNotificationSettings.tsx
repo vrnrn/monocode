@@ -24,6 +24,11 @@ import {
   resolveTabGroupMascot,
 } from "../../workspace/model/tabGroups";
 import type { RecentProject } from "../../projects/model/recents";
+import {
+  JIRA_CHANGE_EVENT,
+  loadJiraInboxFilter,
+  type JiraInboxFilter,
+} from "../../inbox/model/jira";
 
 type Props = {
   cwd: string;
@@ -31,6 +36,7 @@ type Props = {
   notificationProjectPath?: string | null;
   notificationSettingsRequest?: number;
   highlighted?: boolean;
+  jiraFilterMode?: JiraInboxFilter["mode"];
 };
 
 export function ProjectNotificationSettings({
@@ -39,15 +45,25 @@ export function ProjectNotificationSettings({
   notificationProjectPath = null,
   notificationSettingsRequest = 0,
   highlighted = false,
+  jiraFilterMode,
 }: Props) {
+  const [savedJiraMode, setSavedJiraMode] = useState(
+    () => loadJiraInboxFilter().mode,
+  );
+  useEffect(() => {
+    const onChange = () => setSavedJiraMode(loadJiraInboxFilter().mode);
+    window.addEventListener(JIRA_CHANGE_EVENT, onChange);
+    return () => window.removeEventListener(JIRA_CHANGE_EVENT, onChange);
+  }, []);
+  const hideJiraProjects = (jiraFilterMode ?? savedJiraMode) === "jql";
   const notificationProjects = useNotificationProjects([
     cwd,
     notificationProjectPath ?? "",
     ...recents.map((project) => project.path),
   ]);
-  const projects = [...notificationProjects.projects].sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
+  const projects = notificationProjects.projects
+    .filter((project) => !hideJiraProjects || project.kind !== "jira")
+    .sort((a, b) => a.name.localeCompare(b.name));
   const preferences = useProjectNotificationPreferences();
   const groupLogos = useTabGroupLogos();
   const groupColors = loadTabGroupColors();
@@ -154,7 +170,9 @@ export function ProjectNotificationSettings({
             role="status"
             className="px-4 py-3.5 text-[12px] leading-relaxed text-content/45"
           >
-            Open a project or connect an Inbox provider to configure its notifications.
+            {hideJiraProjects
+              ? "Jira project notifications are hidden in JQL mode."
+              : "Open a project or connect an Inbox provider to configure its notifications."}
           </p>
         ) : null}
         {projects.length ? (
