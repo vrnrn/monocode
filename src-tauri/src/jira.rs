@@ -173,17 +173,22 @@ pub async fn jira_list_issues(
     state: String,
     project_ids: Vec<String>,
     limit: Option<u32>,
+    jql: Option<String>,
 ) -> Result<Vec<JiraIssue>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let query = search_jql(jql.as_deref(), assigned_to_me, &state, &project_ids)?;
         let Some(config) = read_config(&app)? else {
-            return Ok(Vec::new());
+            return if jql.is_some() {
+                Err("Connect Jira in Settings".into())
+            } else {
+                Ok(Vec::new())
+            };
         };
         let limit = limit.unwrap_or(DEFAULT_LIMIT).clamp(1, 100);
-        let jql = issue_jql(assigned_to_me, &state, &project_ids);
         let data = jira_post(
             &config,
             "/rest/api/3/search/jql",
-            &json!({ "jql": jql, "maxResults": limit, "fields": ISSUE_FIELDS }),
+            &json!({ "jql": query, "maxResults": limit, "fields": ISSUE_FIELDS }),
         )?;
         parse_jira_issues(&data, &config.site)
     })
@@ -257,6 +262,19 @@ fn status_for(config: Option<&JiraConfig>) -> JiraStatus {
         email: config
             .map(|config| config.email.clone())
             .unwrap_or_default(),
+    }
+}
+
+fn search_jql(
+    custom_jql: Option<&str>,
+    assigned_to_me: bool,
+    state: &str,
+    project_ids: &[String],
+) -> Result<String, String> {
+    match custom_jql {
+        Some(jql) if jql.trim().is_empty() => Err("Enter a JQL query.".into()),
+        Some(jql) => Ok(jql.trim().to_string()),
+        None => Ok(issue_jql(assigned_to_me, state, project_ids)),
     }
 }
 
@@ -1028,6 +1046,32 @@ mod tests {
         assert_eq!(
             issue_jql(false, "all", &[]),
             "updated >= -365d ORDER BY updated DESC"
+        );
+    }
+
+    #[test]
+    fn custom_jql_replaces_project_assignment_and_status_filters() {
+        let jql = " project = ENG OR labels = \"needs triage\" ORDER BY priority DESC ";
+        assert_eq!(
+            search_jql(Some(jql), true, "open", &["10001".into()]).unwrap(),
+            jql.trim()
+        );
+        assert_eq!(
+            search_jql(None, true, "open", &["10001".into()]).unwrap(),
+            issue_jql(true, "open", &["10001".into()])
+        );
+        // Saved filters and custom ordering go to Jira unchanged.
+        assert_eq!(
+            search_jql(Some("filter = 12345"), false, "all", &[]).unwrap(),
+            "filter = 12345"
+        );
+    }
+
+    #[test]
+    fn empty_custom_jql_does_not_fall_back_to_a_broad_query() {
+        assert_eq!(
+            search_jql(Some(" \n "), false, "all", &[]).unwrap_err(),
+            "Enter a JQL query."
         );
     }
 

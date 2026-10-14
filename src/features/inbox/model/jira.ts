@@ -64,7 +64,13 @@ export type JiraStatus = {
   email: string;
 };
 
+export type JiraInboxFilter = {
+  mode: "project" | "jql";
+  jql: string;
+};
+
 const PROJECT_IDS_KEY = "monocode.jiraHiddenProjects";
+const INBOX_FILTER_KEY = "monocode.jiraInboxFilter";
 export const JIRA_CHANGE_EVENT = "monocode:jira-change";
 
 // Keyed by issue key (ENG-42): the REST paths and browse URLs both take it.
@@ -132,13 +138,53 @@ export function listJiraIssues(query: {
   state: "open" | "all";
   projectIds: string[];
   limit?: number;
+  jql?: string;
 }): Promise<JiraIssue[]> {
   return invoke<JiraIssue[]>("jira_list_issues", {
     assignedToMe: query.assignedToMe,
     state: query.state,
     projectIds: query.projectIds,
     limit: query.limit,
+    ...(query.jql !== undefined ? { jql: query.jql.trim() } : {}),
   });
+}
+
+/** Validate with Jira's search endpoint, including saved filters and site-specific fields. */
+export async function validateJiraJql(jql: string): Promise<void> {
+  if (!jql.trim()) throw new Error("Enter a JQL query.");
+  await listJiraIssues({
+    assignedToMe: false,
+    state: "all",
+    projectIds: [],
+    limit: 1,
+    jql,
+  });
+}
+
+export function loadJiraInboxFilter(): JiraInboxFilter {
+  try {
+    const parsed: unknown = JSON.parse(
+      localStorage.getItem(INBOX_FILTER_KEY) ?? "{}",
+    );
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const filter = parsed as Record<string, unknown>;
+      return {
+        mode: filter.mode === "jql" ? "jql" : "project",
+        jql: typeof filter.jql === "string" ? filter.jql.trim() : "",
+      };
+    }
+  } catch {
+    // Missing or malformed preferences use the existing project mode.
+  }
+  return { mode: "project", jql: "" };
+}
+
+export function saveJiraInboxFilter(filter: JiraInboxFilter): void {
+  localStorage.setItem(
+    INBOX_FILTER_KEY,
+    JSON.stringify({ ...filter, jql: filter.jql.trim() }),
+  );
+  notifyJiraChange();
 }
 
 export function peekJiraIssueDetails(key: string): JiraIssueDetails | null {

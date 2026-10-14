@@ -132,7 +132,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     description:
       "Manage Inbox services and notification preferences for each project.",
     keywords:
-      "github gitlab linear jira atlassian azure devops connect token integration",
+      "github gitlab linear jira atlassian azure devops connect token integration jql query",
   },
   {
     id: "archive",
@@ -472,7 +472,8 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     id: "jira",
     section: "inbox",
     label: "Jira",
-    keywords: "atlassian cloud site email api token issues projects connect",
+    keywords:
+      "atlassian cloud site email api token issues projects connect jql query filter mode",
   },
   {
     id: "linear",

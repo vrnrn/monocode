@@ -20,6 +20,8 @@ import {
   listJiraIssues,
   listJiraProjects,
   loadHiddenJiraProjectIds,
+  loadJiraInboxFilter,
+  type JiraInboxFilter,
   type JiraIssue,
 } from "./jira";
 import {
@@ -162,6 +164,7 @@ export type GithubWorkItemQuery = {
 export type InboxQuery = Omit<GithubWorkItemQuery, "kind"> & {
   linearHiddenTeamIds?: string[];
   jiraHiddenProjectIds?: string[];
+  jiraFilter?: JiraInboxFilter;
 };
 
 export type InboxProviderErrors = Partial<Record<InboxProvider, string>>;
@@ -257,6 +260,7 @@ export function inboxListCacheKey(
     .join("|");
   const teams = [...(query.linearHiddenTeamIds ?? [])].sort().join(",");
   const jiraProjects = [...(query.jiraHiddenProjectIds ?? [])].sort().join(",");
+  const jiraFilter = query.jiraFilter ?? loadJiraInboxFilter();
   const connectors = [
     enabled.github,
     enabled.linear,
@@ -266,7 +270,11 @@ export function inboxListCacheKey(
   ]
     .map((value) => (value ? 1 : 0))
     .join("");
-  return `${query.assignedToMe ? 1 : 0}:${query.state}:${paths}:${teams}:${jiraProjects}:${connectors}`;
+  return JSON.stringify([
+    `${query.assignedToMe ? 1 : 0}:${query.state}:${paths}:${teams}:${jiraProjects}:${connectors}`,
+    jiraFilter.mode,
+    jiraFilter.mode === "jql" ? jiraFilter.jql : "",
+  ]);
 }
 
 export function peekInboxList(
@@ -722,6 +730,8 @@ export async function listInboxItems(
   query: InboxQuery,
   options?: { force?: boolean },
 ): Promise<InboxListResult> {
+  // Snapshot preferences once so the cache key and every async fetch agree.
+  query = { ...query, jiraFilter: query.jiraFilter ?? loadJiraInboxFilter() };
   const enabled = loadInboxConnectors();
   const key = inboxListCacheKey(projects, query, enabled);
   if (!options?.force && inboxListIsFresh(projects, query)) {
@@ -1006,6 +1016,20 @@ async function fetchJiraInboxItems(
   query: InboxQuery,
   active: () => boolean,
 ): Promise<InboxItem[]> {
+  const filter = query.jiraFilter ?? loadJiraInboxFilter();
+  if (filter.mode === "jql") {
+    if (!filter.jql.trim())
+      throw new Error("Enter a JQL query in Jira settings.");
+    if (!active()) return [];
+    const issues = await listJiraIssues({
+      assignedToMe: false,
+      state: "all",
+      projectIds: [],
+      limit: INBOX_ALL_LIMIT,
+      jql: filter.jql,
+    });
+    return issues.map(jiraIssueToInboxItem);
+  }
   const hiddenIds = query.jiraHiddenProjectIds ?? loadHiddenJiraProjectIds();
   let projectIds: string[] | null = null;
   if (hiddenIds.length > 0) {

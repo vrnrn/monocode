@@ -32,6 +32,7 @@ type Props = {
   hiddenLinearTeamIds: string[];
   jiraProjects: JiraProject[];
   hiddenJiraProjectIds: string[];
+  jiraFilterMode?: "project" | "jql";
   source: InboxSource;
   filters: InboxFilters;
   onChange: (filters: InboxFilters) => void;
@@ -75,6 +76,7 @@ export function InboxFiltersMenu({
   hiddenLinearTeamIds,
   jiraProjects,
   hiddenJiraProjectIds,
+  jiraFilterMode = "project",
   source,
   filters,
   onChange,
@@ -88,8 +90,9 @@ export function InboxFiltersMenu({
   const hiddenKinds = new Set(filters.hiddenKinds);
   const teamsActive = source === "linear" && hiddenLinearTeamIds.length > 0;
   const hiddenJira = new Set(hiddenJiraProjectIds);
+  const jiraJql = source === "jira" && jiraFilterMode === "jql";
   const jiraProjectsActive =
-    source === "jira" && hiddenJiraProjectIds.length > 0;
+    source === "jira" && !jiraJql && hiddenJiraProjectIds.length > 0;
   const tracker = isTrackerSource(source);
 
   const toggleAssigned = () => {
@@ -154,15 +157,21 @@ export function InboxFiltersMenu({
       onContextMenu={(event) => event.preventDefault()}
       className="overflow-y-auto overscroll-none p-1"
     >
-      <FilterItem
-        label={
-          source === "gitlab" || source === "azuredevops"
-            ? "Needs attention"
-            : "Assigned to me"
-        }
-        checked={filters.assignedToMe}
-        onClick={toggleAssigned}
-      />
+      {jiraJql ? (
+        <p className="px-2 py-1.5 text-[12px] text-content/65">
+          JQL query from Jira settings
+        </p>
+      ) : (
+        <FilterItem
+          label={
+            source === "gitlab" || source === "azuredevops"
+              ? "Needs attention"
+              : "Assigned to me"
+          }
+          checked={filters.assignedToMe}
+          onClick={toggleAssigned}
+        />
+      )}
 
       <SectionLabel>Status</SectionLabel>
       <FilterItem
@@ -247,7 +256,7 @@ export function InboxFiltersMenu({
         </>
       ) : null}
 
-      {source === "jira" && jiraProjects.length > 0 ? (
+      {source === "jira" && !jiraJql && jiraProjects.length > 0 ? (
         <>
           <SectionLabel>Projects</SectionLabel>
           {jiraProjects.map((project) => (
@@ -290,10 +299,10 @@ export function InboxFiltersMenu({
       ) : null}
 
       {hasActiveInboxFilters(
-        filters,
+        jiraJql ? { ...filters, assignedToMe: false } : filters,
         source,
         hiddenLinearTeamIds,
-        hiddenJiraProjectIds,
+        jiraJql ? [] : hiddenJiraProjectIds,
       ) ? (
         <>
           <div role="separator" className="my-1 h-px bg-content/10" />

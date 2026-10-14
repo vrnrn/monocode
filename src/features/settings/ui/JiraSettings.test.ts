@@ -4,7 +4,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { JiraSettings } from "./JiraSettings";
-import { loadHiddenJiraProjectIds } from "../../inbox/model/jira";
+import {
+  loadHiddenJiraProjectIds,
+  loadJiraInboxFilter,
+  saveJiraInboxFilter,
+  saveHiddenJiraProjectIds,
+} from "../../inbox/model/jira";
 import { saveMaskEmails } from "../model/displayPrefs";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -32,6 +37,7 @@ beforeEach(() => {
     }
     if (command === "jira_list_projects")
       return [{ id: "10000", key: "ENG", name: "Engineering" }];
+    if (command === "jira_list_issues") return [];
     throw new Error(`Unexpected command: ${command}`);
   });
 });
@@ -62,6 +68,131 @@ async function submit() {
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   });
 }
+
+async function mountConnected() {
+  const original = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "jira_status")
+      return {
+        connected: true,
+        site: "acme.atlassian.net",
+        email: "ada@example.com",
+      };
+    return original(command, args);
+  });
+  await act(async () => root.render(createElement(JiraSettings)));
+}
+
+async function selectMode(mode: "Project" | "JQL") {
+  const radio = [...container.querySelectorAll<HTMLLabelElement>("label")]
+    .find((label) => label.textContent?.trim() === mode)!
+    .querySelector<HTMLInputElement>("input")!;
+  await act(async () => radio.click());
+}
+
+async function enterJql(value: string) {
+  const field = container.querySelector<HTMLTextAreaElement>("textarea")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )!.set!.call(field, value);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+it("validates and saves JQL, preserving project choices when modes are switched", async () => {
+  saveHiddenJiraProjectIds(["10000"]);
+  await mountConnected();
+  await selectMode("JQL");
+  expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+  const apply = container.querySelector<HTMLButtonElement>(
+    'button[type="submit"]',
+  )!;
+  expect(apply.disabled).toBe(true);
+  await enterJql(
+    "  project = ENG AND statusCategory != Done ORDER BY updated DESC  ",
+  );
+  expect(loadJiraInboxFilter().mode).toBe("project");
+  await submit();
+  expect(invoke).toHaveBeenCalledWith("jira_list_issues", {
+    assignedToMe: false,
+    state: "all",
+    projectIds: [],
+    limit: 1,
+    jql: "project = ENG AND statusCategory != Done ORDER BY updated DESC",
+  });
+  expect(loadJiraInboxFilter()).toEqual({
+    mode: "jql",
+    jql: "project = ENG AND statusCategory != Done ORDER BY updated DESC",
+  });
+  expect(container.querySelector('[role="status"]')?.textContent).toBe(
+    "JQL query applied.",
+  );
+  expect(apply.disabled).toBe(true);
+  await selectMode("Project");
+  expect(loadJiraInboxFilter().mode).toBe("project");
+  expect(
+    container.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+      .checked,
+  ).toBe(false);
+  await selectMode("JQL");
+  expect(container.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe(
+    "project = ENG AND statusCategory != Done ORDER BY updated DESC",
+  );
+  expect(loadHiddenJiraProjectIds()).toEqual(["10000"]);
+});
+
+it("keeps the saved query active when a new JQL query is rejected", async () => {
+  saveJiraInboxFilter({ mode: "jql", jql: "project = ENG" });
+  await mountConnected();
+  expect(invoke).not.toHaveBeenCalledWith("jira_list_projects");
+  await enterJql("unknown = value");
+  vi.mocked(invoke).mockRejectedValueOnce(
+    new Error("Field 'unknown' does not exist"),
+  );
+  await submit();
+  expect(loadJiraInboxFilter()).toEqual({ mode: "jql", jql: "project = ENG" });
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+    "Field 'unknown' does not exist",
+  );
+  expect(
+    container.querySelector("textarea")?.getAttribute("aria-invalid"),
+  ).toBe("true");
+  expect(
+    container.querySelector<HTMLButtonElement>('button[type="submit"]')!
+      .disabled,
+  ).toBe(false);
+});
+
+it("disables changes during JQL validation and restores the saved mode on reopen", async () => {
+  await mountConnected();
+  await selectMode("JQL");
+  await enterJql("filter = 12345");
+  let finish!: () => void;
+  vi.mocked(invoke).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve([]);
+      }),
+  );
+  await submit();
+  expect(container.querySelector("fieldset")!.disabled).toBe(true);
+  expect(
+    container.querySelector<HTMLTextAreaElement>("textarea")!.disabled,
+  ).toBe(true);
+  expect(container.textContent).toContain("Checking JQL…");
+  expect(loadJiraInboxFilter().mode).toBe("project");
+  await act(async () => finish());
+  await act(async () => root.render(null));
+  await act(async () => root.render(createElement(JiraSettings)));
+  expect(container.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe(
+    "filter = 12345",
+  );
+  expect(container.querySelector('[role="status"]')?.textContent).toBe(
+    "JQL query applied.",
+  );
+});
 
 it("connects Jira, synchronizes project filters, and disconnects", async () => {
   saveMaskEmails(true);

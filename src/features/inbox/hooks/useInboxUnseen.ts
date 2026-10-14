@@ -42,7 +42,11 @@ import {
 } from "../model/linkedSessionSeen";
 import { loadInboxConnectors, useInboxConnectors } from "../model/inboxConnectors";
 import { loadHiddenLinearTeamIds } from "../model/linear";
-import { JIRA_CHANGE_EVENT, loadHiddenJiraProjectIds } from "../model/jira";
+import {
+  JIRA_CHANGE_EVENT,
+  loadHiddenJiraProjectIds,
+  loadJiraInboxFilter,
+} from "../model/jira";
 import type { RecentProject } from "../../projects/model/recents";
 import type { SessionSummary } from "../../sessions/data/sessionStore";
 import { playCue } from "../../settings/model/sounds";
@@ -199,6 +203,7 @@ export function useInboxActivity(
         search: "",
         linearHiddenTeamIds: loadHiddenLinearTeamIds(),
         jiraHiddenProjectIds: loadHiddenJiraProjectIds(),
+        jiraFilter: loadJiraInboxFilter(),
       };
       try {
         const result = await listInboxItems(projects, query, { force });
