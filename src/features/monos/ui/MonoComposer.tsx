@@ -7,6 +7,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { InboxMiniCard } from "../../inbox/ui/InboxMiniCard";
+import {
+  composeInboxMessage,
+  type InboxComposerCard,
+} from "../../inbox/model/githubTasks";
 import { isImeComposition } from "../../../shared/lib/keyboard";
 import { ArrowUp, Plus, SmilePlus } from "../../../shared/ui/icons";
 import { AttachmentChip } from "../../sessions/ui/AttachmentChip";
@@ -51,6 +56,8 @@ const FIELD_CLASSES =
 type Props = {
   sessionId: string;
   name: string;
+  inboxCard?: InboxComposerCard;
+  onInboxCardDismiss?: () => void;
   enabled?: boolean;
   focusToken?: number;
   quoteRequest?: QuoteRequest;
@@ -82,6 +89,8 @@ type Props = {
 export function MonoComposer({
   sessionId,
   name,
+  inboxCard,
+  onInboxCardDismiss,
   enabled = true,
   focusToken,
   quoteRequest,
@@ -112,7 +121,7 @@ export function MonoComposer({
     enabled &&
     !submitting &&
     pendingReads === 0 &&
-    (text.trim().length > 0 || attachments.length > 0);
+    (text.trim().length > 0 || attachments.length > 0 || !!inboxCard);
   const inline = !controls;
   // Attachments sit above the field like a second line of text, so an inline
   // field moves above the buttons for them too.
@@ -271,7 +280,7 @@ export function MonoComposer({
     const message = textRef.current.trim();
     const draft = textRef.current;
     const files = attachmentsRef.current;
-    if (!message && !files.length) return;
+    if (!message && !files.length && !inboxCard) return;
     const generation = readGeneration.current;
     const clear = (accepted: boolean | void) => {
       if (accepted === false) return;
@@ -285,7 +294,7 @@ export function MonoComposer({
       setAttachments([]);
       setDropError(null);
     };
-    const result = onSubmit(message, files);
+    const result = onSubmit(composeInboxMessage(inboxCard, message), files);
     if (result instanceof Promise) {
       submittingRef.current = true;
       setSubmitting(true);
@@ -378,6 +387,9 @@ export function MonoComposer({
         ref={box}
         className={`agent-chat-composer relative rounded-lg border bg-content/3 backdrop-blur-sm ${fileDrag ? "border-accent/60" : "border-content/10 has-focus:border-content/20"}`}
       >
+        {inboxCard ? (
+          <InboxMiniCard card={inboxCard} onDismiss={onInboxCardDismiss} />
+        ) : null}
         {fileDrag ? (
           <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-lg bg-accent/8 text-[12px] text-content/70">
             Drop files to attach

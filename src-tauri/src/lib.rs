@@ -48,6 +48,7 @@ mod search;
 mod session_store;
 mod skills;
 pub mod ssh_askpass;
+mod ticket_links;
 #[cfg(target_os = "macos")]
 mod trackpad_zoom;
 #[cfg(target_os = "windows")]
@@ -239,7 +240,7 @@ pub fn run() {
     // Closing to the tray leaves the process running without a taskbar entry,
     // so a second launch must reopen it instead of starting another instance.
     // Registered first so the duplicate exits before any setup runs.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(windows, target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
         let _ = window::show_hidden_or_open_new(app);
     }));
@@ -247,6 +248,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -260,7 +262,14 @@ pub fn run() {
         .manage(pty::PtyHost::new())
         .manage(remote::RemoteConnections::default())
         .manage(window_transfer::WindowTransferState::new())
+        .manage(ticket_links::PendingTicketLinks::default())
         .setup(|app| {
+            ticket_links::init(app.handle());
+            #[cfg(any(windows, target_os = "linux"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                app.deep_link().register_all()?;
+            }
             harness::reap_orphaned_harness_processes();
             session_store::init(app.handle())?;
             control::init(app.handle())?;
@@ -608,6 +617,7 @@ pub fn run() {
             mono_chat::mono_menu_bar_set_visible,
             window_transfer::stage_window_transfer,
             window_transfer::take_window_transfer,
+            ticket_links::take_ticket_context_links,
             chat_background::save_chat_background,
             chat_background::remove_chat_background,
             chat_background::save_project_chat_background,

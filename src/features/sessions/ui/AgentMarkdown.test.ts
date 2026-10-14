@@ -2,6 +2,21 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { ticketContextLink } from "../../inbox/model/ticketContext";
+
+it("renders valid MonoCode ticket links while retaining the script URL filter", () => {
+  const link = ticketContextLink({
+    provider: "jira",
+    url: "https://demo.atlassian.net/browse/DEMO-42",
+  });
+  const markup = renderToStaticMarkup(
+    createElement(AgentMarkdown, {
+      text: `[Ticket](${link}) [Bad](javascript:alert%281%29)`,
+    }),
+  );
+  expect(markup).toContain(`href="${link.replace(/&/g, "&amp;")}"`);
+  expect(markup).not.toContain('href="javascript:');
+});
 
 describe("AgentMarkdown text direction", () => {
   it("detects direction independently for RTL and LTR blocks", () => {

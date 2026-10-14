@@ -692,7 +692,6 @@ import type { InboxSessionPortal } from "../features/inbox/ui/InboxDiscussionPan
 import { inboxAskKey, inboxAskPrompt } from "../features/inbox/model/inboxAsk";
 import {
   githubWorkItemThread,
-  inboxComposerCard,
   type InboxItem,
 } from "../features/inbox/model/githubTasks";
 import {
@@ -708,6 +707,14 @@ import {
 } from "../features/inbox/model/linkedWorkItemActivity";
 import type { LinkedSessionUpdate } from "../features/inbox/model/linkedSessionUpdates";
 import { markLinkedSessionUpdateSeen } from "../features/inbox/model/linkedSessionSeen";
+import {
+  ticketComposerCard,
+  supportsTicketContext,
+  inboxItemFromTicketReference,
+  type TicketReference,
+} from "../features/inbox/model/ticketContext";
+import { openTicketInMono } from "../features/inbox/model/ticketChat";
+import { useTicketDeepLinks } from "./hooks/useTicketDeepLinks";
 import { inboxTrackerDescription } from "../features/inbox/model/inboxContext";
 import {
   gitlabWorkItemDetails,
@@ -2779,6 +2786,10 @@ function Workspace({
   const onStartInboxItem = useCallback(
     async (item: InboxItem, body?: string) => {
       const start = (description?: string) => {
+        closeMonoView();
+        setSearchViewOpen(false);
+        setSettingsOpen(false);
+        setFilePickerOpen(false);
         setInboxViewOpen(false);
         setNotesViewOpen(false);
         setAutomationsViewOpen(false);
@@ -2793,7 +2804,7 @@ function Workspace({
         const session = {
           ...newDefaultSession(cwd, sessionDefaults?.runtimeMode),
           title: `${ref} ${item.title}`,
-          inboxCard: inboxComposerCard(item, description),
+          inboxCard: ticketComposerCard(item, description),
           ...(linkedWorkItem ? { linkedWorkItem } : {}),
         };
         const tab = newTab(session.id);
@@ -2803,11 +2814,16 @@ function Workspace({
         setComposerFocused(true);
       };
 
-      start(await inboxTrackerDescription(item, body));
+      start(
+        supportsTicketContext(item)
+          ? body
+          : await inboxTrackerDescription(item, body),
+      );
     },
     [
       active?.cwd,
       appendTab,
+      closeMonoView,
       sessionDefaults?.cwd,
       sessionDefaults?.runtimeMode,
       projectCwd,
@@ -4728,6 +4744,45 @@ function Workspace({
     },
     [ensureOpenSession, workspaceNavigation.cancel],
   );
+
+  const onStartTicketChat = useCallback(
+    async (item: InboxItem, body?: string, monoId?: string) => {
+      if (!monoId) return onStartInboxItem(item, body);
+      await openTicketInMono(
+        item,
+        monoId,
+        {
+          ensure: (id) =>
+            ensureMonoSession(id, {
+              home: homeDir,
+              load: ensureOpenSession,
+              create: newDefaultSession,
+              add: (created) => {
+                sessionsRef.current = [...sessionsRef.current, created];
+                setSessions(sessionsRef.current);
+              },
+            }),
+          current: (id) => sessionsRef.current.find((entry) => entry.id === id),
+          attach: (id, inboxCard) => {
+            sessionsRef.current = sessionsRef.current.map((entry) =>
+              entry.id === id ? { ...entry, inboxCard } : entry,
+            );
+            setSessions(sessionsRef.current);
+          },
+          reveal: onOpenMono,
+        },
+        body,
+      );
+    },
+    [onStartInboxItem, ensureOpenSession, onOpenMono],
+  );
+
+  const onOpenTicketLink = useCallback(
+    (ref: TicketReference) =>
+      onStartInboxItem(inboxItemFromTicketReference(ref)),
+    [onStartInboxItem],
+  );
+  useTicketDeepLinks(onOpenTicketLink);
 
   // A Mono open when the app last closed opens again; a moved window keeps
   // what it carried.
@@ -13288,7 +13343,15 @@ function Workspace({
                   compactRail={compactRailActive}
                   onClose={onLeaveInbox}
                   onToggleSidebar={onToggleSidebar}
-                  onStart={onStartInboxItem}
+                  onStart={onStartTicketChat}
+                  monos={
+                    monosEnabled
+                      ? listMonos().map((mono) => ({
+                          id: mono.id,
+                          ...monoLook(mono),
+                        }))
+                      : []
+                  }
                   onAsk={onAskInboxItem}
                   onAskRestart={onRestartInboxAsk}
                   onAskMount={setInboxAskPortal}

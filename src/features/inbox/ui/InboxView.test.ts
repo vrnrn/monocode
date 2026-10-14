@@ -120,7 +120,7 @@ describe("InboxDetail layout", () => {
     expect(scrollIndex).toBeGreaterThan(headerIndex);
     expect(header).toContain("line-clamp-2");
     expect(header).toContain('title="A long inbox issue"');
-    expect(header).toContain("Send to agent");
+    expect(header).toContain("Send to chat");
     expect(header).toContain("Ask");
     expect(header).toContain("Open on GitHub");
     expect(header).toContain("Unassigned");
@@ -338,7 +338,7 @@ describe("InboxDetail layout", () => {
     const header = markup.slice(headerIndex, scrollIndex);
 
     expect(header).toContain("Mentioned you");
-    expect(header).toContain("Choose project");
+    expect(header).toContain("Choose destination");
     expect(header).toContain("Open on GitLab");
   });
 

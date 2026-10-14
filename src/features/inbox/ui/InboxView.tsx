@@ -1,6 +1,9 @@
 import { useGithubPrChecks } from "../hooks/useGithubPrChecks";
 import { summarizePrChecks } from "../model/githubPrChecks";
 import type { CiRepairRequest } from "../model/ciRepair";
+import { TicketContextActions } from "./TicketContextActions";
+import { supportsTicketContext } from "../model/ticketContext";
+import type { PickerMono } from "../../projects/ui/SearchableProjectPicker";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Check,
@@ -382,7 +385,12 @@ type Props = {
   compactRail?: boolean;
   onClose?: () => void;
   onToggleSidebar?: () => void;
-  onStart?: (item: InboxItem, body?: string) => void | Promise<void>;
+  onStart?: (
+    item: InboxItem,
+    body?: string,
+    monoId?: string,
+  ) => void | Promise<void>;
+  monos?: readonly PickerMono[];
   repairSessions?: CiRepairProps["repairSessions"];
   onRepairChecks?: CiRepairProps["onRepairChecks"];
   sessions?: readonly SessionSummary[];
@@ -404,6 +412,7 @@ export function InboxView({
   onClose,
   onToggleSidebar,
   onStart,
+  monos,
   repairSessions,
   onRepairChecks,
   sessions = [],
@@ -1232,6 +1241,7 @@ export function InboxView({
               }
               onDiscuss={() => setDiscussionOpen(true)}
               onStart={onStart}
+              monos={monos}
               repairSessions={repairSessions}
               onRepairChecks={onRepairChecks}
               onOpenSession={onOpenSession}
@@ -1471,6 +1481,7 @@ function InboxDetailBody({
   relatedSessions,
   onDiscuss,
   onStart,
+  monos,
   repairSessions,
   onRepairChecks,
   onOpenSession,
@@ -1482,7 +1493,12 @@ function InboxDetailBody({
   revision?: number;
   relatedSessions: readonly SessionSummary[];
   onDiscuss?: () => void;
-  onStart?: (item: InboxItem, body?: string) => void | Promise<void>;
+  onStart?: (
+    item: InboxItem,
+    body?: string,
+    monoId?: string,
+  ) => void | Promise<void>;
+  monos?: readonly PickerMono[];
   repairSessions?: CiRepairProps["repairSessions"];
   onRepairChecks?: CiRepairProps["onRepairChecks"];
   onOpenSession?: (sessionId: string) => void | Promise<void>;
@@ -1506,6 +1522,7 @@ function InboxDetailBody({
       relatedSessions={relatedSessions}
       onDiscuss={onDiscuss}
       onStart={onStart}
+      monos={monos}
       repairSessions={repairSessions}
       onRepairChecks={onRepairChecks}
       onOpenSession={onOpenSession}
@@ -2059,6 +2076,7 @@ export function InboxDetail({
   visible = true,
   onDiscuss,
   onStart,
+  monos,
   repairSessions,
   onRepairChecks,
   onOpenSession,
@@ -2072,7 +2090,12 @@ export function InboxDetail({
   mode?: "inbox" | "panel";
   visible?: boolean;
   onDiscuss?: () => void;
-  onStart?: (item: InboxItem, body?: string) => void | Promise<void>;
+  onStart?: (
+    item: InboxItem,
+    body?: string,
+    monoId?: string,
+  ) => void | Promise<void>;
+  monos?: readonly PickerMono[];
   repairSessions?: CiRepairProps["repairSessions"];
   onRepairChecks?: CiRepairProps["onRepairChecks"];
   onOpenSession?: (sessionId: string) => void | Promise<void>;
@@ -2850,7 +2873,15 @@ export function InboxDetail({
                 </div>
               ) : null}
               <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                {onStart && item.kind !== "pr" ? (
+                {supportsTicketContext(item) ? (
+                  <TicketContextActions
+                    item={item}
+                    cwd={cwd}
+                    projects={projects}
+                    monos={monos}
+                    onStart={onStart}
+                  />
+                ) : onStart && item.kind !== "pr" ? (
                   <>
                     <button
                       type="button"

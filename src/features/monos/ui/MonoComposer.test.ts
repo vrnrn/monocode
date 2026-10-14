@@ -5,6 +5,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MonoComposer } from "./MonoComposer";
 import { clearComposerDraft } from "../../sessions/model/draftCache";
 import { saveComposerAutocorrect } from "../../settings/model/displayPrefs";
+import { ticketComposerCard } from "../../inbox/model/ticketContext";
+import type { InboxItem } from "../../inbox/model/githubTasks";
 
 const { pick } = vi.hoisted(() => ({ pick: vi.fn() }));
 vi.mock("../../sessions/model/attachments", async (original) => ({
@@ -87,6 +89,46 @@ function submit() {
     .querySelector("form")!
     .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 }
+
+it("attaches ticket context without replacing the typed draft and submits both", () => {
+  const onSubmit = vi.fn(() => true);
+  render({ onSubmit });
+  type("Please investigate");
+  const inboxCard = ticketComposerCard({
+    provider: "jira",
+    kind: "jira",
+    identifier: "DEMO-42",
+    number: 42,
+    title: "Demo ticket",
+    url: "https://demo.atlassian.net/browse/DEMO-42",
+    labels: [],
+    repo: "DEMO",
+  } as InboxItem);
+  render({ onSubmit, inboxCard });
+  expect(field().value).toBe("Please investigate");
+  act(submit);
+  expect(onSubmit).toHaveBeenCalledWith(
+    `${inboxCard.prompt}\n\nPlease investigate`,
+    [],
+  );
+});
+
+it("allows a ticket-only turn and retains its draft when rejected", () => {
+  const onSubmit = vi.fn(() => false);
+  const inboxCard = ticketComposerCard({
+    provider: "github",
+    kind: "issue",
+    number: 42,
+    title: "Demo ticket",
+    url: "https://github.com/acme/demo/issues/42",
+    labels: [],
+    repo: "acme/demo",
+  } as InboxItem);
+  render({ onSubmit, inboxCard });
+  act(submit);
+  expect(onSubmit).toHaveBeenCalledWith(inboxCard.prompt, []);
+  expect(container.textContent).toContain("Demo ticket");
+});
 
 it("consumes quotes once and adds them to the current draft", () => {
   const consumed = vi.fn();
