@@ -10,7 +10,7 @@ Select the Jira source in Inbox to browse issues, read descriptions and comments
 post comments, ask about a ticket, or start work in a local project. Starting work
 and asking about a ticket include its description and Jira identifier.
 
-Choose **Project** or **JQL** under **Filter tickets by** in Jira settings:
+Choose **Project** or **JQL** from the **Filter tickets by** dropdown in Jira settings:
 
 - **Project** keeps the existing project checklist. Selections are shared with
   the Inbox filter menu. Unchecked projects are excluded from fetching and
@@ -24,6 +24,10 @@ Choose **Project** or **JQL** under **Filter tickets by** in Jira settings:
   assignment, and status fetch constraints and loads up to 100 matching tickets.
   Its ordering is sent to Jira unchanged; the Inbox displays tickets by last
   update. Inbox status, time, and text filters can still narrow displayed results.
+
+Selecting JQL hides Jira project rows from **Project notifications** at the top
+of **Inbox & Notes** settings. Switching back to Project restores the rows and
+their notification preferences. Other providers' projects remain available.
 
 The saved mode and query also apply to background polling and Jira automation
 triggers. Switching back to Project restores your project selections; switching

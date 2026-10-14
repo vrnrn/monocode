@@ -7,6 +7,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { SettingsView } from "./SettingsView";
 import { rememberNotificationProjects } from "../../notifications/model/notificationProjects";
 import { loadInboxConnectors } from "../../inbox/model/inboxConnectors";
+import { loadJiraInboxFilter } from "../../inbox/model/jira";
 import {
   SETTINGS_INDEX,
   SETTINGS_SECTIONS,
@@ -121,6 +122,53 @@ afterEach(async () => {
 });
 
 describe("settings pages", () => {
+  it("hides Jira notification rows immediately when the dropdown selects JQL", async () => {
+    rememberNotificationProjects([
+      {
+        id: "jira:acme:project:10000",
+        name: "Engineering",
+        detail: "Jira",
+        kind: "jira",
+        paths: [],
+      },
+    ]);
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "jira_status")
+        return {
+          connected: true,
+          site: "acme.atlassian.net",
+          email: "demo@example.com",
+        };
+      if (command === "jira_list_projects")
+        return [{ id: "10000", key: "ENG", name: "Engineering" }];
+      return undefined;
+    });
+    await render("inbox");
+    const notifications = container.querySelector(
+      '[aria-label="Project notifications"]',
+    )!;
+    expect(notifications.textContent).toContain("Engineering");
+    const selectMode = async (label: string) => {
+      await act(async () =>
+        container
+          .querySelector<HTMLButtonElement>(
+            'button[aria-label^="Filter tickets by:"]',
+          )!
+          .click(),
+      );
+      await act(async () =>
+        [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+          .find((button) => button.textContent?.trim() === label)!
+          .click(),
+      );
+    };
+    await selectMode("JQL");
+    expect(notifications.textContent).not.toContain("Engineering");
+    expect(loadJiraInboxFilter().mode).toBe("project");
+    await selectMode("Project");
+    expect(notifications.textContent).toContain("Engineering");
+  });
+
   it("puts an enabled switch beside each inbox connector heading", async () => {
     await render("inbox");
     for (const name of ["GitHub", "GitLab", "ADO", "Jira", "Linear"]) {

@@ -41,6 +41,7 @@ import {
 import { Popover } from "../../../shared/ui/Popover";
 import { SecondaryButton } from "../../../shared/ui/SecondaryButton";
 import { JiraSettings } from "./JiraSettings";
+import { loadJiraInboxFilter } from "../../inbox/model/jira";
 import { GradientBlurBackground } from "./GradientBlurBackground";
 import { McpSettings } from "./McpSettings";
 import { InboxProviderMark } from "../../inbox/ui/InboxProviderMark";
@@ -1209,6 +1210,9 @@ function InboxPage({
 }) {
   const revealed = useContext(RevealedSetting);
   const connectors = useInboxConnectors();
+  const [jiraFilterMode, setJiraFilterMode] = useState(
+    () => loadJiraInboxFilter().mode,
+  );
   return (
     <>
       <div
@@ -1221,6 +1225,7 @@ function InboxPage({
           notificationProjectPath={notificationProjectPath}
           notificationSettingsRequest={notificationSettingsRequest}
           highlighted={revealed === "project-notifications"}
+          jiraFilterMode={connectors.jira ? jiraFilterMode : undefined}
         />
       </div>
       <InboxConnectorGroup
@@ -1252,7 +1257,7 @@ function InboxPage({
         enabled={connectors.jira}
         description="Jira Cloud issues filtered by project or a JQL query."
       >
-        <JiraSettings />
+        <JiraSettings onFilterModeChange={setJiraFilterMode} />
       </InboxConnectorGroup>
 
       <InboxConnectorGroup

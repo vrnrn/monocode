@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { SecondaryButton } from "../../../shared/ui/SecondaryButton";
 import { PrivateEmail } from "../../../shared/ui/PrivateEmail";
+import { SearchableSelect } from "../../../shared/ui/SearchableSelect";
 import { clearInboxCache } from "../../inbox/model/githubTasks";
 import {
   disconnectJira,
@@ -15,11 +16,21 @@ import {
   saveJiraConfig,
   saveJiraInboxFilter,
   validateJiraJql,
+  type JiraInboxFilter,
   type JiraProject,
   type JiraStatus,
 } from "../../inbox/model/jira";
 
-export function JiraSettings() {
+const FILTER_MODES = [
+  { value: "project", label: "Project" },
+  { value: "jql", label: "JQL" },
+];
+
+export function JiraSettings({
+  onFilterModeChange,
+}: {
+  onFilterModeChange?: (mode: JiraInboxFilter["mode"]) => void;
+}) {
   const [status, setStatus] = useState<JiraStatus | null>(null);
   const [site, setSite] = useState("");
   const [email, setEmail] = useState("");
@@ -79,6 +90,10 @@ export function JiraSettings() {
     setMode(inboxFilter.mode);
     setJql(inboxFilter.jql);
   }, [inboxFilter]);
+
+  useEffect(() => {
+    onFilterModeChange?.(mode);
+  }, [mode, onFilterModeChange]);
 
   useEffect(() => {
     if (status?.connected && mode === "project") void loadProjects();
@@ -251,29 +266,22 @@ export function JiraSettings() {
             <legend className="mb-2 text-[13px] text-content/65">
               Filter tickets by
             </legend>
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-[13px] text-content">
-                <input
-                  type="radio"
-                  name={`${filterId}-mode`}
-                  checked={mode === "project"}
-                  onChange={selectProjectMode}
-                />
-                Project
-              </label>
-              <label className="flex items-center gap-2 text-[13px] text-content">
-                <input
-                  type="radio"
-                  name={`${filterId}-mode`}
-                  checked={mode === "jql"}
-                  onChange={() => {
-                    setMode("jql");
-                    setJqlError(null);
-                  }}
-                />
-                JQL
-              </label>
-            </div>
+            <SearchableSelect
+              label="Filter tickets by"
+              value={mode}
+              options={FILTER_MODES}
+              variant="row"
+              searchable={false}
+              disabled={busy || applying}
+              onChange={(next) => {
+                if (next === mode) return;
+                if (next === "project") selectProjectMode();
+                else {
+                  setMode("jql");
+                  setJqlError(null);
+                }
+              }}
+            />
           </fieldset>
           {mode === "jql" ? (
             <form

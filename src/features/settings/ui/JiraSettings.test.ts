@@ -84,10 +84,14 @@ async function mountConnected() {
 }
 
 async function selectMode(mode: "Project" | "JQL") {
-  const radio = [...container.querySelectorAll<HTMLLabelElement>("label")]
-    .find((label) => label.textContent?.trim() === mode)!
-    .querySelector<HTMLInputElement>("input")!;
-  await act(async () => radio.click());
+  const trigger = container.querySelector<HTMLButtonElement>(
+    'button[aria-label^="Filter tickets by:"]',
+  )!;
+  await act(async () => trigger.click());
+  const option = [
+    ...document.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+  ].find((button) => button.textContent?.trim() === mode)!;
+  await act(async () => option.click());
 }
 
 async function enterJql(value: string) {
