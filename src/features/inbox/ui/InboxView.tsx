@@ -149,6 +149,7 @@ import {
   jiraIssueThread,
   listJiraProjects,
   loadHiddenJiraProjectIds,
+  loadJiraInboxFilter,
   peekJiraIssueDetails,
   peekJiraIssueThread,
   saveHiddenJiraProjectIds,
@@ -291,6 +292,7 @@ function peekInboxForRail(recents: RecentProject[], cwd: string) {
     search: "",
     linearHiddenTeamIds: loadHiddenLinearTeamIds(),
     jiraHiddenProjectIds: loadHiddenJiraProjectIds(),
+    jiraFilter: loadJiraInboxFilter(),
   });
 }
 
@@ -466,6 +468,7 @@ export function InboxView({
     loadHiddenJiraProjectIds,
   );
   const [jiraProjects, setJiraProjects] = useState<JiraProject[]>([]);
+  const [jiraFilter, setJiraFilter] = useState(loadJiraInboxFilter);
   const prevRefresh = useRef(refresh);
 
   const projects = useMemo(
@@ -486,10 +489,12 @@ export function InboxView({
     [filters, projects],
   );
   const filtersActive = hasActiveInboxFilters(
-    activeFilters,
+    source === "jira" && jiraFilter.mode === "jql"
+      ? { ...activeFilters, assignedToMe: false }
+      : activeFilters,
     source,
     linearHiddenTeamIds,
-    jiraHiddenProjectIds,
+    jiraFilter.mode === "project" ? jiraHiddenProjectIds : [],
   );
   const fetchState = inboxFetchState(activeFilters);
   const fetchQuery = useMemo<InboxQuery>(
@@ -499,12 +504,14 @@ export function InboxView({
       search: "",
       linearHiddenTeamIds,
       jiraHiddenProjectIds,
+      jiraFilter,
     }),
     [
       activeFilters.assignedToMe,
       fetchState,
       linearHiddenTeamIds,
       jiraHiddenProjectIds,
+      jiraFilter,
     ],
   );
 
@@ -555,6 +562,7 @@ export function InboxView({
   useEffect(() => {
     const onChange = () => {
       setJiraHiddenProjectIds(loadHiddenJiraProjectIds());
+      setJiraFilter(loadJiraInboxFilter());
       setRefresh((value) => value + 1);
     };
     window.addEventListener(JIRA_CHANGE_EVENT, onChange);
@@ -679,7 +687,11 @@ export function InboxView({
 
   // Same for Jira: hidden projects are excluded from the fetch itself.
   useEffect(() => {
-    if (source !== "jira" || !enabledConnectors.jira) {
+    if (
+      source !== "jira" ||
+      !enabledConnectors.jira ||
+      jiraFilter.mode === "jql"
+    ) {
       setJiraProjects([]);
       return;
     }
@@ -694,7 +706,7 @@ export function InboxView({
     return () => {
       cancelled = true;
     };
-  }, [source, jiraHiddenProjectIds, enabledConnectors.jira]);
+  }, [source, jiraHiddenProjectIds, enabledConnectors.jira, jiraFilter.mode]);
 
   useEffect(() => {
     const force = refresh !== prevRefresh.current;
@@ -870,6 +882,7 @@ export function InboxView({
   }, [
     activeFilters,
     jiraHiddenProjectIds,
+    jiraFilter,
     linearHiddenTeamIds,
     searchInput,
     source,
@@ -1158,6 +1171,7 @@ export function InboxView({
       linearTeams={linearTeams}
       hiddenLinearTeamIds={linearHiddenTeamIds}
       jiraProjects={jiraProjects}
+      jiraFilterMode={jiraFilter.mode}
       hiddenJiraProjectIds={jiraHiddenProjectIds}
       source={source}
       filters={activeFilters}

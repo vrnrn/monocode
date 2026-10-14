@@ -11,6 +11,9 @@ import {
   peekJiraIssueDetails,
   peekJiraIssueThread,
   saveJiraConfig,
+  loadJiraInboxFilter,
+  saveJiraInboxFilter,
+  validateJiraJql,
   type JiraIssue,
 } from "./jira";
 import {
@@ -18,6 +21,7 @@ import {
   listInboxItems,
   inboxItemStatus,
   inboxStartDraft,
+  inboxListCacheKey,
 } from "./githubTasks";
 import { inboxTrackerDescription } from "./inboxContext";
 import {
@@ -75,6 +79,105 @@ beforeEach(() => {
 });
 
 describe("Jira inbox", () => {
+  it("defaults existing connections to project mode and persists both mode and query", () => {
+    expect(loadJiraInboxFilter()).toEqual({ mode: "project", jql: "" });
+    saveJiraInboxFilter({ mode: "jql", jql: "  filter = 12345  " });
+    expect(loadJiraInboxFilter()).toEqual({
+      mode: "jql",
+      jql: "filter = 12345",
+    });
+    saveJiraInboxFilter({ ...loadJiraInboxFilter(), mode: "project" });
+    expect(loadJiraInboxFilter()).toEqual({
+      mode: "project",
+      jql: "filter = 12345",
+    });
+    localStorage.setItem("monocode.jiraInboxFilter", "broken JSON");
+    expect(loadJiraInboxFilter()).toEqual({ mode: "project", jql: "" });
+    localStorage.setItem(
+      "monocode.jiraInboxFilter",
+      JSON.stringify({ mode: "other", jql: 123 }),
+    );
+    expect(loadJiraInboxFilter()).toEqual({ mode: "project", jql: "" });
+  });
+
+  it("uses JQL independently of project selections, assignment, and fetch status", async () => {
+    saveJiraInboxFilter({
+      mode: "jql",
+      jql: 'project = ENG OR labels = "triage" ORDER BY priority DESC',
+    });
+    const result = await listInboxItems([], {
+      ...query,
+      jiraHiddenProjectIds: ["10000", "10001"],
+    });
+    expect(result.items).toEqual([issue]);
+    expect(invoke).not.toHaveBeenCalledWith("jira_list_projects");
+    expect(invoke).toHaveBeenCalledWith("jira_list_issues", {
+      assignedToMe: false,
+      state: "all",
+      projectIds: [],
+      limit: 100,
+      jql: 'project = ENG OR labels = "triage" ORDER BY priority DESC',
+    });
+  });
+
+  it("separates cached lists by mode and JQL even when no filter snapshot is supplied", async () => {
+    const projectKey = inboxListCacheKey([], query);
+    saveJiraInboxFilter({ mode: "jql", jql: "project = ENG" });
+    expect(inboxListCacheKey([], query)).not.toBe(projectKey);
+    await listInboxItems([], query);
+    const jqlKey = inboxListCacheKey([], query);
+    saveJiraInboxFilter({ mode: "jql", jql: "project = OPS" });
+    expect(inboxListCacheKey([], query)).not.toBe(jqlKey);
+    await listInboxItems([], query);
+    expect(invoke).toHaveBeenCalledWith(
+      "jira_list_issues",
+      expect.objectContaining({ jql: "project = OPS" }),
+    );
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.filter(([command]) => command === "jira_list_issues"),
+    ).toHaveLength(2);
+  });
+
+  it("keeps an explicit JQL snapshot consistent through asynchronous discovery", async () => {
+    saveJiraInboxFilter({ mode: "jql", jql: "project = OPS" });
+    await listInboxItems([], {
+      ...query,
+      jiraFilter: { mode: "jql", jql: "project = ENG" },
+    });
+    expect(invoke).toHaveBeenCalledWith(
+      "jira_list_issues",
+      expect.objectContaining({ jql: "project = ENG" }),
+    );
+  });
+
+  it("reports an empty JQL preference without silently fetching other tickets", async () => {
+    saveJiraInboxFilter({ mode: "jql", jql: " " });
+    const result = await listInboxItems([], query);
+    expect(result.items).toEqual([]);
+    expect(result.errors.jira).toContain("Enter a JQL query");
+    expect(invoke).not.toHaveBeenCalledWith(
+      "jira_list_issues",
+      expect.anything(),
+    );
+    await expect(validateJiraJql(" \n ")).rejects.toThrow("Enter a JQL query");
+  });
+
+  it("reports Jira JQL errors without falling back to project mode", async () => {
+    const original = vi.mocked(invoke).getMockImplementation()!;
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "jira_list_issues")
+        throw new Error("Field 'unknown' does not exist");
+      return original(command, args);
+    });
+    saveJiraInboxFilter({ mode: "jql", jql: "unknown = value" });
+    const result = await listInboxItems([], query);
+    expect(result.errors.jira).toContain("Field 'unknown' does not exist");
+    expect(result.items).toEqual([]);
+    expect(invoke).not.toHaveBeenCalledWith("jira_list_projects");
+  });
+
   it("loads account-wide issues without a local repository", async () => {
     const result = await listInboxItems([], query);
     expect(result).toEqual({ items: [issue], errors: {} });

@@ -18,6 +18,7 @@ import {
   recordInboxSelfActivity,
 } from "../model/inboxSelfActivity";
 import { useInboxActivity, type InboxActivity } from "./useInboxUnseen";
+import { saveJiraInboxFilter } from "../model/jira";
 
 const { githubWorkItem, listInboxItems, playCue } = vi.hoisted(() => ({
   githubWorkItem: vi.fn(),
@@ -102,6 +103,39 @@ afterEach(() => {
 });
 
 describe("Inbox activity polling", () => {
+  it("refreshes background polling with the saved JQL and mode changes", async () => {
+    listInboxItems.mockResolvedValue({ items: [], errors: {} });
+    saveJiraInboxFilter({ mode: "jql", jql: "filter = 12345" });
+    await mount();
+    expect(listInboxItems).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        jiraFilter: { mode: "jql", jql: "filter = 12345" },
+      }),
+      expect.anything(),
+    );
+    await act(async () =>
+      saveJiraInboxFilter({ mode: "jql", jql: "project = OPS" }),
+    );
+    expect(listInboxItems).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        jiraFilter: { mode: "jql", jql: "project = OPS" },
+      }),
+      { force: true },
+    );
+    await act(async () =>
+      saveJiraInboxFilter({ mode: "project", jql: "project = OPS" }),
+    );
+    expect(listInboxItems).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        jiraFilter: { mode: "project", jql: "project = OPS" },
+      }),
+      { force: true },
+    );
+  });
+
   it("updates Inbox and linked-session indicators on category changes without consuming unread activity", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-14T12:00:00Z"));

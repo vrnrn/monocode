@@ -1250,7 +1250,7 @@ function InboxPage({
       <InboxConnectorGroup
         source="jira"
         enabled={connectors.jira}
-        description="Jira Cloud issues from the projects you pick."
+        description="Jira Cloud issues filtered by project or a JQL query."
       >
         <JiraSettings />
       </InboxConnectorGroup>

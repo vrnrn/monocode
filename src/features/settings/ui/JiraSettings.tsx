@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { SecondaryButton } from "../../../shared/ui/SecondaryButton";
 import { PrivateEmail } from "../../../shared/ui/PrivateEmail";
@@ -9,9 +9,12 @@ import {
   jiraConnected,
   listJiraProjects,
   loadHiddenJiraProjectIds,
+  loadJiraInboxFilter,
   notifyJiraChange,
   saveHiddenJiraProjectIds,
   saveJiraConfig,
+  saveJiraInboxFilter,
+  validateJiraJql,
   type JiraProject,
   type JiraStatus,
 } from "../../inbox/model/jira";
@@ -26,6 +29,12 @@ export function JiraSettings() {
   const [error, setError] = useState<string | null>(null);
   const [projects, setProjects] = useState<JiraProject[]>([]);
   const [hiddenIds, setHiddenIds] = useState(loadHiddenJiraProjectIds);
+  const [inboxFilter, setInboxFilter] = useState(loadJiraInboxFilter);
+  const [mode, setMode] = useState(inboxFilter.mode);
+  const [jql, setJql] = useState(inboxFilter.jql);
+  const [applying, setApplying] = useState(false);
+  const [jqlError, setJqlError] = useState<string | null>(null);
+  const filterId = useId();
 
   const loadProjects = useCallback(async () => {
     try {
@@ -39,10 +48,9 @@ export function JiraSettings() {
   useEffect(() => {
     let cancelled = false;
     void jiraConnected()
-      .then(async (next) => {
+      .then((next) => {
         if (cancelled) return;
         setStatus(next);
-        if (next.connected) await loadProjects();
       })
       .catch((err: unknown) => {
         if (!cancelled)
@@ -51,13 +59,56 @@ export function JiraSettings() {
       .finally(() => {
         if (!cancelled) setChecking(false);
       });
-    const onChange = () => setHiddenIds(loadHiddenJiraProjectIds());
+    const onChange = () => {
+      setHiddenIds(loadHiddenJiraProjectIds());
+      const next = loadJiraInboxFilter();
+      setInboxFilter((previous) =>
+        previous.mode === next.mode && previous.jql === next.jql
+          ? previous
+          : next,
+      );
+    };
     window.addEventListener(JIRA_CHANGE_EVENT, onChange);
     return () => {
       cancelled = true;
       window.removeEventListener(JIRA_CHANGE_EVENT, onChange);
     };
-  }, [loadProjects]);
+  }, []);
+
+  useEffect(() => {
+    setMode(inboxFilter.mode);
+    setJql(inboxFilter.jql);
+  }, [inboxFilter]);
+
+  useEffect(() => {
+    if (status?.connected && mode === "project") void loadProjects();
+  }, [status?.connected, mode, loadProjects]);
+
+  const selectProjectMode = () => {
+    setJqlError(null);
+    try {
+      clearInboxCache();
+      saveJiraInboxFilter({ ...inboxFilter, mode: "project" });
+      setMode("project");
+    } catch {
+      setJqlError("Could not save the Jira filter. Try again.");
+    }
+  };
+
+  const applyJql = async () => {
+    if (applying || busy || !jql.trim()) return;
+    setApplying(true);
+    setJqlError(null);
+    try {
+      await validateJiraJql(jql);
+      clearInboxCache();
+      saveJiraInboxFilter({ mode: "jql", jql });
+    } catch (err) {
+      setJqlError(String(err instanceof Error ? err.message : err));
+    } finally {
+      setApplying(false);
+    }
+  };
 
   const connect = async () => {
     if (busy || checking || !site.trim() || !email.trim() || !token.trim())
@@ -69,7 +120,6 @@ export function JiraSettings() {
       setToken("");
       clearInboxCache();
       saveHiddenJiraProjectIds([]);
-      await loadProjects();
     } catch (err) {
       setError(String(err instanceof Error ? err.message : err));
     } finally {
@@ -106,7 +156,10 @@ export function JiraSettings() {
               <PrivateEmail key={status.email} email={status.email} />
             </p>
           </div>
-          <SecondaryButton onClick={() => void disconnect()} disabled={busy}>
+          <SecondaryButton
+            onClick={() => void disconnect()}
+            disabled={busy || applying}
+          >
             {busy ? "Disconnecting" : "Disconnect"}
           </SecondaryButton>
         </div>
@@ -194,41 +247,142 @@ export function JiraSettings() {
       ) : null}
       {status?.connected ? (
         <div className="mt-4 flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[13px] font-medium text-content">
-              Projects
-            </span>
-            <SecondaryButton
-              disabled={busy || checking}
-              onClick={() => void loadProjects()}
+          <fieldset disabled={busy || applying} className="flex flex-col gap-2">
+            <legend className="mb-2 text-[13px] text-content/65">
+              Filter tickets by
+            </legend>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-[13px] text-content">
+                <input
+                  type="radio"
+                  name={`${filterId}-mode`}
+                  checked={mode === "project"}
+                  onChange={selectProjectMode}
+                />
+                Project
+              </label>
+              <label className="flex items-center gap-2 text-[13px] text-content">
+                <input
+                  type="radio"
+                  name={`${filterId}-mode`}
+                  checked={mode === "jql"}
+                  onChange={() => {
+                    setMode("jql");
+                    setJqlError(null);
+                  }}
+                />
+                JQL
+              </label>
+            </div>
+          </fieldset>
+          {mode === "jql" ? (
+            <form
+              className="mt-2 flex flex-col gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void applyJql();
+              }}
             >
-              Refresh projects
-            </SecondaryButton>
-          </div>
-          <p className="text-[12px] text-content/45">
-            Unchecked projects stay out of the inbox.
-          </p>
-          {projects.map((project) => (
-            <label
-              key={project.id}
-              className="flex items-center gap-2 text-[13px] text-content"
-            >
-              <input
-                type="checkbox"
-                checked={!hiddenIds.includes(project.id)}
-                disabled={busy}
-                onChange={() => {
-                  const next = hiddenIds.includes(project.id)
-                    ? hiddenIds.filter((id) => id !== project.id)
-                    : [...hiddenIds, project.id];
-                  clearInboxCache();
-                  saveHiddenJiraProjectIds(next);
+              <label
+                htmlFor={`${filterId}-query`}
+                className="text-[12px] text-content/65"
+              >
+                JQL query
+              </label>
+              <textarea
+                id={`${filterId}-query`}
+                value={jql}
+                onChange={(event) => {
+                  setJql(event.target.value);
+                  setJqlError(null);
                 }}
+                placeholder={
+                  "project = ENG AND statusCategory != Done ORDER BY updated DESC"
+                }
+                rows={4}
+                disabled={busy || applying}
+                required
+                spellCheck={false}
+                aria-describedby={`${filterId}-help${jqlError ? ` ${filterId}-error` : ""}`}
+                aria-invalid={jqlError ? true : undefined}
+                className="w-full resize-y rounded-md border border-content/10 bg-transparent px-2 py-1.5 font-mono text-[12px] text-content outline-none focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40"
               />
-              {project.name}{" "}
-              <span className="text-content/40">{project.key}</span>
-            </label>
-          ))}
+              <p
+                id={`${filterId}-help`}
+                className="text-[12px] leading-relaxed text-content/65"
+              >
+                JQL controls which tickets are fetched. Project selections and
+                Assigned to me do not apply. Inbox status, time, and search
+                filters still narrow the results.
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <SecondaryButton
+                  type="submit"
+                  disabled={
+                    busy ||
+                    applying ||
+                    !jql.trim() ||
+                    (inboxFilter.mode === "jql" &&
+                      inboxFilter.jql === jql.trim())
+                  }
+                >
+                  {applying ? "Checking JQL…" : "Apply JQL"}
+                </SecondaryButton>
+                <p role="status" className="text-[12px] text-content/65">
+                  {inboxFilter.mode === "jql" && inboxFilter.jql === jql.trim()
+                    ? "JQL query applied."
+                    : "Apply to check and save your query."}
+                </p>
+              </div>
+            </form>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-medium text-content">
+                  Projects
+                </span>
+                <SecondaryButton
+                  disabled={busy || checking}
+                  onClick={() => void loadProjects()}
+                >
+                  Refresh projects
+                </SecondaryButton>
+              </div>
+              <p className="text-[12px] text-content/45">
+                Unchecked projects stay out of the inbox.
+              </p>
+              {projects.map((project) => (
+                <label
+                  key={project.id}
+                  className="flex items-center gap-2 text-[13px] text-content"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!hiddenIds.includes(project.id)}
+                    disabled={busy}
+                    onChange={() => {
+                      const next = hiddenIds.includes(project.id)
+                        ? hiddenIds.filter((id) => id !== project.id)
+                        : [...hiddenIds, project.id];
+                      clearInboxCache();
+                      saveHiddenJiraProjectIds(next);
+                    }}
+                  />
+                  {project.name}{" "}
+                  <span className="text-content/40">{project.key}</span>
+                </label>
+              ))}
+            </>
+          )}
+          {jqlError ? (
+            <p
+              id={`${filterId}-error`}
+              role="alert"
+              className="text-[12px] text-red-600 dark:text-red-400/90"
+            >
+              {jqlError}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </div>
