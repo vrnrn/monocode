@@ -59,7 +59,7 @@ test("supports keyboard destination selection in a narrow window", async ({ page
   await page.getByRole("button", { name: "Choose chat destination" }).click();
   const search = page.getByRole("textbox", { name: "Find project or Mono" });
   await expect(search).toBeFocused();
-  if (testInfo.project.name === "chromium") await page.screenshot({ path: "/private/tmp/vorkspace-ticket-context.png" });
+  if (testInfo.project.name === "chromium") await page.screenshot({ path: testInfo.outputPath("ticket-context.png") });
   await search.press("ArrowDown");
   await expect(page.getByRole("option", { name: "Demo project" })).toBeFocused();
   await page.getByRole("option", { name: "Demo project" }).press("ArrowDown");
