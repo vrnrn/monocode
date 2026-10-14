@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { applyTicketContextToTurn, hasTicketContextLinks } from "../../inbox/model/ticketContext";
+import { homeDir } from "../../../platform/tauri/fs";
 import type { SessionPaneProps } from "../../sessions/ui/SessionPane";
 import type {
   Attachment,
@@ -716,6 +718,9 @@ function ConnectedRemoteSession({
     uploaded?: RemoteAttachment[],
   ) => {
     const version = bindingVersion.current;
+    const prompt = !turn.draft && hasTicketContextLinks(turn.text)
+      ? await applyTicketContextToTurn(turn.text, await homeDir())
+      : turn.text;
     const refs = turn.draftBlockId
       ? []
       : (uploaded ??
@@ -732,7 +737,7 @@ function ConnectedRemoteSession({
           }
         : message(
             id,
-            turn.text,
+            prompt,
             turn.commandId,
             refs,
             turn.intent,
@@ -746,6 +751,9 @@ function ConnectedRemoteSession({
   const startSession = async (turn: OptimisticTurn) => {
     const version = bindingVersion.current;
     try {
+      const prompt = !turn.draft && hasTicketContextLinks(turn.text)
+        ? await applyTicketContextToTurn(turn.text, await homeDir())
+        : turn.text;
       const uploaded = await uploadRemoteAttachments(
         machine.id,
         turn.attachments,
@@ -784,7 +792,7 @@ function ConnectedRemoteSession({
       }
       const followup: Exclude<HostCommand, { type: "create" }> = turn.draft
         ? { type: "draft", commandId: turn.commandId, sessionId: "", text: turn.text, attachments: uploaded }
-        : message("", turn.text, turn.commandId, uploaded, turn.intent, turn.draftBlockId, turn.planBlockId);
+        : message("", prompt, turn.commandId, uploaded, turn.intent, turn.draftBlockId, turn.planBlockId);
       const receipt = await run({
         type: "create",
         commandId: crypto.randomUUID(),

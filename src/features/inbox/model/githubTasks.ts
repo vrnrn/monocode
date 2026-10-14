@@ -492,9 +492,13 @@ export async function githubWorkItemDetails(
   repo: string,
   kind: GithubTaskKind,
   number: number,
-  options?: { maxAgeMs?: number },
+  options?: { maxAgeMs?: number; force?: boolean },
 ): Promise<GithubWorkItemDetails> {
   const key = detailsCacheKey(repo, kind, number);
+  if (options?.force) {
+    detailsByKey.delete(key);
+    detailsInflight.delete(key);
+  }
   const cached = detailsByKey.get(key);
   if (cached && freshEnough(`details:${key}`, options?.maxAgeMs)) {
     return cached;

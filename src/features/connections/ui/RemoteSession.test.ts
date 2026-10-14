@@ -10,6 +10,7 @@ import {
 import type { Block, Session } from "../../sessions/model/session";
 import type { AgentModel } from "../../sessions/model/models";
 import { rememberRemoteProject } from "../model/remoteProjects";
+import { ticketContextLink } from "../../inbox/model/ticketContext";
 import { preloadRemoteSession } from "./RemoteSession";
 import { rememberRemoteSession, remoteSessionFor } from "../model/connections";
 import "../model/remoteCommands";
@@ -146,6 +147,10 @@ beforeEach(() => {
   }).key;
   vi.mocked(invoke).mockReset();
   vi.mocked(invoke).mockImplementation(async (command, input) => {
+    if (command === "home_dir") return "/tmp/demo";
+    if (command === "jira_status") return { connected: true, site: "https://demo.atlassian.net" };
+    if (command === "jira_issue_details") return { body: "Latest dummy ticket description", author: "Alex" };
+    if (command === "jira_issue_thread") return { comments: [{ body: "Newest dummy comment", author: "Robin", createdAt: "" }], truncated: false };
     if (command === "remote_machines") return [machine];
     if (command !== "remote_request") return undefined;
     const { method, params } = input as {
@@ -1073,4 +1078,12 @@ it("ignores a late create response after its tab has switched conversations", as
   expect(remoteSessionFor("shell")).toBe("different-session");
   expect(commands.map((command) => command.type)).toEqual(["create"]);
   expect(container.textContent).not.toContain("Pending first message");
+});
+
+it("resolves ticket links before creating and sending to a remote project", async () => {
+  await render();
+  await send(ticketContextLink({ provider: "jira", url: "https://demo.atlassian.net/browse/DEMO-42" }));
+  const sent = commands.find((command) => command.type === "send");
+  expect(sent).toMatchObject({ text: expect.stringContaining("Latest dummy ticket description") });
+  expect(sent).toMatchObject({ text: expect.stringContaining("Newest dummy comment") });
 });

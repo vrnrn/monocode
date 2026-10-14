@@ -22,11 +22,16 @@ import {
   Streamdown,
   defaultRehypePlugins,
   defaultRemarkPlugins,
+  defaultUrlTransform,
   useIsCodeFenceIncomplete,
   type BlockProps,
   type Components,
 } from "streamdown";
-import type { PluggableList } from "unified";
+import {
+  parseTicketContextLink,
+  requestOpenTicketContext,
+} from "../../inbox/model/ticketContext";
+import type { Plugin, PluggableList } from "unified";
 import { ExplorerMenu, type ExplorerMenuItem } from "../../files/ui/ExplorerMenu";
 import { FileActionError } from "../../files/ui/FileActionError";
 import { FileTypeIcon } from "../../files/ui/FileTypeIcon";
@@ -76,10 +81,27 @@ const mermaid = createLazyMermaidPlugin({
 });
 
 const MARKDOWN_PLUGINS = { code: boundedCode, mermaid };
+const [sanitize, schema] = defaultRehypePlugins.sanitize as [
+  Plugin,
+  {
+    protocols: { href: string[]; [key: string]: string[] };
+    [key: string]: unknown;
+  },
+];
+const ticketLinkSanitize: PluggableList[number] = [
+  sanitize,
+  {
+    ...schema,
+    protocols: {
+      ...schema.protocols,
+      href: [...schema.protocols.href, "monocode"],
+    },
+  },
+];
 
 const MARKDOWN_REHYPE_PLUGINS: PluggableList = [
   defaultRehypePlugins.raw,
-  defaultRehypePlugins.sanitize,
+  ticketLinkSanitize,
   [
     harden,
     {
@@ -87,6 +109,7 @@ const MARKDOWN_REHYPE_PLUGINS: PluggableList = [
       // relative note URLs reach that component without changing link parsing.
       allowedImagePrefixes: ["*"],
       allowedLinkPrefixes: ["*"],
+      allowedProtocols: ["monocode:"],
       allowDataImages: true,
       imageBlockPolicy: "remove" as const,
     },
@@ -95,13 +118,14 @@ const MARKDOWN_REHYPE_PLUGINS: PluggableList = [
 
 const INBOX_MEDIA_REHYPE_PLUGINS: PluggableList = [
   defaultRehypePlugins.raw,
-  defaultRehypePlugins.sanitize,
+  ticketLinkSanitize,
   [
     harden,
     {
       defaultOrigin: "https://inbox.invalid",
       allowedImagePrefixes: INBOX_MEDIA_PREFIXES,
       allowedLinkPrefixes: ["*"],
+      allowedProtocols: ["monocode:"],
       allowDataImages: true,
       imageBlockPolicy: "remove" as const,
     },
@@ -234,7 +258,9 @@ const LANGUAGE_FILE_NAMES: Record<string, string> = {
 const PLAINTEXT_FENCE_LANGUAGES = new Set(["text", "plaintext", "txt", ""]);
 
 function highlightLanguageFor(language: string): string {
-  return PLAINTEXT_FENCE_LANGUAGES.has(language.toLowerCase()) ? "js" : language;
+  return PLAINTEXT_FENCE_LANGUAGES.has(language.toLowerCase())
+    ? "js"
+    : language;
 }
 
 type MarkdownLinkProps = ComponentProps<"a"> & { node?: unknown };
@@ -273,6 +299,10 @@ function MarkdownLink({
           return;
         }
         event.preventDefault();
+        if (href && parseTicketContextLink(href)) {
+          requestOpenTicketContext(href);
+          return;
+        }
         if (href && /^https?:\/\//i.test(href)) {
           void openUrl(href).catch((error) => {
             console.error("Failed to open web link:", error);
@@ -675,6 +705,11 @@ export const AgentMarkdown = memo(function AgentMarkdown({
               {/* Streamdown takes no style; a contents box passes the fade timing down. */}
               <div className="contents" style={fadeStyle}>
                 <Streamdown
+                  urlTransform={(url, key, node) =>
+                    parseTicketContextLink(url)
+                      ? url
+                      : defaultUrlTransform(url, key, node)
+                  }
                   BlockComponent={DirectionalBlock}
                   className={`agent-markdown min-w-0 font-sans text-sm leading-6 ${fading ? "word-fading" : ""} ${className ?? ""}`}
                   components={MARKDOWN_COMPONENTS}

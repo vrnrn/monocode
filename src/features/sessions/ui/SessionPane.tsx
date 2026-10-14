@@ -1177,6 +1177,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
                     key={session.id}
                     sessionId={session.id}
                     name={agent.name}
+                    inboxCard={session.inboxCard}
+                    onInboxCardDismiss={() => onInboxCardDismiss?.(session.id)}
                     enabled={visible}
                     quoteRequest={quoteRequest}
                     onQuoteRequestConsumed={acknowledgeQuote}

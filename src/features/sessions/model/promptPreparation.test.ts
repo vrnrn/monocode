@@ -6,6 +6,10 @@ const mocks = vi.hoisted(() => ({
   applySkillsToTurn: vi.fn(),
   events: [] as string[],
   warmNativeSkills: vi.fn(),
+  applyTicketContextToTurn: vi.fn(),
+}));
+vi.mock("../../inbox/model/ticketContext", () => ({
+  applyTicketContextToTurn: mocks.applyTicketContextToTurn,
 }));
 
 vi.mock("../../files/model/fileMentions", () => ({
@@ -35,6 +39,9 @@ function deferred<T>() {
 
 beforeEach(() => {
   mocks.events.length = 0;
+  mocks.applyTicketContextToTurn
+    .mockReset()
+    .mockImplementation(async (text: string) => text);
   mocks.applyFileMentionsToTurn.mockReset();
   mocks.applyNotesToTurn.mockReset();
   mocks.applyNotesToTurn.mockImplementation(async (text: string) => text);
@@ -57,6 +64,7 @@ describe("preparePrompt", () => {
     expect(mocks.applyFileMentionsToTurn).not.toHaveBeenCalled();
     expect(mocks.applyNotesToTurn).not.toHaveBeenCalled();
     expect(mocks.applySkillsToTurn).not.toHaveBeenCalled();
+    expect(mocks.applyTicketContextToTurn).not.toHaveBeenCalled();
   });
   it("starts warmup before awaiting file mentions", async () => {
     const files = deferred<string>();
@@ -79,5 +87,23 @@ describe("preparePrompt", () => {
       harness: "pi",
       cwd: "/repo",
     });
+  });
+  it("resolves tickets last so ticket prose cannot trigger file, note or skill expansion", async () => {
+    mocks.applyFileMentionsToTurn.mockResolvedValue("files");
+    mocks.applySkillsToTurn.mockResolvedValue("skills");
+    mocks.applyTicketContextToTurn.mockResolvedValue("latest ticket context");
+    expect(
+      await preparePrompt("ticket link", {
+        harness: "codex",
+        cwd: "/tmp/demo",
+      }),
+    ).toBe("latest ticket context");
+    expect(mocks.applyTicketContextToTurn).toHaveBeenCalledWith(
+      "skills",
+      "/tmp/demo",
+    );
+    expect(mocks.applySkillsToTurn.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.applyTicketContextToTurn.mock.invocationCallOrder[0],
+    );
   });
 });
