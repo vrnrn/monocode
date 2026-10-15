@@ -279,8 +279,10 @@ export class HostEngine {
           { type: "interrupted" },
         );
       }
+      // Retain history for providers no longer installed on this host. Session
+      // commands still report them as unavailable, but must not block startup.
       if (value.session.providerSessionId)
-        this.provider(value.session.harness).bind(
+        this.providers[value.session.harness]?.bind(
           value.session.id,
           value.session.providerSessionId,
           value.session.cwd,

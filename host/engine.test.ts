@@ -698,6 +698,75 @@ describe("headless session ownership", () => {
     expect(provider.answer).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["idle", "running"] as const)(
+    "starts with mixed supported and removed-provider %s sessions and retains their history",
+    async (status) => {
+      const { store, provider, id, turns, project } = setup();
+      const supported = store.session(id);
+      store.transaction(() =>
+        store.save(
+          {
+            ...supported,
+            revision: supported.revision + 1,
+            session: { ...supported.session, providerSessionId: "supported-thread" },
+          },
+          { type: "fixture" },
+        ),
+      );
+      const removed = ["cursor", "grok", "opencode", "fx", "hermes", "devin"];
+      for (const harness of removed) {
+        // Write the historical snapshot as JSON: these IDs are deliberately no
+        // longer members of the current provider type.
+        const snapshot = {
+          ...supported,
+          status,
+          updatedAt: supported.updatedAt + 1,
+          session: {
+            ...supported.session,
+            id: `legacy-${harness}`,
+            harness,
+            busy: status === "running",
+            providerSessionId: `${harness}-thread`,
+            blocks: [{ id: "history", role: "assistant", text: "Retained work" }],
+          },
+        };
+        store.db.prepare(
+          "INSERT INTO sessions (id, project_id, snapshot) VALUES (?, ?, ?)",
+        ).run(snapshot.session.id, project.id, JSON.stringify(snapshot));
+      }
+
+      const recovered = new HostEngine(store, { codex: provider });
+      cleanups.push(() => recovered.close());
+      expect(provider.bind).toHaveBeenCalledExactlyOnceWith(
+        id, "supported-thread", supported.session.cwd,
+      );
+      expect(provider.send).not.toHaveBeenCalled();
+      expect(store.summaries(project.id)).toHaveLength(removed.length + 1);
+      for (const harness of removed) {
+        const legacyId = `legacy-${harness}`;
+        expect(store.session(legacyId)).toMatchObject({
+          status: status === "running" ? "interrupted" : "idle",
+          session: {
+            harness,
+            busy: false,
+            providerSessionId: `${harness}-thread`,
+            blocks: expect.arrayContaining([
+              { id: "history", role: "assistant", text: "Retained work" },
+            ]),
+          },
+        });
+        expect(store.sync(legacyId).kind).toBe("snapshot");
+        expect(() => recovered.command({
+          type: "send", commandId: `send-${harness}`, sessionId: legacyId, text: "Continue",
+        })).toThrow(`${harness} is not available on this host`);
+      }
+      recovered.command({ type: "send", commandId: "supported-send", sessionId: id, text: "Continue" });
+      await vi.waitFor(() => expect(turns).toHaveLength(1));
+      turns[0].finish();
+      await vi.waitFor(() => expect(store.session(id).status).toBe("idle"));
+    },
+  );
+
   it("recovers interrupted durable state without replaying an uncertain provider send", async () => {
     const { store, provider, id } = setup();
     const value = store.session(id);

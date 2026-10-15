@@ -466,6 +466,15 @@ fn parse_automation(value: String) -> Result<Automation, String> {
     Ok(automation)
 }
 
+fn unsupported_provider_error(automation: &Automation) -> Option<String> {
+    (!crate::harness::is_supported_provider(&automation.harness)).then(|| {
+        format!(
+            "Automation provider '{}' is no longer supported. Choose a supported provider before running it.",
+            automation.harness
+        )
+    })
+}
+
 fn valid_time(value: &str) -> bool {
     let Some((hour, minute)) = value.split_once(':') else {
         return false;
@@ -478,16 +487,30 @@ fn valid_time(value: &str) -> bool {
 
 fn list(conn: &Connection) -> Result<Vec<Automation>, String> {
     let mut statement = conn
-        .prepare("SELECT definition_json FROM automations ORDER BY updated_at DESC, id")
+        .prepare("SELECT definition_json, enabled FROM automations ORDER BY updated_at DESC, id")
         .map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map([], |row| row.get::<_, String>(0))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+        })
         .map_err(|error| error.to_string())?;
-    rows.map(|row| {
-        let value = row.map_err(|error| error.to_string())?;
-        parse_automation(value)
-    })
-    .collect()
+    let mut automations = Vec::new();
+    let mut paused = Vec::new();
+    for row in rows {
+        let (value, enabled) = row.map_err(|error| error.to_string())?;
+        let automation = parse_automation(value)?;
+        if enabled && unsupported_provider_error(&automation).is_some() {
+            paused.push(automation.clone());
+        }
+        automations.push(automation);
+    }
+    drop(statement);
+    // Keep the indexed enabled flag and saved definition consistent with what
+    // callers see, without deleting historical definitions or runs.
+    for automation in paused {
+        write_automation(conn, &automation)?;
+    }
+    Ok(automations)
 }
 
 fn get(conn: &Connection, id: &str) -> Result<Option<Automation>, String> {
@@ -768,6 +791,19 @@ pub fn automation_runs_recover(
     now: i64,
 ) -> Result<Vec<DueAutomationRun>, String> {
     let mut conn = store.lock_conn()?;
+    let (due, changed) = recover_runs(&mut conn, started_before, now)?;
+    drop(conn);
+    if changed || !due.is_empty() {
+        let _ = app.emit(CHANGED, ());
+    }
+    Ok(due)
+}
+
+fn recover_runs(
+    conn: &mut Connection,
+    started_before: i64,
+    now: i64,
+) -> Result<(Vec<DueAutomationRun>, bool), String> {
     let tx = conn.transaction().map_err(|error| error.to_string())?;
     let mut statement = tx
         .prepare(
@@ -806,6 +842,17 @@ pub fn automation_runs_recover(
             changed = true;
             continue;
         }
+        if let Some(error) = unsupported_provider_error(&automation) {
+            run.status = "failed".into();
+            run.completed_at = Some(now);
+            run.error = Some(error);
+            apply_run_summary(&mut automation, &run);
+            write_run(&tx, &run)?;
+            write_automation(&tx, &automation)?;
+            changed_automation_ids.push(run.automation_id.clone());
+            changed = true;
+            continue;
+        }
         if run.trigger == "event"
             && run
                 .prompt
@@ -830,11 +877,7 @@ pub fn automation_runs_recover(
         trim_history(&tx, &automation_id)?;
     }
     tx.commit().map_err(|error| error.to_string())?;
-    drop(conn);
-    if changed || !due.is_empty() {
-        let _ = app.emit(CHANGED, ());
-    }
-    Ok(due)
+    Ok((due, changed))
 }
 
 #[tauri::command(async)]
@@ -846,19 +889,30 @@ pub fn automation_run_now(
 ) -> Result<AutomationRun, String> {
     validate_id(&automation_id, "automation")?;
     let mut conn = store.lock_conn()?;
+    let result = run_now(&mut conn, &automation_id, now);
+    drop(conn);
+    // An unsupported provider is paused durably even though the run is rejected.
+    let _ = app.emit(CHANGED, ());
+    result
+}
+
+fn run_now(conn: &mut Connection, automation_id: &str, now: i64) -> Result<AutomationRun, String> {
     let tx = conn.transaction().map_err(|error| error.to_string())?;
     let mut automation =
-        get(&tx, &automation_id)?.ok_or_else(|| "Automation not found.".to_string())?;
-    let run = new_run(&automation_id, "manual", now, now, &automation.prompt);
+        get(&tx, automation_id)?.ok_or_else(|| "Automation not found.".to_string())?;
+    if let Some(error) = unsupported_provider_error(&automation) {
+        write_automation(&tx, &automation)?;
+        tx.commit().map_err(|error| error.to_string())?;
+        return Err(error);
+    }
+    let run = new_run(automation_id, "manual", now, now, &automation.prompt);
     automation.last_run_at = Some(now);
     automation.last_run_status = Some(run.status.clone());
     automation.last_run_error = None;
     write_run(&tx, &run)?;
     write_automation(&tx, &automation)?;
-    trim_history(&tx, &automation_id)?;
+    trim_history(&tx, automation_id)?;
     tx.commit().map_err(|error| error.to_string())?;
-    drop(conn);
-    let _ = app.emit(CHANGED, ());
     Ok(run)
 }
 
@@ -876,10 +930,33 @@ pub fn automations_claim_due(
         return Err("The following automation occurrence must advance the schedule.".into());
     }
     let mut conn = store.lock_conn()?;
+    let result = claim_due(
+        &mut conn,
+        &automation_id,
+        expected_next_run_at,
+        next_run_at,
+        now,
+    )?;
+    drop(conn);
+    let _ = app.emit(CHANGED, ());
+    Ok(result)
+}
+
+fn claim_due(
+    conn: &mut Connection,
+    automation_id: &str,
+    expected_next_run_at: i64,
+    next_run_at: i64,
+    now: i64,
+) -> Result<Option<DueAutomationRun>, String> {
     let tx = conn.transaction().map_err(|error| error.to_string())?;
-    let current = get(&tx, &automation_id)?.ok_or_else(|| "Automation not found.".to_string())?;
-    if !has_time_trigger(&current) {
-        tx.rollback().map_err(|error| error.to_string())?;
+    let current = get(&tx, automation_id)?.ok_or_else(|| "Automation not found.".to_string())?;
+    if unsupported_provider_error(&current).is_some()
+        || !current.enabled
+        || !has_time_trigger(&current)
+    {
+        write_automation(&tx, &current)?;
+        tx.commit().map_err(|error| error.to_string())?;
         return Ok(None);
     }
     let claimed = tx
@@ -894,10 +971,10 @@ pub fn automations_claim_due(
         return Ok(None);
     }
     let mut automation =
-        get(&tx, &automation_id)?.ok_or_else(|| "Automation not found.".to_string())?;
+        get(&tx, automation_id)?.ok_or_else(|| "Automation not found.".to_string())?;
     automation.next_run_at = next_run_at;
     let mut run = new_run(
-        &automation_id,
+        automation_id,
         "scheduled",
         expected_next_run_at,
         now,
@@ -916,10 +993,8 @@ pub fn automations_claim_due(
     automation.last_run_error = run.error.clone();
     write_run(&tx, &run)?;
     write_automation(&tx, &automation)?;
-    trim_history(&tx, &automation_id)?;
+    trim_history(&tx, automation_id)?;
     tx.commit().map_err(|error| error.to_string())?;
-    drop(conn);
-    let _ = app.emit(CHANGED, ());
     Ok(Some(DueAutomationRun { automation, run }))
 }
 
@@ -1058,6 +1133,219 @@ mod tests {
             "time": "09:00", "dayOfWeek": 1, "missedRunGraceMinutes": 720,
             "enabled": true, "nextRunAt": 1, "createdAt": 1, "updatedAt": 1
         })
+    }
+
+    const REMOVED_PROVIDERS: [&str; 6] = ["cursor", "grok", "opencode", "fx", "hermes", "devin"];
+    const SUPPORTED_PROVIDERS: [&str; 5] = ["claude", "codex", "pi", "omp", "antigravity"];
+
+    fn test_connection() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_tables(&conn).unwrap();
+        conn
+    }
+
+    fn save_test_automation(conn: &Connection, harness: &str, enabled: bool) -> Automation {
+        let mut saved = saved_connector_automation("time");
+        saved["id"] = format!("saved-{harness}").into();
+        saved["harness"] = harness.into();
+        saved["enabled"] = enabled.into();
+        // Bypass hydration to reproduce the enabled definitions left on disk
+        // by older versions, even when the provider has since been removed.
+        let automation: Automation = serde_json::from_value(saved).unwrap();
+        write_automation(conn, &automation).unwrap();
+        automation
+    }
+
+    fn assert_paused_on_disk(conn: &Connection, id: &str) {
+        let (enabled, raw): (bool, String) = conn
+            .query_row(
+                "SELECT enabled, definition_json FROM automations WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(!enabled);
+        assert!(!serde_json::from_str::<Automation>(&raw).unwrap().enabled);
+    }
+
+    #[test]
+    fn listing_persists_removed_providers_as_disabled_and_keeps_history() {
+        let conn = test_connection();
+        for provider in REMOVED_PROVIDERS {
+            let automation = save_test_automation(&conn, provider, true);
+            let mut history = new_run(&automation.id, "manual", 1, 1, &automation.prompt);
+            history.status = "succeeded".into();
+            history.completed_at = Some(2);
+            write_run(&conn, &history).unwrap();
+        }
+        let automations = list(&conn).unwrap();
+        assert_eq!(automations.len(), REMOVED_PROVIDERS.len());
+        for automation in automations {
+            assert!(!automation.enabled);
+            assert_eq!(automation.prompt, "Triage the issue");
+            assert_paused_on_disk(&conn, &automation.id);
+            assert_eq!(
+                list_runs(&conn, &automation.id).unwrap()[0].status,
+                "succeeded"
+            );
+        }
+    }
+
+    #[test]
+    fn manual_runs_reject_removed_providers_without_creating_a_run() {
+        let mut conn = test_connection();
+        for provider in REMOVED_PROVIDERS {
+            let automation = save_test_automation(&conn, provider, true);
+            let error = run_now(&mut conn, &automation.id, 2).unwrap_err();
+            assert!(error.contains(provider));
+            assert!(error.contains("Choose a supported provider"));
+            assert!(list_runs(&conn, &automation.id).unwrap().is_empty());
+            assert_paused_on_disk(&conn, &automation.id);
+        }
+    }
+
+    #[test]
+    fn due_claims_reject_removed_providers_before_advancing_the_schedule() {
+        let mut conn = test_connection();
+        for provider in REMOVED_PROVIDERS {
+            let automation = save_test_automation(&conn, provider, true);
+            assert!(claim_due(&mut conn, &automation.id, 1, 2, 1)
+                .unwrap()
+                .is_none());
+            assert!(list_runs(&conn, &automation.id).unwrap().is_empty());
+            assert_eq!(get(&conn, &automation.id).unwrap().unwrap().next_run_at, 1);
+            assert_paused_on_disk(&conn, &automation.id);
+        }
+    }
+
+    #[test]
+    fn recovery_settles_removed_provider_runs_and_keeps_supported_pending_runs() {
+        let mut conn = test_connection();
+        for provider in REMOVED_PROVIDERS {
+            let automation = save_test_automation(&conn, provider, true);
+            for (index, trigger) in ["manual", "scheduled", "event", "running", "succeeded"]
+                .into_iter()
+                .enumerate()
+            {
+                let mut run = new_run(
+                    &automation.id,
+                    trigger,
+                    1,
+                    index as i64 + 1,
+                    &automation.prompt,
+                );
+                run.session_id = Some("retained-session".into());
+                if trigger == "running" || trigger == "succeeded" {
+                    run.status = trigger.into();
+                }
+                if trigger == "succeeded" {
+                    run.completed_at = Some(6);
+                }
+                write_run(&conn, &run).unwrap();
+            }
+        }
+        for provider in SUPPORTED_PROVIDERS {
+            let automation = save_test_automation(&conn, provider, false);
+            let pending = new_run(&automation.id, "manual", 1, 1, &automation.prompt);
+            write_run(&conn, &pending).unwrap();
+            let mut running = new_run(&automation.id, "manual", 2, 2, &automation.prompt);
+            running.status = "running".into();
+            write_run(&conn, &running).unwrap();
+        }
+
+        let (due, changed) = recover_runs(&mut conn, 10, 20).unwrap();
+        assert!(changed);
+        assert_eq!(due.len(), SUPPORTED_PROVIDERS.len());
+        assert!(due.iter().all(|item| {
+            crate::harness::is_supported_provider(&item.automation.harness)
+                && item.run.status == "pending"
+                && !item.automation.enabled
+        }));
+        for provider in REMOVED_PROVIDERS {
+            let id = format!("saved-{provider}");
+            assert_paused_on_disk(&conn, &id);
+            let runs = list_runs(&conn, &id).unwrap();
+            assert_eq!(runs.len(), 5);
+            for run in runs {
+                assert_eq!(run.session_id.as_deref(), Some("retained-session"));
+                match run.trigger.as_str() {
+                    "running" => {
+                        assert_eq!(run.status, "cancelled");
+                        assert_eq!(
+                            run.error.as_deref(),
+                            Some("Interrupted when MonoCode last stopped.")
+                        );
+                        assert_eq!(run.completed_at, Some(20));
+                    }
+                    "succeeded" => {
+                        assert_eq!(run.status, "succeeded");
+                        assert_eq!(run.completed_at, Some(6));
+                        assert!(run.error.is_none());
+                    }
+                    _ => {
+                        assert_eq!(run.status, "failed");
+                        assert_eq!(run.completed_at, Some(20));
+                        assert!(run.error.unwrap().contains(provider));
+                    }
+                }
+            }
+        }
+        for provider in SUPPORTED_PROVIDERS {
+            let runs = list_runs(&conn, &format!("saved-{provider}")).unwrap();
+            assert_eq!(runs[0].status, "cancelled");
+            assert_eq!(runs[1].status, "pending");
+        }
+        let (_, changed_again) = recover_runs(&mut conn, 10, 30).unwrap();
+        assert!(!changed_again);
+    }
+
+    #[test]
+    fn supported_disabled_manual_runs_and_enabled_due_claims_still_work() {
+        let mut conn = test_connection();
+        for provider in SUPPORTED_PROVIDERS {
+            let mut automation = save_test_automation(&conn, provider, false);
+            let manual = run_now(&mut conn, &automation.id, 1).unwrap();
+            assert_eq!(manual.trigger, "manual");
+            assert_eq!(manual.status, "pending");
+            assert!(!get(&conn, &automation.id).unwrap().unwrap().enabled);
+            assert!(claim_due(&mut conn, &automation.id, 1, 2, 1)
+                .unwrap()
+                .is_none());
+            automation.enabled = true;
+            write_automation(&conn, &automation).unwrap();
+            let due = claim_due(&mut conn, &automation.id, 1, 2, 1)
+                .unwrap()
+                .unwrap();
+            assert_eq!(due.run.status, "pending");
+            assert_eq!(due.run.trigger, "scheduled");
+            assert_eq!(due.automation.next_run_at, 2);
+            assert!(claim_due(&mut conn, &automation.id, 1, 2, 1)
+                .unwrap()
+                .is_none());
+            assert_eq!(list_runs(&conn, &automation.id).unwrap().len(), 2);
+        }
+    }
+
+    #[test]
+    fn recovery_keeps_cutoff_and_missing_event_prompt_behavior() {
+        let mut conn = test_connection();
+        let automation = save_test_automation(&conn, "codex", true);
+        let mut event = new_run(&automation.id, "event", 1, 1, &automation.prompt);
+        event.prompt = None;
+        write_run(&conn, &event).unwrap();
+        let future = new_run(&automation.id, "manual", 30, 30, &automation.prompt);
+        write_run(&conn, &future).unwrap();
+        let (due, changed) = recover_runs(&mut conn, 10, 20).unwrap();
+        assert!(due.is_empty());
+        assert!(changed);
+        let runs = list_runs(&conn, &automation.id).unwrap();
+        assert_eq!(runs[0].id, future.id);
+        assert_eq!(runs[0].status, "pending");
+        assert_eq!(runs[1].status, "failed");
+        assert_eq!(
+            runs[1].error.as_deref(),
+            Some("The Inbox event prompt was not available after restart.")
+        );
     }
 
     #[test]
