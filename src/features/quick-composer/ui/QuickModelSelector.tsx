@@ -11,6 +11,7 @@ import { emit } from "@tauri-apps/api/event";
 import { Check, RotateCcw, Search, Star, Zap } from "../../../shared/ui/icons";
 import {
   findModel,
+  filterPickerModels,
   getModelSnapshot,
   getPickerVisibilitySnapshot,
   loadFavoriteModels,
@@ -83,7 +84,7 @@ export function QuickModelSelector({
               !!item && providers.includes(item.harness),
           )
       : modelsFor(visibleTab);
-  const models = filterQuickModels(pool, query);
+  const models = filterQuickModels(filterPickerModels(pool), query);
   const effort =
     modelEffortSetting(model) ??
     model.settings?.find(

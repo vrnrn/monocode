@@ -20,6 +20,7 @@ import {
 } from "react";
 import {
   coerceModelPickerTab,
+  filterPickerModels,
   getModelSnapshot,
   getPickerVisibilitySnapshot,
   isEffortSettingId,
@@ -243,13 +244,14 @@ function settingValueLabel(
 function recentMenuModels(
   current: AgentModel,
   source: ModelSource,
+  project?: string,
 ): AgentModel[] {
   const models = loadRecentModelChoices().flatMap((choice) => {
     const item = source.find(choice.model);
     return item?.harness === choice.harness ? [item] : [];
   });
   if (!models.some((item) => item.id === current.id)) models.push(current);
-  return models.slice(0, 6);
+  return filterPickerModels(models, project).slice(0, 6);
 }
 
 /** Harness tabs whose catalog names upstream providers list models under them. */
@@ -440,15 +442,34 @@ export function ModelPicker({
                 item != null && pickerHarnesses.includes(item.harness),
             )
         : source.modelsFor(visibleTab);
+    const choices = filterPickerModels(pool, project);
     const matches = needle
-      ? pool.filter((item) =>
+      ? choices.filter((item) =>
           `${item.name} ${HARNESS_TITLE[item.harness]} ${item.provider?.name ?? ""} ${item.provider?.id ?? ""}`
             .toLowerCase()
             .includes(needle),
         )
-      : pool;
+      : choices;
     return inProviderOrder(visibleTab, matches);
-  }, [source, catalogVersion, favorites, providerKey, query, visibleTab]);
+  }, [
+    source,
+    catalogVersion,
+    favorites,
+    providerKey,
+    query,
+    visibleTab,
+    visibilityVersion,
+    projectVersion,
+    project,
+  ]);
+
+  useEffect(() => {
+    setRecentMenu((current) => {
+      if (!current) return current;
+      const models = filterPickerModels(current.models, project);
+      return models.length === current.models.length ? current : { models };
+    });
+  }, [visibilityVersion, projectVersion, project]);
 
   const dismiss = (restore: boolean) => {
     setOpen(false);
@@ -468,7 +489,7 @@ export function ModelPicker({
   const openRecentMenu = () => {
     const selected = currentRef.current;
     if (!selected) return;
-    const models = recentMenuModels(selected, source);
+    const models = recentMenuModels(selected, source, project);
     const selectedIndex = models.findIndex((item) => item.id === selected.id);
     setOpen(false);
     setSubmenu(null);

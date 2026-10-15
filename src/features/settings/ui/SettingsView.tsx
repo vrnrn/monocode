@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ConnectionsSettings } from "../../connections/ui/ConnectionsSettings";
+import { ModelVisibilityControl } from "../../providers/ui/ModelVisibilityControl";
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
   ArrowDownCircle,
@@ -182,16 +183,20 @@ import {
   defaultModelId,
   firstEnabledHarness,
   getModelSnapshot,
+  getPickerVisibilitySnapshot,
   hasLiveCatalog,
   loadDefaultModels,
   loadHiddenPickerProviders,
   loadLastModelChoice,
   modelsFor,
+  pickerModelsFor,
   resolveModel,
   saveDefaultModel,
   saveLastModelChoice,
   savePickerProviderVisible,
   subscribeModels,
+  subscribePickerVisibility,
+  visibleModelId,
 } from "../../sessions/model/models";
 import {
   pathKey,
@@ -2887,9 +2892,12 @@ function ProvidersPage({
   const [idleAgentLimit, setIdleAgentLimit] =
     useState<IdleAgentLimit>(loadIdleAgentLimit);
   const [scope, setScope] = useState<string>(GLOBAL_PROVIDER_SCOPE);
-  const [hiddenGlobally, setHiddenGlobally] = useState(
-    loadHiddenPickerProviders,
+  useSyncExternalStore(
+    subscribePickerVisibility,
+    getPickerVisibilitySnapshot,
+    getPickerVisibilitySnapshot,
   );
+  const hiddenGlobally = loadHiddenPickerProviders();
 
   const scopeOptions = useMemo(() => {
     const options: { value: string; label: string; icon?: ReactNode }[] = [
@@ -2982,11 +2990,6 @@ function ProvidersPage({
       return;
     }
     savePickerProviderVisible(harness, visible);
-    setHiddenGlobally((prev) =>
-      visible
-        ? prev.filter((id) => id !== harness)
-        : [...new Set([...prev, harness])],
-    );
   };
 
   return (
@@ -3041,6 +3044,7 @@ function ProvidersPage({
             <ProviderRow
               key={harness}
               harness={harness}
+              project={project ?? undefined}
               selectedModel={selectedModel}
               isDefault={isDefault}
               inPicker={inPicker}
@@ -3471,6 +3475,7 @@ function ProjectScopeIcon({ path }: { path: string }) {
 
 function ProviderRow({
   harness,
+  project,
   selectedModel,
   isDefault,
   inPicker,
@@ -3480,6 +3485,7 @@ function ProviderRow({
   onPickerVisible,
 }: {
   harness: HarnessId;
+  project?: string;
   selectedModel: string;
   isDefault: boolean;
   inPicker: boolean;
@@ -3490,9 +3496,12 @@ function ProviderRow({
   onPickerVisible: (visible: boolean) => void;
 }) {
   const models = modelsFor(harness);
+  const choices = pickerModelsFor(harness, project);
   const available = isHarnessAvailable(harness);
   const current =
-    models.length > 0 ? resolveModel(harness, selectedModel) : null;
+    choices.length > 0
+      ? resolveModel(harness, visibleModelId(harness, selectedModel, project))
+      : null;
 
   useEffect(() => {
     if (!available || hasLiveCatalog(harness)) return;
@@ -3532,12 +3541,17 @@ function ProviderRow({
               void refreshHarnessCatalogs([harness], { force: true });
             }
           }}
-          options={models.map((item) => ({
+          options={choices.map((item) => ({
             value: item.id,
             label: item.name,
           }))}
         />
       ) : null}
+      <ModelVisibilityControl
+        harness={harness}
+        models={models}
+        project={project}
+      />
       <SecondaryButton
         onClick={() => current && onDefault(harness, current.id)}
         disabled={isDefault || !current}

@@ -30,7 +30,7 @@ import {
   isPickerProviderVisible,
   mergeModelSettings,
   modelEffortSetting,
-  modelsFor,
+  pickerModelsFor,
   preferredModelId,
   subscribeModels,
   subscribePickerVisibility,
@@ -183,13 +183,20 @@ export function SecondOpinionButton({
   const models = useMemo(() => {
     void catalogVersion;
     if (!activeHarness) return [];
-    const list = modelsFor(activeHarness);
+    const list = pickerModelsFor(activeHarness);
     // The current model is not a second opinion on itself, so it is not an
     // option once the picker lets the turn's own harness back in.
     return excludeFromModel && activeHarness === from && fromModel
       ? list.filter((model) => model.id !== fromModel)
       : list;
-  }, [activeHarness, catalogVersion, from, fromModel, excludeFromModel]);
+  }, [
+    activeHarness,
+    catalogVersion,
+    visibilityVersion,
+    from,
+    fromModel,
+    excludeFromModel,
+  ]);
   const preferred =
     activeHarness != null
       ? activeHarness === from && fromModel && !excludeFromModel
@@ -268,7 +275,7 @@ export function SecondOpinionButton({
       ? true
       : targets.some((harness) => {
           if (!hasLiveCatalog(harness)) return true;
-          const list = modelsFor(harness);
+          const list = pickerModelsFor(harness);
           return harness === from
             ? list.some((model) => model.id !== fromModel)
             : list.length > 0;
@@ -442,7 +449,7 @@ export function SecondOpinionButton({
                     type="button"
                     role="menuitem"
                     aria-haspopup={
-                      modelsFor(harness).length > 0 ? "menu" : undefined
+                      pickerModelsFor(harness).length > 0 ? "menu" : undefined
                     }
                     aria-expanded={highlighted && showSubmenu}
                     disabled={!available && probed}
@@ -454,7 +461,7 @@ export function SecondOpinionButton({
                     onClick={() => {
                       if (!available && probed) return;
                       setActive(index);
-                      if (modelsFor(harness).length > 0) setMenuLevel("models");
+                      if (pickerModelsFor(harness).length > 0) setMenuLevel("models");
                     }}
                     className={`flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] leading-none ${
                       !available && probed
@@ -468,7 +475,7 @@ export function SecondOpinionButton({
                     <span className="min-w-0 flex-1 truncate">
                       {HARNESS_TITLE[harness]}
                     </span>
-                    {modelsFor(harness).length > 0 ? (
+                    {pickerModelsFor(harness).length > 0 ? (
                       <ChevronRight
                         className="size-3.5 shrink-0 text-content/40"
                         strokeWidth={1.75}

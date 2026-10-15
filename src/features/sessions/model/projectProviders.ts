@@ -19,6 +19,8 @@ export type ProjectProviderSettings = {
   models?: Partial<Record<HarnessId, string>>;
   /** Providers this project keeps out of the picker and out of new sessions. */
   hidden?: HarnessId[];
+  /** Model ids kept out of this project's model pickers. */
+  hiddenModels?: string[];
 };
 
 type Stored = Record<string, ProjectProviderSettings>;
@@ -82,6 +84,21 @@ export function setProjectProviderHidden(  project: string,
   });
 }
 
+export function setProjectModelsHidden(
+  project: string,
+  models: readonly string[],
+  hidden: boolean,
+): void {
+  update(project, (current) => {
+    const next = new Set(current.hiddenModels ?? []);
+    for (const id of models) {
+      if (hidden) next.add(id);
+      else next.delete(id);
+    }
+    return { ...current, hiddenModels: [...next] };
+  });
+}
+
 export function clearProjectProviders(project: string): void {
   const key = pathKey(project);
   const all = { ...readAll() };
@@ -136,7 +153,8 @@ function empty(value: ProjectProviderSettings): boolean {
     value.defaultHarness == null &&
     value.defaultModel == null &&
     Object.keys(value.models ?? {}).length === 0 &&
-    (value.hidden ?? []).length === 0
+    (value.hidden ?? []).length === 0 &&
+    (value.hiddenModels ?? []).length === 0
   );
 }
 
@@ -202,6 +220,16 @@ function normalize(value: ProjectProviderSettings): ProjectProviderSettings {
       ),
     ];
     if (hidden.length > 0) next.hidden = hidden;
+  }
+  if (Array.isArray(value.hiddenModels)) {
+    const hiddenModels = [
+      ...new Set(
+        value.hiddenModels.filter(
+          (id): id is string => typeof id === "string" && id.length > 0,
+        ),
+      ),
+    ];
+    if (hiddenModels.length) next.hiddenModels = hiddenModels;
   }
   return next;
 }
