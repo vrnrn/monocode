@@ -2318,6 +2318,97 @@ mod tests {
     use super::*;
     use std::os::unix::process::CommandExt;
 
+    #[test]
+    fn copilot_token_authorizes_only_omp() {
+        const SCENARIO: &str = "VORKSPACE_COPILOT_AUTH_SCENARIO";
+        const ROOT: &str = "VORKSPACE_COPILOT_AUTH_ROOT";
+        const SHELL_TOKEN: &str = "fixture-shell-copilot-token";
+        const INHERITED_TOKEN: &str = "fixture-inherited-copilot-token";
+
+        if let Ok(scenario) = std::env::var(SCENARIO) {
+            let root = PathBuf::from(std::env::var_os(ROOT).expect("fixture root"));
+            let (binary, expected_token, allowed) = match scenario.as_str() {
+                "shell-token-for-omp" => ("omp", SHELL_TOKEN, true),
+                "inherited-token-for-omp" => ("omp", INHERITED_TOKEN, true),
+                "shell-token-for-other" => ("other-agent", SHELL_TOKEN, false),
+                _ => panic!("unknown Copilot authorization scenario: {scenario}"),
+            };
+            let binary_path = root.join(binary);
+            let mut cmd = Command::new(&binary_path);
+            cmd.arg(expected_token).stdin(Stdio::null());
+            prepare_child(&mut cmd, binary_path.to_str().expect("fixture binary path"));
+            let status = cmd.status().expect("run authorization fixture");
+            if allowed {
+                assert!(status.success(), "{scenario} must authorize");
+            } else {
+                assert_eq!(status.code(), Some(1), "{scenario} must deny authorization");
+            }
+            return;
+        }
+
+        struct FixtureDir(PathBuf);
+        impl Drop for FixtureDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        use std::os::unix::fs::PermissionsExt;
+        let root = FixtureDir(
+            std::env::temp_dir().join(format!("vorkspace-copilot-auth-{}", uuid::Uuid::new_v4())),
+        );
+        std::fs::create_dir(&root.0).expect("create Copilot authorization fixture");
+        let shell = root.0.join("fixture-shell");
+        std::fs::write(
+            &shell,
+            b"#!/bin/sh\n[ \"$1\" = '-lic' ] && [ \"$2\" = 'printenv' ] || exit 2\nprintf '%s\\n' 'PATH=/usr/bin:/bin' 'COPILOT_GITHUB_TOKEN=fixture-shell-copilot-token'\n",
+        )
+        .expect("write fixture shell");
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755))
+            .expect("make fixture shell executable");
+        for name in ["omp", "other-agent"] {
+            let path = root.0.join(name);
+            std::fs::write(
+                &path,
+                b"#!/bin/sh\n[ \"$COPILOT_GITHUB_TOKEN\" = \"$1\" ]\n",
+            )
+            .expect("write authorization fixture");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                .expect("make authorization fixture executable");
+        }
+
+        for (scenario, inherited_token) in [
+            ("shell-token-for-omp", None),
+            ("inherited-token-for-omp", Some(INHERITED_TOKEN)),
+            ("shell-token-for-other", None),
+        ] {
+            let mut child = Command::new(std::env::current_exe().expect("test executable"));
+            child
+                .args([
+                    "--exact",
+                    "harness::tests::copilot_token_authorizes_only_omp",
+                ])
+                .env_clear()
+                .env("HOME", &root.0)
+                .env("TMPDIR", &root.0)
+                .env("PATH", "/usr/bin:/bin")
+                .env("SHELL", &shell)
+                .env(SCENARIO, scenario)
+                .env(ROOT, &root.0)
+                .stdin(Stdio::null());
+            if let Some(token) = inherited_token {
+                child.env("COPILOT_GITHUB_TOKEN", token);
+            }
+            let output = child.output().expect("run isolated authorization scenario");
+            assert!(
+                output.status.success(),
+                "{scenario} failed: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
     fn spawn_group(script: &str) -> std::process::Child {
         Command::new("sh")
             .args(["-c", script])
