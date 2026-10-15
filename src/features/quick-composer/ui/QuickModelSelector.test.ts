@@ -7,8 +7,11 @@ import {
   resetHarnessModelOverlays,
   setHarnessModels,
   saveLastModelSettings,
+  savePickerModelsVisible,
   type AgentModel,
 } from "../../sessions/model/models";
+
+import { setProjectModelsHidden } from "../../sessions/model/projectProviders";
 
 vi.mock("@tauri-apps/api/event", () => ({
   emit: vi.fn().mockResolvedValue(undefined),
@@ -196,4 +199,34 @@ it("resets reasoning and fast mode to saved user defaults", () => {
     fast: "false",
     context: "256k",
   });
+});
+
+it("applies project model visibility live without hiding the model in other projects", () => {
+  const render = (project: string) =>
+    act(() =>
+      root.render(
+        createElement(QuickModelSelector, {
+          model: claude,
+          project,
+          values: {},
+          availableHarnesses: ["claude", "antigravity"],
+          onChange,
+          onSettingsChange,
+          onClose,
+        }),
+      ),
+    );
+  render("/repo");
+  act(() => setProjectModelsHidden("/repo", [claude.id], true));
+  expect(
+    container.querySelector('[role="listbox"]')?.textContent,
+  ).not.toContain("Test Claude");
+  render("/other");
+  expect(container.querySelector('[role="listbox"]')?.textContent).toContain(
+    "Test Claude",
+  );
+  act(() => savePickerModelsVisible([claude.id], false));
+  expect(
+    container.querySelector('[role="listbox"]')?.textContent,
+  ).not.toContain("Test Claude");
 });

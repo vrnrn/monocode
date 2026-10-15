@@ -30,6 +30,10 @@ import {
   HARNESS_TITLE,
   type HarnessId,
 } from "../../sessions/model/session";
+import {
+  projectProvidersRevision,
+  subscribeProjectProviders,
+} from "../../sessions/model/projectProviders";
 import { HarnessIcon } from "../../sessions/ui/HarnessIcon";
 import {
   filterQuickModels,
@@ -38,6 +42,7 @@ import {
 
 type Props = {
   model: AgentModel;
+  project?: string;
   values: Record<string, string>;
   availableHarnesses: HarnessId[] | null;
   onChange: (model: AgentModel) => void;
@@ -48,6 +53,7 @@ type Props = {
 /** Inline model browser: providers share the full width above search/results. */
 export function QuickModelSelector({
   model,
+  project,
   values,
   availableHarnesses,
   onChange,
@@ -59,6 +65,7 @@ export function QuickModelSelector({
     getModelSnapshot,
   );
   useSyncExternalStore(subscribePickerVisibility, getPickerVisibilitySnapshot);
+  useSyncExternalStore(subscribeProjectProviders, projectProvidersRevision);
   const [tab, setTab] = useState<ModelPickerTab>(model.harness);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -84,7 +91,7 @@ export function QuickModelSelector({
               !!item && providers.includes(item.harness),
           )
       : modelsFor(visibleTab);
-  const models = filterQuickModels(filterPickerModels(pool), query);
+  const models = filterQuickModels(filterPickerModels(pool, project), query);
   const effort =
     modelEffortSetting(model) ??
     model.settings?.find(

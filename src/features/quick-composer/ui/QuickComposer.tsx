@@ -37,6 +37,11 @@ import {
   loadLastModelSettings,
   saveLastModelSettings,
   saveRecentModelChoice,
+  firstEnabledHarness,
+  getPickerVisibilitySnapshot,
+  preferredModelId,
+  subscribePickerVisibility,
+  visibleModelId,
 } from "../../sessions/model/models";
 import {
   DEFAULT_RUNTIME_MODE,
@@ -82,6 +87,10 @@ import {
   resolveQuickModel,
   type QuickLaunch,
 } from "../model/quickComposer";
+import {
+  projectProvidersRevision,
+  subscribeProjectProviders,
+} from "../../sessions/model/projectProviders";
 
 /** Tallest the prompt grows before it scrolls, in px. */
 const PROMPT_MAX_HEIGHT = 220;
@@ -132,6 +141,32 @@ export function QuickComposer({ onShown }: { onShown: () => void }) {
     subscribeModels,
     getModelSnapshot,
   );
+  const pickerVisibilityVersion = useSyncExternalStore(
+    subscribePickerVisibility,
+    getPickerVisibilitySnapshot,
+  );
+  const projectProvidersVersion = useSyncExternalStore(
+    subscribeProjectProviders,
+    projectProvidersRevision,
+  );
+  // The quick composer creates a new chat, so its choice must remain visible
+  // when the project, catalog, or visibility settings change.
+  useEffect(() => {
+    const project = cwd ?? undefined;
+    setChoice((current) => {
+      const harness = firstEnabledHarness(project, current.harness);
+      const model = visibleModelId(
+        harness,
+        harness === current.harness
+          ? current.model
+          : preferredModelId(harness),
+        project,
+      );
+      return harness === current.harness && model === current.model
+        ? current
+        : { harness, model };
+    });
+  }, [cwd, catalogVersion, pickerVisibilityVersion, projectProvidersVersion]);
   const [modelSettings, setModelSettings] = useState(loadLastModelSettings);
   const [runtimeMode, setRuntimeMode] =
     useState<RuntimeMode>(DEFAULT_RUNTIME_MODE);
@@ -793,6 +828,7 @@ export function QuickComposer({ onShown }: { onShown: () => void }) {
           {picker === "model" ? (
             <QuickModelSelector
               model={model}
+              project={cwd ?? undefined}
               values={settings}
               availableHarnesses={availableHarnesses}
               onChange={(selected) => {

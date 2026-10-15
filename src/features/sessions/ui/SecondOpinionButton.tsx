@@ -30,11 +30,17 @@ import {
   isPickerProviderVisible,
   mergeModelSettings,
   modelEffortSetting,
+  modelsFor,
   pickerModelsFor,
   preferredModelId,
   subscribeModels,
   subscribePickerVisibility,
 } from "../model/models";
+import {
+  isProviderHidden,
+  projectProvidersRevision,
+  subscribeProjectProviders,
+} from "../model/projectProviders";
 import { LAYER } from "../../../shared/lib/layers";
 import { secondOpinionTargets } from "../model/secondOpinion";
 import {
@@ -47,6 +53,7 @@ import { Popover } from "../../../shared/ui/Popover";
 
 type Props = {
   from: HarnessId;
+  project?: string;
   fromModel?: string;
   fromSettings?: Record<string, string>;
   onPick: (target: ModelTarget) => void;
@@ -78,11 +85,13 @@ const SELF = "[data-provider-target]";
 
 export function HandoffButton({
   from,
+  project,
   onPick,
-}: Pick<Props, "from" | "onPick">) {
+}: Pick<Props, "from" | "project" | "onPick">) {
   return (
     <SecondOpinionButton
       from={from}
+      project={project}
       onPick={onPick}
       icon={Replace}
       title="Handoff"
@@ -95,12 +104,14 @@ export function HandoffButton({
 
 export function BuildTargetButton({
   from,
+  project,
   model,
   settings,
   disabled,
   onPick,
 }: {
   from: HarnessId;
+  project?: string;
   model?: string;
   settings?: Record<string, string>;
   disabled?: boolean;
@@ -109,6 +120,7 @@ export function BuildTargetButton({
   return (
     <SecondOpinionButton
       from={from}
+      project={project}
       fromModel={model}
       fromSettings={settings}
       onPick={onPick}
@@ -126,6 +138,7 @@ export function BuildTargetButton({
 
 export function SecondOpinionButton({
   from,
+  project,
   fromModel,
   fromSettings,
   onPick,
@@ -154,6 +167,11 @@ export function SecondOpinionButton({
     getModelSnapshot,
     getModelSnapshot,
   );
+  const projectVersion = useSyncExternalStore(
+    subscribeProjectProviders,
+    projectProvidersRevision,
+    projectProvidersRevision,
+  );
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [modelActive, setModelActive] = useState(0);
@@ -173,17 +191,29 @@ export function SecondOpinionButton({
     void visibilityVersion;
     return secondOpinionTargets(from, {
       installed: isHarnessAvailable,
-      visible: isPickerProviderVisible,
+      visible: (id) =>
+        isPickerProviderVisible(id) &&
+        !isProviderHidden(project, id) &&
+        (modelsFor(id).length === 0 || pickerModelsFor(id, project).length > 0),
       probed,
       includeCurrent,
     });
-  }, [from, includeCurrent, probed, availabilityVersion, visibilityVersion]);
+  }, [
+    from,
+    project,
+    includeCurrent,
+    probed,
+    availabilityVersion,
+    visibilityVersion,
+    projectVersion,
+    catalogVersion,
+  ]);
 
   const activeHarness = targets[active];
   const models = useMemo(() => {
     void catalogVersion;
     if (!activeHarness) return [];
-    const list = pickerModelsFor(activeHarness);
+    const list = pickerModelsFor(activeHarness, project);
     // The current model is not a second opinion on itself, so it is not an
     // option once the picker lets the turn's own harness back in.
     return excludeFromModel && activeHarness === from && fromModel
@@ -191,6 +221,8 @@ export function SecondOpinionButton({
       : list;
   }, [
     activeHarness,
+    project,
+    projectVersion,
     catalogVersion,
     visibilityVersion,
     from,
@@ -275,7 +307,7 @@ export function SecondOpinionButton({
       ? true
       : targets.some((harness) => {
           if (!hasLiveCatalog(harness)) return true;
-          const list = pickerModelsFor(harness);
+          const list = pickerModelsFor(harness, project);
           return harness === from
             ? list.some((model) => model.id !== fromModel)
             : list.length > 0;
@@ -449,7 +481,9 @@ export function SecondOpinionButton({
                     type="button"
                     role="menuitem"
                     aria-haspopup={
-                      pickerModelsFor(harness).length > 0 ? "menu" : undefined
+                      pickerModelsFor(harness, project).length > 0
+                        ? "menu"
+                        : undefined
                     }
                     aria-expanded={highlighted && showSubmenu}
                     disabled={!available && probed}
@@ -461,7 +495,8 @@ export function SecondOpinionButton({
                     onClick={() => {
                       if (!available && probed) return;
                       setActive(index);
-                      if (pickerModelsFor(harness).length > 0) setMenuLevel("models");
+                      if (pickerModelsFor(harness, project).length > 0)
+                        setMenuLevel("models");
                     }}
                     className={`flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] leading-none ${
                       !available && probed
@@ -475,7 +510,7 @@ export function SecondOpinionButton({
                     <span className="min-w-0 flex-1 truncate">
                       {HARNESS_TITLE[harness]}
                     </span>
-                    {pickerModelsFor(harness).length > 0 ? (
+                    {pickerModelsFor(harness, project).length > 0 ? (
                       <ChevronRight
                         className="size-3.5 shrink-0 text-content/40"
                         strokeWidth={1.75}

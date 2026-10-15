@@ -1593,6 +1593,7 @@ function AgentTranscriptComponent({
                 standaloneReply ||
                 (inlineWork && firstWork >= 0)) ? (
                 <TurnDuration
+                  project={cwd}
                   revealOnHover={inlineWork}
                   elapsedMs={durationMs ?? null}
                   label={
@@ -1799,6 +1800,7 @@ function backgroundLabel(tasks: string[]): string {
  * to the last, so it is not repeated here.
  */
 function TurnDuration({
+  project,
   elapsedMs,
   label: completionLabel,
   metrics,
@@ -1816,6 +1818,7 @@ function TurnDuration({
   onHandoff,
   revealOnHover = false,
 }: {
+  project?: string;
   elapsedMs: number | null;
   label?: string;
   metrics?: TurnMetrics;
@@ -1874,11 +1877,16 @@ function TurnDuration({
           </button>
         ) : null}
         {fromHarness && onHandoff ? (
-          <HandoffButton from={fromHarness} onPick={onHandoff} />
+          <HandoffButton
+            from={fromHarness}
+            project={project}
+            onPick={onHandoff}
+          />
         ) : null}
         {fromHarness && onSecondOpinion ? (
           <SecondOpinionButton
             from={fromHarness}
+            project={project}
             fromModel={fromModel}
             onPick={onSecondOpinion}
             includeCurrent
@@ -2300,6 +2308,7 @@ const TranscriptBlock = memo(function TranscriptBlock({
     return (
       <div className={embedded ? "py-1" : "px-4 py-1"}>
         <PlanPreview
+          project={cwd}
           text={block.text}
           streaming={block.streaming}
           busy={planBusy}
