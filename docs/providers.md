@@ -17,3 +17,9 @@ Once a provider is installed and signed in, open a project folder in MonoCode, c
 In **Settings → Providers**, use **Models** beside an agent to choose which models appear in pickers, favorites, and recent choices. Search for a model and uncheck it to hide it; **Show all** restores the list. The Global/project scope applies to model visibility too, and a model hidden globally stays hidden in every project. Existing conversations keep their selected model.
 
 To run MonoCode from a checkout, see [building from source](building.md). Return to the [README](../README.md) for desktop downloads.
+
+## GitHub Copilot with omp
+
+On macOS and Linux, desktop launches do not inherit your interactive shell environment. MonoCode forwards `COPILOT_GITHUB_TOKEN` from that shell only to omp when the app environment lacks the variable. An inherited value takes precedence.
+
+Export `COPILOT_GITHUB_TOKEN` in your shell configuration before you start MonoCode. Restart MonoCode after you change the token.

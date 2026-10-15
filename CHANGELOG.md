@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- omp sessions now receive `COPILOT_GITHUB_TOKEN` from the interactive login shell after desktop launches. Existing environment values take precedence.
+
 ## [0.13.0] - 2026-10-12
 
 ### Added

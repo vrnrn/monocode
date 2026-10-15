@@ -2214,8 +2214,17 @@ pub(crate) fn apply_gui_env(cmd: &mut Command) {
     }
 }
 
-fn prepare_child(cmd: &mut Command, _command: &str) {
+fn prepare_child(cmd: &mut Command, command: &str) {
     apply_gui_env(cmd);
+    if Path::new(command)
+        .file_stem()
+        .is_some_and(|name| name == "omp")
+        && std::env::var_os("COPILOT_GITHUB_TOKEN").is_none()
+    {
+        if let Some(token) = login_shell_env("COPILOT_GITHUB_TOKEN") {
+            cmd.env("COPILOT_GITHUB_TOKEN", token);
+        }
+    }
     isolate_child(cmd);
 }
 
@@ -2223,7 +2232,7 @@ static LOGIN_SHELL_ENV: Mutex<Option<HashMap<String, String>>> = Mutex::new(None
 
 /// Keys worth keeping out of `printenv`. PATH is the important one: a
 /// Finder-launched app inherits only launchd's bare PATH.
-const LOGIN_SHELL_KEYS: [&str; 1] = ["PATH"];
+const LOGIN_SHELL_KEYS: [&str; 2] = ["PATH", "COPILOT_GITHUB_TOKEN"];
 
 fn login_shell_path() -> Option<String> {
     login_shell_env("PATH")
