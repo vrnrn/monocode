@@ -6,7 +6,7 @@ export type NotificationProject = {
   id: string;
   name: string;
   detail: string;
-  kind: "repository" | "local" | "linear" | "jira";
+  kind: "repository" | "local" | "jira";
   paths: string[];
 };
 
@@ -37,9 +37,9 @@ export function knownNotificationProject(
   );
 }
 
-export function knownNotificationProjectSelection(
-  paths: readonly string[],
-): { projects: NotificationProject[] } {
+export function knownNotificationProjectSelection(paths: readonly string[]): {
+  projects: NotificationProject[];
+} {
   const requested = new Map(
     paths.filter(looksLikeProject).map((path) => [pathKey(path), path]),
   );
@@ -74,9 +74,15 @@ export function loadNotificationProjects(): NotificationProject[] {
         typeof value.id === "string" &&
         typeof value.name === "string" &&
         typeof value.detail === "string" &&
-        ["repository", "local", "linear", "jira"].includes(value.kind) &&
+        ["repository", "local", "jira"].includes(value.kind) &&
         Array.isArray(value.paths) &&
-        value.paths.every((path: unknown) => typeof path === "string"),
+        value.paths.every((path: unknown) => typeof path === "string") &&
+        !(
+          value.paths.length === 0 &&
+          /^repository:(?:azuredevops:|dev\.azure\.com\/|[^/]+\.visualstudio\.com\/)/i.test(
+            value.id,
+          )
+        ),
     );
     return catalog;
   } catch {
@@ -128,12 +134,7 @@ export function subscribeNotificationProjects(
 }
 
 type NotificationWorkItem = Pick<InboxItem, "provider" | "repo" | "url"> &
-  Partial<
-    Pick<
-      InboxItem,
-      "projectPath" | "projectId" | "projectName" | "teamId" | "teamName"
-    >
-  >;
+  Partial<Pick<InboxItem, "projectPath" | "teamId" | "teamName">>;
 
 export function inboxNotificationProject(
   item: NotificationWorkItem,
@@ -153,18 +154,7 @@ export function inboxNotificationProject(
       paths: [],
     };
   }
-  if (item.provider === "linear") {
-    const project = item.projectId?.trim();
-    return {
-      id: project
-        ? `linear:project:${project}`
-        : `linear:team:${item.teamId || "unknown"}:unassigned`,
-      name: project ? item.projectName || project : "No project",
-      detail: `Linear · ${item.teamName || item.teamId || "Unknown team"}`,
-      kind: "linear",
-      paths: [],
-    };
-  }
+
   if (item.projectPath && looksLikeProject(item.projectPath)) {
     return {
       ...localNotificationProject(item.projectPath),

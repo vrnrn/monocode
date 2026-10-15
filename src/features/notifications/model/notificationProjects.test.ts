@@ -8,6 +8,35 @@ import {
   rememberNotificationProjects,
 } from "./notificationProjects";
 
+it("ignores retired provider-only catalog rows while retaining local Azure checkouts", () => {
+  const azure = {
+    id: "repository:dev.azure.com/acme/app",
+    name: "acme/app",
+    detail: "dev.azure.com",
+    kind: "repository",
+    paths: [],
+  };
+  localStorage.setItem(
+    "monocode.notificationProjects.v2",
+    JSON.stringify([
+      azure,
+      {
+        id: "linear:project:old",
+        name: "Old project",
+        detail: "Linear",
+        kind: "linear",
+        paths: [],
+      },
+      { ...azure, id: "local:/work/app", paths: ["/work/app"] },
+    ]),
+  );
+  expect(
+    knownNotificationProjectSelection(["/work/app"]).projects.map(
+      (project) => project.id,
+    ),
+  ).toEqual(["local:/work/app"]);
+});
+
 beforeEach(() => localStorage.clear());
 
 it("groups Jira notification preferences by site and stable project ID", () => {
@@ -20,8 +49,19 @@ it("groups Jira notification preferences by site and stable project ID", () => {
     id: "jira:acme.atlassian.net:project:10000", name: "Engineering",
     detail: "Jira · acme.atlassian.net", kind: "jira", paths: [],
   });
-  expect(inboxNotificationProject({ ...item, repo: "RENAMED", url: "https://acme.atlassian.net/browse/RENAMED-1" }).id).toBe(project.id);
-  expect(inboxNotificationProject({ ...item, url: "https://other.atlassian.net/browse/ENG-42" }).id).not.toBe(project.id);
+  expect(
+    inboxNotificationProject({
+      ...item,
+      repo: "RENAMED",
+      url: "https://acme.atlassian.net/browse/RENAMED-1",
+    }).id,
+  ).toBe(project.id);
+  expect(
+    inboxNotificationProject({
+      ...item,
+      url: "https://other.atlassian.net/browse/ENG-42",
+    }).id,
+  ).not.toBe(project.id);
   rememberNotificationProjects([project]);
   expect(loadNotificationProjects()).toContainEqual(project);
 });
@@ -53,10 +93,10 @@ it("keeps separate checkout and worktree paths as separate projects", () => {
 it("includes requested paths and provider-only catalog projects", () => {
   rememberNotificationProjects([
     {
-      id: "linear:project:roadmap",
+      id: "jira:demo.atlassian.net:project:roadmap",
       name: "Roadmap",
-      detail: "Linear",
-      kind: "linear",
+      detail: "Jira",
+      kind: "jira",
       paths: [],
     },
     {
@@ -71,7 +111,7 @@ it("includes requested paths and provider-only catalog projects", () => {
     knownNotificationProjectSelection(["/work/app"]).projects.map(
       (project) => project.id,
     ),
-  ).toEqual(["linear:project:roadmap", "local:/work/app"]);
+  ).toEqual(["jira:demo.atlassian.net:project:roadmap", "local:/work/app"]);
 });
 
 it("uses the same local ID when Inbox enriches a path with repository metadata", () => {
@@ -88,27 +128,6 @@ it("uses the same local ID when Inbox enriches a path with repository metadata",
   });
   rememberNotificationProjects([project]);
   expect(knownNotificationProject("/work/app")).toEqual(project);
-});
-
-it("keeps provider-only repository and Linear identities", () => {
-  expect(
-    inboxNotificationProject({
-      provider: "github",
-      repo: "Acme/App",
-      url: "git@github.com:Acme/App.git",
-    }).id,
-  ).toBe("repository:github.com/acme/app");
-  expect(
-    inboxNotificationProject({
-      provider: "linear",
-      repo: "PROD",
-      url: "https://linear.app/acme/issue/PROD-1",
-      projectId: "launch",
-      projectName: "Launch",
-      teamId: "product",
-      teamName: "Product",
-    }).id,
-  ).toBe("linear:project:launch");
 });
 
 it("uses a new catalog version so old Git-derived path mappings are ignored", () => {

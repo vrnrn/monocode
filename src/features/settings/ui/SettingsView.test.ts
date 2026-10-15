@@ -21,10 +21,7 @@ import {
   clearCachedRateLimits,
   setCachedRateLimits,
 } from "../../providers/model/rateLimitsCache";
-import {
-  HARNESSES,
-  HARNESS_TITLE,
-} from "../../sessions/model/session";
+import { HARNESSES, HARNESS_TITLE } from "../../sessions/model/session";
 import { saveMaskEmails, saveShowRemainingUsage } from "../model/displayPrefs";
 import {
   createMono,
@@ -171,13 +168,20 @@ describe("settings pages", () => {
 
   it("puts an enabled switch beside each inbox connector heading", async () => {
     await render("inbox");
-    for (const name of ["GitHub", "GitLab", "ADO", "Jira", "Linear"]) {
+    for (const name of ["GitHub", "GitLab", "Jira"]) {
       const control = container.querySelector<HTMLButtonElement>(
         `[role="switch"][aria-label="Enable ${name} inbox connector"]`,
       )!;
       expect(control.getAttribute("aria-checked")).toBe("true");
-      expect(control.parentElement?.querySelector("h2")?.textContent).toBe(name);
+      expect(control.parentElement?.querySelector("h2")?.textContent).toBe(
+        name,
+      );
     }
+    expect(
+      container.querySelectorAll(
+        '[role="switch"][aria-label$=" inbox connector"]',
+      ),
+    ).toHaveLength(3);
   });
 
   it("keeps a disabled connector off when settings reopen without disconnecting it", async () => {
@@ -195,22 +199,32 @@ describe("settings pages", () => {
     expect(toggle().getAttribute("aria-checked")).toBe("false");
     expect(loadInboxConnectors().gitlab).toBe(false);
     expect(loadInboxConnectors().github).toBe(true);
-    expect(container.querySelector('[data-setting-id="gitlab"]')?.textContent)
-      .toContain("Saved connection details are kept.");
-    expect(vi.mocked(invoke).mock.calls.some(([command]) =>
-      command === "gitlab_disconnect" || command === "gitlab_set_config",
-    )).toBe(false);
+    expect(
+      container.querySelector('[data-setting-id="gitlab"]')?.textContent,
+    ).toContain("Saved connection details are kept.");
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.some(
+          ([command]) =>
+            command === "gitlab_disconnect" || command === "gitlab_set_config",
+        ),
+    ).toBe(false);
 
     await render("general");
     vi.mocked(invoke).mockClear();
     await render("inbox");
     expect(toggle().getAttribute("aria-checked")).toBe("false");
-    expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "gitlab_status"))
-      .toBe(false);
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.some(([command]) => command === "gitlab_status"),
+    ).toBe(false);
     await act(async () => toggle().click());
     expect(toggle().getAttribute("aria-checked")).toBe("true");
-    expect(container.querySelector('[data-setting-id="gitlab"]')?.textContent)
-      .toContain("https://gitlab.example.com");
+    expect(
+      container.querySelector('[data-setting-id="gitlab"]')?.textContent,
+    ).toContain("https://gitlab.example.com");
   });
 
   it("saves each Mono's session visibility and restores it when settings reopen", async () => {
@@ -231,10 +245,12 @@ describe("settings pages", () => {
     await render("general");
     await render("monos");
     expect(toggle(mono.id).getAttribute("aria-checked")).toBe("true");
-    await act(async () => updateMono(mono.id, (entry) => ({
-      ...entry,
-      showStartedSessionsInSidebar: false,
-    })));
+    await act(async () =>
+      updateMono(mono.id, (entry) => ({
+        ...entry,
+        showStartedSessionsInSidebar: false,
+      })),
+    );
     expect(toggle(mono.id).getAttribute("aria-checked")).toBe("false");
   });
 
@@ -597,11 +613,13 @@ describe("settings pages", () => {
       ).codex,
     ).toBe("/opt/codex/bin/codex");
     await act(async () =>
-      Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
-        (button) => button.textContent === "Cancel",
-      )!.click(),
+      Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+        .find((button) => button.textContent === "Cancel")!
+        .click(),
     );
-    expect(document.querySelector('[aria-label="Retry Codex configured path"]')).not.toBeNull();
+    expect(
+      document.querySelector('[aria-label="Retry Codex configured path"]'),
+    ).not.toBeNull();
 
     failAutoCodex = true;
     await save("Codex", "");

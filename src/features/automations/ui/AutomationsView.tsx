@@ -80,25 +80,37 @@ import {
   type AutomationTemplateCategoryId,
   type AutomationTemplateIcon,
 } from "../model/automationTemplates";
-import {
-  AZUREDEVOPS_CHANGE_EVENT,
-  azureDevOpsConnected,
-} from "../../inbox/model/azureDevOps";
+
 import { gitBranches } from "../../../platform/tauri/fs";
-import { formatRelativeTime, githubStatus } from "../../inbox/model/githubTasks";
+import {
+  formatRelativeTime,
+  githubStatus,
+} from "../../inbox/model/githubTasks";
 import { GITLAB_CHANGE_EVENT, gitlabConnected } from "../../inbox/model/gitlab";
 import { LAYER } from "../../../shared/lib/layers";
-import { LINEAR_CHANGE_EVENT, linearConnected } from "../../inbox/model/linear";
+
 import { JIRA_CHANGE_EVENT, jiraConnected } from "../../inbox/model/jira";
-import { defaultSessionChoice, firstEnabledHarness, modelsFor, preferredModelId, resolveModel } from "../../sessions/model/models";
+import {
+  defaultSessionChoice,
+  firstEnabledHarness,
+  modelsFor,
+  preferredModelId,
+  resolveModel,
+} from "../../sessions/model/models";
 import { projectKey, projectName } from "../../../shared/lib/paths";
 import { IS_MAC } from "../../../platform/tauri/platform";
-import { looksLikeProject, type RecentProject } from "../../projects/model/recents";
+import {
+  looksLikeProject,
+  type RecentProject,
+} from "../../projects/model/recents";
 import {
   loadSessionFolders,
   subscribeSessionFolders,
 } from "../../sessions/model/sessionFolders";
-import { loadModelControls, subscribeModelControls } from "../../settings/model/settings";
+import {
+  loadModelControls,
+  subscribeModelControls,
+} from "../../settings/model/settings";
 import {
   loadTabGroupColors,
   loadTabGroupCustomColors,
@@ -834,10 +846,8 @@ function AutomationEditor({
   >({});
   const [providerConnected, setProviderConnected] = useState({
     github: false,
-    linear: false,
     jira: false,
     gitlab: false,
-    azuredevops: false,
   });
   const controlsBeside =
     useSyncExternalStore(subscribeModelControls, loadModelControls) ===
@@ -850,35 +860,25 @@ function AutomationEditor({
         githubStatus()
           .then((status) => status.connected)
           .catch(() => false),
-        linearConnected()
-          .then((status) => status.connected)
-          .catch(() => false),
         jiraConnected()
           .then((status) => status.connected)
           .catch(() => false),
         gitlabConnected()
           .then((status) => status.connected)
           .catch(() => false),
-        azureDevOpsConnected()
-          .then((status) => status.connected)
-          .catch(() => false),
-      ]).then(([github, linear, jira, gitlab, azuredevops]) => {
+      ]).then(([github, jira, gitlab]) => {
         if (!cancelled) {
-          setProviderConnected({ github, linear, jira, gitlab, azuredevops });
+          setProviderConnected({ github, jira, gitlab });
         }
       });
     };
     load();
-    window.addEventListener(LINEAR_CHANGE_EVENT, load);
     window.addEventListener(JIRA_CHANGE_EVENT, load);
     window.addEventListener(GITLAB_CHANGE_EVENT, load);
-    window.addEventListener(AZUREDEVOPS_CHANGE_EVENT, load);
     return () => {
       cancelled = true;
-      window.removeEventListener(LINEAR_CHANGE_EVENT, load);
       window.removeEventListener(JIRA_CHANGE_EVENT, load);
       window.removeEventListener(GITLAB_CHANGE_EVENT, load);
-      window.removeEventListener(AZUREDEVOPS_CHANGE_EVENT, load);
     };
   }, []);
   const triggerReady = (kind: AutomationTriggerKind) => {
@@ -1665,10 +1665,8 @@ const TRIGGER_CATEGORIES: readonly {
 }[] = [
   { value: "time", label: "Scheduled" },
   { value: "github", label: "GitHub" },
-  { value: "linear", label: "Linear" },
   { value: "jira", label: "Jira" },
   { value: "gitlab", label: "GitLab" },
-  { value: "azuredevops", label: "Azure DevOps" },
 ];
 
 type TriggerEvent = {
@@ -1688,15 +1686,10 @@ const TRIGGER_EVENTS: Record<AutomationTriggerKind, readonly TriggerEvent[]> = {
     { value: "pull_request_opened", label: "Pull request opened" },
     { value: "issue_opened", label: "Issue opened" },
   ],
-  linear: [{ value: "issue_created", label: "Issue created" }],
   jira: [{ value: "issue_created", label: "Issue appeared" }],
   gitlab: [
     { value: "merge_request_opened", label: "Merge request opened" },
     { value: "issue_opened", label: "Issue opened" },
-  ],
-  azuredevops: [
-    { value: "pull_request_appeared", label: "Pull request appeared" },
-    { value: "work_item_appeared", label: "Work item appeared" },
   ],
 };
 

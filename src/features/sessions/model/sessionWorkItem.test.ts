@@ -179,17 +179,6 @@ describe("session work items", () => {
     });
   });
 
-  it("does not associate a Linear Inbox item", () => {
-    expect(
-      linkedWorkItemFromInboxItem({
-        provider: "linear",
-        kind: "linear",
-        number: 12,
-        repo: "",
-      } as InboxItem),
-    ).toBeNull();
-  });
-
   it("finds sessions related to the same GitHub Inbox item", () => {
     const item = {
       provider: "github",
@@ -225,7 +214,7 @@ describe("session work items", () => {
     expect(relatedSessionsForInboxItem(item, sessions)).toEqual([matching]);
     expect(
       relatedSessionsForInboxItem(
-        { ...item, provider: "linear", kind: "linear" } as InboxItem,
+        { ...item, provider: "jira", kind: "jira" } as InboxItem,
         sessions,
       ),
     ).toEqual([]);

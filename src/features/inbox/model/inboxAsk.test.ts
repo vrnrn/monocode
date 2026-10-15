@@ -2,16 +2,25 @@ import { describe, expect, it } from "vitest";
 import { inboxAskKey, inboxAskPrompt } from "./inboxAsk";
 import type { InboxItem } from "./githubTasks";
 import { newSession } from "../../sessions/model/session";
-import { shouldPersistSession, upsertSession } from "../../sessions/data/sessionStore";
+import {
+  shouldPersistSession,
+  upsertSession,
+} from "../../sessions/data/sessionStore";
 import {
   collectWorkspaceSnapshot,
   hydrateWorkspaceSnapshot,
   parseWorkspaceSnapshot,
 } from "../../workspace/model/workspaceSnapshot";
 import { newTab } from "../../workspace/model/layout";
-import { inFlightRefs, workspaceFromResumed } from "../../sessions/model/inFlight";
+import {
+  inFlightRefs,
+  workspaceFromResumed,
+} from "../../sessions/model/inFlight";
 
-import { historyWithLiveSessions, summaryFromSession } from "../../sessions/data/sessionHistory";
+import {
+  historyWithLiveSessions,
+  summaryFromSession,
+} from "../../sessions/data/sessionHistory";
 import { liveAgentsFromSessions } from "../../sessions/model/liveAgents";
 import { hiddenApprovalNotices } from "../../notifications/model/approvalToast";
 
@@ -36,8 +45,8 @@ describe("inbox sessions", () => {
       inboxAskKey({ ...item, url: "https://git.example.com/acme/app/pull/42" }),
     );
     expect(
-      inboxAskKey({ provider: "linear", id: "issue-uuid" } as InboxItem),
-    ).toBe("linear:issue-uuid");
+      inboxAskKey({ provider: "jira", id: "issue-uuid" } as InboxItem),
+    ).toBe("jira:issue-uuid");
     expect(
       inboxAskKey({
         provider: "gitlab",
@@ -48,13 +57,13 @@ describe("inbox sessions", () => {
 
   it("falls back to a stable key when the item has no usable link", () => {
     const item = {
-      provider: "azuredevops",
+      provider: "gitlab",
       kind: "pr",
       number: 12,
       repo: "platform/web",
       url: "",
     } as InboxItem;
-    expect(inboxAskKey(item)).toBe("azuredevops:platform/web:pr:12");
+    expect(inboxAskKey(item)).toBe("gitlab:platform/web:pr:12");
     expect(() => inboxAskKey({ ...item, url: "not a url" })).not.toThrow();
   });
 

@@ -51,8 +51,7 @@ beforeEach(() => {
     if (command === "git_github_status")
       return { connected: true, installed: true, authenticated: true };
     if (String(command).endsWith("_status")) return { connected: false };
-    if (command === "linear_list_teams" || command === "jira_list_projects")
-      return [];
+    if (command === "jira_list_projects") return [];
     throw new Error(`Unexpected command: ${command}`);
   });
   container = document.createElement("div");
@@ -79,18 +78,14 @@ describe("Inbox connector controls", () => {
         (tab) => tab.textContent,
       ),
     ).toEqual(["GitHub"]);
-    await act(async () => {
-      (
-        container.querySelector(
-          '[aria-label="Connect an inbox source"]',
-        ) as HTMLButtonElement
-      ).click();
-    });
+    expect(
+      container.querySelector('[aria-label="Connect an inbox source"]'),
+    ).toBeNull();
     expect(
       [...document.querySelectorAll('[role="menuitem"]')].map(
         (row) => row.textContent,
       ),
-    ).toEqual(["Connect Linear", "Connect ADO"]);
+    ).toEqual([]);
     expect(
       vi
         .mocked(invoke)
@@ -103,16 +98,15 @@ describe("Inbox connector controls", () => {
   it("resolves a disabled selected provider to an enabled source without metadata or exact-target fetching", async () => {
     saveInboxConnections({
       github: true,
-      linear: true,
+
       jira: false,
       gitlab: false,
-      azuredevops: false,
     });
     saveInboxSource("github");
     setInboxConnectorEnabled("github", false);
     vi.mocked(invoke).mockImplementation(async (command) => {
-      if (command === "linear_status") return { connected: true };
-      if (command === "linear_list_issues" || command === "linear_list_teams")
+      if (command === "jira_status") return { connected: true };
+      if (command === "jira_list_issues" || command === "jira_list_projects")
         return [];
       return { connected: false };
     });
@@ -125,7 +119,7 @@ describe("Inbox connector controls", () => {
     expect(
       container.querySelector('[role="tab"][aria-selected="true"]')
         ?.textContent,
-    ).toBe("Linear");
+    ).toBe("Jira");
     expect(
       vi
         .mocked(invoke)
@@ -136,13 +130,7 @@ describe("Inbox connector controls", () => {
   });
 
   it("shows Inbox Settings when all connectors are off and makes no discovery requests", async () => {
-    for (const provider of [
-      "github",
-      "linear",
-      "jira",
-      "gitlab",
-      "azuredevops",
-    ] as const)
+    for (const provider of ["github", "jira", "gitlab"] as const)
       setInboxConnectorEnabled(provider, false);
     await mount();
     expect(container.querySelector('[role="tab"]')).toBeNull();

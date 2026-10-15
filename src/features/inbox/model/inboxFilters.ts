@@ -1,3 +1,4 @@
+import { isInboxProvider } from "./inboxProviders";
 import {
   filterInboxItems,
   inboxItemStatus,
@@ -7,7 +8,10 @@ import {
 } from "./githubTasks";
 import { loadInboxConnectors, type InboxConnectors } from "./inboxConnectors";
 import { normalizeProjectPath } from "../../projects/model/recents";
-import { timeFilterStart, type SessionTimeFilter } from "../../sessions/model/sessionFilters";
+import {
+  timeFilterStart,
+  type SessionTimeFilter,
+} from "../../sessions/model/sessionFilters";
 
 export type InboxTimeFilter = SessionTimeFilter;
 
@@ -21,22 +25,9 @@ export type InboxStatusFilter = {
 export type InboxFilters = {
   assignedToMe: boolean;
   hiddenProjects: string[];
-  /** Linear project ids to hide. `LINEAR_NO_PROJECT` stands for issues outside every project. */
-  hiddenLinearProjects: string[];
   hiddenKinds: InboxKind[];
   time: InboxTimeFilter;
   status: InboxStatusFilter;
-};
-
-/**
- * Stands in for "issue belongs to no Linear project" so that bucket is as
- * hideable as a real one. Not a valid Linear id, so it can never collide.
- */
-export const LINEAR_NO_PROJECT = "~none";
-
-export type LinearProjectOption = {
-  id: string;
-  name: string;
 };
 
 export const DEFAULT_INBOX_STATUS_FILTER: InboxStatusFilter = {
@@ -49,7 +40,6 @@ export const DEFAULT_INBOX_STATUS_FILTER: InboxStatusFilter = {
 export const DEFAULT_INBOX_FILTERS: InboxFilters = {
   assignedToMe: false,
   hiddenProjects: [],
-  hiddenLinearProjects: [],
   hiddenKinds: [],
   time: "all",
   status: DEFAULT_INBOX_STATUS_FILTER,
@@ -67,10 +57,8 @@ export type InboxSourceConnections = Record<
 
 export const INBOX_SOURCE_LABELS: Record<InboxSource, string> = {
   github: "GitHub",
-  linear: "Linear",
   jira: "Jira",
   gitlab: "GitLab",
-  azuredevops: "ADO",
 };
 
 export function visibleInboxSources(
@@ -79,11 +67,8 @@ export function visibleInboxSources(
 ): InboxSource[] {
   const sources: InboxSource[] = [];
   if (enabled.github && connections.github !== false) sources.push("github");
-  if (enabled.linear && connections.linear !== false) sources.push("linear");
   if (enabled.jira && connections.jira !== false) sources.push("jira");
   if (enabled.gitlab && connections.gitlab !== false) sources.push("gitlab");
-  if (enabled.azuredevops && connections.azuredevops !== false)
-    sources.push("azuredevops");
   return sources;
 }
 
@@ -93,17 +78,14 @@ export function connectableInboxSources(
 ): ConnectableInboxSource[] {
   const sources: ConnectableInboxSource[] = [];
   if (enabled.github && connections.github === false) sources.push("github");
-  if (enabled.linear && connections.linear === false) sources.push("linear");
   if (enabled.jira && connections.jira === false) sources.push("jira");
   if (enabled.gitlab && connections.gitlab === false) sources.push("gitlab");
-  if (enabled.azuredevops && connections.azuredevops === false)
-    sources.push("azuredevops");
   return sources;
 }
 
 /** Account-wide issue trackers: no local repos, no PRs, no draft/merged states. */
 export function isTrackerSource(source?: InboxSource): boolean {
-  return source === "linear" || source === "jira";
+  return source === "jira";
 }
 
 export function resolveInboxSource(
@@ -121,21 +103,14 @@ const CONNECTIONS_KEY = "monocode.inboxConnections";
 
 const UNKNOWN_CONNECTIONS: InboxSourceConnections = {
   github: null,
-  linear: null,
   jira: null,
   gitlab: null,
-  azuredevops: null,
 };
 
 export function loadInboxSource(): InboxSource {
   try {
     const raw = localStorage.getItem(SOURCE_KEY);
-    return raw === "linear" ||
-      raw === "jira" ||
-      raw === "gitlab" ||
-      raw === "azuredevops"
-      ? raw
-      : "github";
+    return isInboxProvider(raw) ? raw : "github";
   } catch {
     return "github";
   }
@@ -165,10 +140,8 @@ export function loadInboxConnections(): InboxSourceConnections {
     const record = parsed as Record<string, unknown>;
     return {
       github: connectFlag(record.github),
-      linear: connectFlag(record.linear),
       jira: connectFlag(record.jira),
       gitlab: connectFlag(record.gitlab),
-      azuredevops: connectFlag(record.azuredevops),
     };
   } catch {
     return UNKNOWN_CONNECTIONS;
@@ -194,11 +167,6 @@ export function loadInboxFilters(): InboxFilters {
         ? parsed.hiddenProjects.filter(
             (path): path is string =>
               typeof path === "string" && path.length > 0,
-          )
-        : [],
-      hiddenLinearProjects: Array.isArray(parsed.hiddenLinearProjects)
-        ? parsed.hiddenLinearProjects.filter(
-            (id): id is string => typeof id === "string" && id.length > 0,
           )
         : [],
       hiddenKinds: Array.isArray(parsed.hiddenKinds)
@@ -242,8 +210,6 @@ export function pruneInboxFilters(
 export function hasActiveInboxFilters(
   filters: InboxFilters,
   source?: InboxSource,
-  /** Teams live outside InboxFilters — they narrow the fetch and are shared with Settings. */
-  hiddenLinearTeamIds: readonly string[] = [],
   /** Same for Jira projects. */
   hiddenJiraProjectIds: readonly string[] = [],
 ): boolean {
@@ -255,11 +221,8 @@ export function hasActiveInboxFilters(
       filters.status.merged;
   return (
     filters.assignedToMe ||
-    (source === "linear" && hiddenLinearTeamIds.length > 0) ||
     (source === "jira" && hiddenJiraProjectIds.length > 0) ||
-    (source === "linear"
-      ? filters.hiddenLinearProjects.length > 0
-      : source !== "jira" && filters.hiddenProjects.length > 0) ||
+    (source !== "jira" && filters.hiddenProjects.length > 0) ||
     (isTrackerSource(source) ? false : filters.hiddenKinds.length > 0) ||
     filters.time !== "all" ||
     statusActive
@@ -285,45 +248,6 @@ export function filterInboxByProject(
     const path = normalizeProjectPath(item.projectPath);
     if (!path) return true;
     return !hidden.has(path);
-  });
-}
-
-/**
- * Every distinct Linear project across `items`, name-sorted, with a trailing
- * "No project" row when any issue sits outside a project. Derived from the
- * fetched issues because Linear projects are not fetched separately.
- */
-export function linearProjectOptions(
-  items: readonly InboxItem[],
-): LinearProjectOption[] {
-  const byId = new Map<string, string>();
-  let unassigned = false;
-  for (const item of items) {
-    if (item.provider !== "linear") continue;
-    const id = item.projectId?.trim() ?? "";
-    if (!id) {
-      unassigned = true;
-      continue;
-    }
-    if (!byId.has(id)) byId.set(id, item.projectName?.trim() || id);
-  }
-  const options = [...byId]
-    .map(([id, name]) => ({ id, name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  if (unassigned) options.push({ id: LINEAR_NO_PROJECT, name: "No project" });
-  return options;
-}
-
-export function filterInboxByLinearProject(
-  items: readonly InboxItem[],
-  hiddenProjects: Iterable<string>,
-): InboxItem[] {
-  const hidden = new Set(hiddenProjects);
-  if (hidden.size === 0) return [...items];
-  return items.filter((item) => {
-    if (item.provider !== "linear") return true;
-    const id = item.projectId?.trim() || LINEAR_NO_PROJECT;
-    return !hidden.has(id);
   });
 }
 
@@ -381,8 +305,7 @@ export function applyInboxFilters(
 ): InboxItem[] {
   const scoped = source ? filterInboxByProvider(items, source) : [...items];
   const hiddenProjects =
-    isTrackerSource(source) ||
-    ((source === "gitlab" || source === "azuredevops") && filters.assignedToMe)
+    isTrackerSource(source) || (source === "gitlab" && filters.assignedToMe)
       ? []
       : filters.hiddenProjects;
   const hiddenKinds = isTrackerSource(source) ? [] : filters.hiddenKinds;
@@ -390,10 +313,7 @@ export function applyInboxFilters(
     filterInboxByStatus(
       filterInboxByTime(
         filterInboxByKind(
-          filterInboxByLinearProject(
-            filterInboxByProject(scoped, hiddenProjects),
-            filters.hiddenLinearProjects,
-          ),
+          filterInboxByProject(scoped, hiddenProjects),
           hiddenKinds,
         ),
         filters.time,

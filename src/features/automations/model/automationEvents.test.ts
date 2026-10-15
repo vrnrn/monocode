@@ -55,15 +55,43 @@ function automation(
 
 describe("inbox automation events", () => {
   it("matches account-wide Jira issues and keeps their event identity after a project move", () => {
-    const jira = item({ provider: "jira", kind: "jira", id: "10042", identifier: "ENG-42", repo: "ENG", projectPath: "" });
-    const trigger = { ...createAutomationTrigger("jira", "issue_created"), repos: ["ENG"] };
-    expect(inboxAppearedEvent(jira)).toEqual({ kind: "jira", event: "issue_created" });
+    const jira = item({
+      provider: "jira",
+      kind: "jira",
+      id: "10042",
+      identifier: "ENG-42",
+      repo: "ENG",
+      projectPath: "",
+    });
+    const trigger = {
+      ...createAutomationTrigger("jira", "issue_created"),
+      repos: ["ENG"],
+    };
+    expect(inboxAppearedEvent(jira)).toEqual({
+      kind: "jira",
+      event: "issue_created",
+    });
     expect(automationEventKey(jira)).toBe("jira:issue:10042");
-    expect(automationEventKey({ ...jira, identifier: "OPS-17", repo: "OPS", number: 17 })).toBe("jira:issue:10042");
-    const matches = matchInboxAutomations([automation({ triggers: [trigger] })], [jira]);
+    expect(
+      automationEventKey({
+        ...jira,
+        identifier: "OPS-17",
+        repo: "OPS",
+        number: 17,
+      }),
+    ).toBe("jira:issue:10042");
+    const matches = matchInboxAutomations(
+      [automation({ triggers: [trigger] })],
+      [jira],
+    );
     expect(matches).toHaveLength(1);
     expect(matches[0].prompt).toContain("Work on this Jira issue:");
-    expect(matchInboxAutomations([automation({ triggers: [trigger] })], [{ ...jira, repo: "OPS" }])).toEqual([]);
+    expect(
+      matchInboxAutomations(
+        [automation({ triggers: [trigger] })],
+        [{ ...jira, repo: "OPS" }],
+      ),
+    ).toEqual([]);
   });
 
   it("maps opened PRs, drafts, and issues", () => {
@@ -97,35 +125,6 @@ describe("inbox automation events", () => {
         }),
       ),
     ).toEqual({ kind: "gitlab", event: "issue_opened" });
-    expect(
-      inboxAppearedEvent(
-        item({
-          provider: "linear",
-          kind: "linear",
-          id: "issue-1",
-          identifier: "ENG-12",
-          url: "https://linear.app/acme/issue/ENG-12",
-          projectPath: "",
-        }),
-      ),
-    ).toEqual({ kind: "linear", event: "issue_created" });
-    expect(
-      inboxAppearedEvent(
-        item({
-          provider: "azuredevops",
-          url: "https://dev.azure.com/acme/shop/_git/web/pullrequest/12",
-        }),
-      ),
-    ).toEqual({ kind: "azuredevops", event: "pull_request_appeared" });
-    expect(
-      inboxAppearedEvent(
-        item({
-          provider: "azuredevops",
-          kind: "issue",
-          url: "https://dev.azure.com/acme/shop/_workitems/edit/12",
-        }),
-      ),
-    ).toEqual({ kind: "azuredevops", event: "work_item_appeared" });
   });
 
   it("fires a same-project opened PR into the matching automation", () => {
@@ -145,16 +144,16 @@ describe("inbox automation events", () => {
     const review = automation({
       triggers: [createAutomationTrigger("github", "pull_request_opened")],
     });
-    expect(
-      matchInboxAutomations([review], [item({ draft: true })]),
-    ).toEqual([]);
+    expect(matchInboxAutomations([review], [item({ draft: true })])).toEqual(
+      [],
+    );
     const drafts = automation({
       id: "draft-id",
       triggers: [createAutomationTrigger("github", "draft_opened")],
     });
-    expect(matchInboxAutomations([drafts], [item({ draft: true })])).toHaveLength(
-      1,
-    );
+    expect(
+      matchInboxAutomations([drafts], [item({ draft: true })]),
+    ).toHaveLength(1);
   });
 
   it("keeps automations scoped to their project", () => {
@@ -178,9 +177,7 @@ describe("inbox automation events", () => {
     expect(match?.eventKey).toBe("github:issue:acme/web:12");
     expect(match?.prompt).toContain("Triage the newly opened GitHub issue.");
     expect(match?.prompt).toContain("Work on this GitHub issue:");
-    expect(
-      matchInboxAutomations([triage], [item()]),
-    ).toEqual([]);
+    expect(matchInboxAutomations([triage], [item()])).toEqual([]);
   });
 
   it("fires GitLab merge requests into the matching project", () => {
@@ -227,103 +224,6 @@ describe("inbox automation events", () => {
     );
     expect(match?.eventKey).toBe("gitlab:issue:acme/web:12");
     expect(match?.prompt).toContain("Work on this GitLab issue:");
-  });
-
-  it("fires Azure DevOps pull requests into the matching project", () => {
-    const review = automation({
-      triggers: [
-        createAutomationTrigger("azuredevops", "pull_request_appeared"),
-      ],
-    });
-    const [match] = matchInboxAutomations(
-      [review],
-      [
-        item({
-          provider: "azuredevops",
-          url: "https://dev.azure.com/acme/shop/_git/web/pullrequest/12",
-        }),
-      ],
-    );
-    expect(match?.eventKey).toBe("azuredevops:pr:acme/web:12");
-    expect(match?.prompt).toContain("Work on this ADO pull request:");
-  });
-
-  it("fires Azure DevOps work items separately from pull requests", () => {
-    const triage = automation({
-      triggers: [createAutomationTrigger("azuredevops", "work_item_appeared")],
-    });
-    expect(
-      matchInboxAutomations(
-        [triage],
-        [
-          item({
-            provider: "azuredevops",
-            url: "https://dev.azure.com/acme/shop/_git/web/pullrequest/12",
-          }),
-        ],
-      ),
-    ).toEqual([]);
-    const [match] = matchInboxAutomations(
-      [triage],
-      [
-        item({
-          provider: "azuredevops",
-          kind: "issue",
-          url: "https://dev.azure.com/acme/shop/_workitems/edit/12",
-        }),
-      ],
-    );
-    expect(match?.eventKey).toBe("azuredevops:issue:acme/web:12");
-    expect(match?.prompt).toContain("Work on this ADO issue:");
-  });
-
-  it("fires new Linear issues into the automation's project", () => {
-    const triage = automation({
-      name: "Triage new issues",
-      prompt: "Triage the new Linear issue.",
-      triggers: [createAutomationTrigger("linear", "issue_created")],
-    });
-    const [match] = matchInboxAutomations(
-      [triage],
-      [
-        item({
-          provider: "linear",
-          kind: "linear",
-          id: "issue-1",
-          identifier: "ENG-12",
-          title: "Fix auth",
-          url: "https://linear.app/acme/issue/ENG-12",
-          projectPath: "",
-        }),
-      ],
-    );
-    expect(match?.eventKey).toBe("linear:issue:issue-1");
-    expect(match?.automation.cwd).toBe("/tmp/web");
-    expect(match?.prompt).toContain("Triage the new Linear issue.");
-    expect(match?.prompt).toContain("Work on this Linear issue:");
-    expect(match?.prompt).toContain("ENG-12 Fix auth");
-  });
-
-  it("still scopes Linear issues when they carry a project path", () => {
-    const triage = automation({
-      cwd: "/tmp/other",
-      triggers: [createAutomationTrigger("linear", "issue_created")],
-    });
-    expect(
-      matchInboxAutomations(
-        [triage],
-        [
-          item({
-            provider: "linear",
-            kind: "linear",
-            id: "issue-1",
-            identifier: "ENG-12",
-            url: "https://linear.app/acme/issue/ENG-12",
-            projectPath: "/tmp/web",
-          }),
-        ],
-      ),
-    ).toEqual([]);
   });
 
   it("honors an explicit repo filter and ignores unverifiable actors", () => {
@@ -427,7 +327,9 @@ describe("inbox automation events", () => {
       url: "https://github.com/acme/web/pull/12",
     });
     expect(
-      invoke.mock.calls.filter(([command]) => command === "automations_claim_event"),
+      invoke.mock.calls.filter(
+        ([command]) => command === "automations_claim_event",
+      ),
     ).toHaveLength(2);
     invoke.mockReset();
     window.localStorage.clear();

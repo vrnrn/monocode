@@ -212,7 +212,7 @@ fn is_allowed_media_target(url: &MediaUrl) -> bool {
     if is_github_site(&url.host) {
         return is_github_attachment_path(&url.path);
     }
-    is_github_media_cdn(&url.host) || is_linear_uploads(&url.host) || is_github_asset_s3(&url.host)
+    is_github_media_cdn(&url.host) || is_github_asset_s3(&url.host)
 }
 
 fn is_github_attachment_path(path: &str) -> bool {
@@ -231,10 +231,6 @@ fn is_github_site(host: &str) -> bool {
 
 fn is_github_media_cdn(host: &str) -> bool {
     host == "githubusercontent.com" || host.ends_with(".githubusercontent.com")
-}
-
-fn is_linear_uploads(host: &str) -> bool {
-    host == "uploads.linear.app" || host.ends_with(".uploads.linear.app")
 }
 
 fn is_github_asset_s3(host: &str) -> bool {
@@ -288,7 +284,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn github_and_linear_attachments_are_allowed() {
+    fn github_attachments_are_allowed() {
         assert!(parse_allowed_media_url(
             "https://github.com/user-attachments/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         )
@@ -296,7 +292,6 @@ mod tests {
         assert!(
             parse_allowed_media_url("https://user-images.githubusercontent.com/1/shot.png").is_ok()
         );
-        assert!(parse_allowed_media_url("https://uploads.linear.app/org/uuid/file.png").is_ok());
         assert!(parse_allowed_media_url(
             "https://github-production-user-asset-6210df.s3.amazonaws.com/1/shot.png"
         )
@@ -309,6 +304,7 @@ mod tests {
 
     #[test]
     fn github_pages_other_hosts_and_traversal_are_rejected() {
+        assert!(parse_allowed_media_url("https://uploads.linear.app/org/uuid/file.png").is_err());
         assert!(parse_allowed_media_url("https://github.com/acme/web/issues/1").is_err());
         assert!(parse_allowed_media_url("https://github.com/acme/web/assets").is_err());
         assert!(parse_allowed_media_url("https://github.com/user-attachments/../login").is_err());

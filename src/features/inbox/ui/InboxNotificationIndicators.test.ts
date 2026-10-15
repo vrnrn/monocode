@@ -57,21 +57,31 @@ it("reports a failed mark-all write in Inbox and clears the error after retry", 
   saveInboxConnections({
     github: true,
     gitlab: false,
-    linear: false,
-    azuredevops: false,
   });
   saveInboxSource("github");
   listInboxItems.mockResolvedValue({ items: [item], errors: {} });
-  await act(async () => root.render(createElement(InboxView, {
-    cwd: "/tmp/app", recents: [], onAsk: async () => "", onAskRestart: async () => "",
-    onAskMount: () => {}, onOpenIntegrations: () => {},
-  })));
-  const markAll = container.querySelector<HTMLButtonElement>('button[aria-label="Mark all as read"]')!;
+  await act(async () =>
+    root.render(
+      createElement(InboxView, {
+        cwd: "/tmp/app",
+        recents: [],
+        onAsk: async () => "",
+        onAskRestart: async () => "",
+        onAskMount: () => {},
+        onOpenIntegrations: () => {},
+      }),
+    ),
+  );
+  const markAll = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Mark all as read"]',
+  )!;
   const write = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
     throw new Error("Storage full");
   });
   act(() => markAll.click());
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain("Could not save read status");
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+    "Could not save read status",
+  );
   expect(isInboxEntryUnseen(entry)).toBe(true);
   expect(markAll.disabled).toBe(false);
   write.mockRestore();
@@ -110,13 +120,6 @@ it.each([
     "https://gitlab.example.com/acme/app/-/merge_requests/42",
     "local:/tmp/app",
   ],
-  [
-    "linear",
-    "linear",
-    "issues",
-    "https://linear.app/acme/issue/ENG-42",
-    "linear:project:roadmap",
-  ],
 ] as const)(
   "keeps the %s %s visibly unread until opened even with its category off or project muted",
   async (provider, kind, category, url, projectId) => {
@@ -133,9 +136,9 @@ it.each([
       assignees: [],
       draft: false,
       projectPath: "/tmp/app",
-      ...(provider === "linear"
+      ...(provider === "jira"
         ? {
-            id: "linear-42",
+            id: "jira-42",
             identifier: "ENG-42",
             projectId: "roadmap",
             teamId: "engineering",
@@ -147,8 +150,6 @@ it.each([
     saveInboxConnections({
       github: true,
       gitlab: true,
-      linear: true,
-      azuredevops: true,
     });
     saveInboxSource(provider);
     listInboxItems.mockResolvedValue({ items: [item], errors: {} });

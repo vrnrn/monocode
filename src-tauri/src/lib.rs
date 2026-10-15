@@ -3,7 +3,6 @@ use tauri::Manager;
 mod account_identity;
 mod artifacts;
 mod automations;
-mod azure_devops;
 mod chat_background;
 mod checkpoint;
 mod codex_mono_store;
@@ -20,7 +19,6 @@ mod harness_updates;
 mod inbox_media;
 mod jira;
 mod jsonc;
-mod linear;
 mod link_preview;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -396,22 +394,6 @@ pub fn run() {
             gitlab::gitlab_work_item_thread,
             gitlab::gitlab_work_item_comment,
             gitlab::gitlab_mr_diff,
-            azure_devops::azure_devops_status,
-            azure_devops::azure_devops_set_config,
-            azure_devops::azure_devops_repo,
-            azure_devops::azure_devops_list_work_items,
-            azure_devops::azure_devops_list_todos,
-            azure_devops::azure_devops_work_item_details,
-            azure_devops::azure_devops_work_item_thread,
-            azure_devops::azure_devops_work_item_comment,
-            azure_devops::azure_devops_mr_diff,
-            linear::linear_status,
-            linear::linear_set_token,
-            linear::linear_list_teams,
-            linear::linear_list_issues,
-            linear::linear_issue_details,
-            linear::linear_issue_thread,
-            linear::linear_issue_comment,
             jira::jira_status,
             jira::jira_set_config,
             jira::jira_list_projects,

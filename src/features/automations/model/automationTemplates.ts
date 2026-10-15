@@ -1,4 +1,7 @@
-import type { AutomationScheduleKind, AutomationTriggerKind } from "./automations";
+import type {
+  AutomationScheduleKind,
+  AutomationTriggerKind,
+} from "./automations";
 
 export const AUTOMATION_TEMPLATE_CATEGORIES = [
   { id: "popular", label: "Popular" },
@@ -246,25 +249,6 @@ Look for API keys, tokens, private keys, .env files, and credentials in config. 
 - Do not implement a large fix unless the issue is clearly a small, validated bug`,
   },
   {
-    id: "triage-new-issues",
-    category: "incidents",
-    icon: "inbox",
-    name: "Triage new issues",
-    description:
-      "When a Linear issue is created, inspect the repo and add a concrete reproduction or next step",
-    trigger: {
-      kind: "linear",
-      event: "issue_created",
-    },
-    triggerLabel: "Issue created",
-    prompt: `A new Linear issue was created. Triage it against this repo.
-
-- Reproduce or locate the relevant code if the report is specific enough
-- Label the severity in your summary (blocker / bug / request / unclear)
-- Add a concrete next step: file paths, likely cause, or the missing information
-- Do not implement a large fix unless the issue is clearly a small, validated bug`,
-  },
-  {
     id: "failing-ci-watch",
     category: "incidents",
     icon: "alert",
@@ -359,5 +343,7 @@ export function templatesForCategory(
   if (category === "popular") {
     return AUTOMATION_TEMPLATES.filter((template) => template.popular);
   }
-  return AUTOMATION_TEMPLATES.filter((template) => template.category === category);
+  return AUTOMATION_TEMPLATES.filter(
+    (template) => template.category === category,
+  );
 }

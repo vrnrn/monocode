@@ -8,10 +8,33 @@ const KEY = "monocode.inboxConnectors.v1";
 const DEFAULTS = {
   github: true,
   gitlab: true,
-  azuredevops: true,
+
   jira: true,
-  linear: true,
 };
+
+it("ignores removed provider preferences while preserving supported choices", () => {
+  localStorage.setItem(
+    KEY,
+    JSON.stringify({
+      github: false,
+      gitlab: true,
+      jira: false,
+      linear: true,
+      azuredevops: true,
+    }),
+  );
+  expect(connectors.loadInboxConnectors()).toEqual({
+    github: false,
+    gitlab: true,
+    jira: false,
+  });
+  connectors.setInboxConnectorEnabled("github", true);
+  expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({
+    github: true,
+    gitlab: true,
+    jira: false,
+  });
+});
 let connectors: typeof import("./inboxConnectors");
 let root: Root | undefined;
 let container: HTMLDivElement;
@@ -102,19 +125,19 @@ it("preserves an external provider choice when changing another provider", () =>
 it("updates mounted consumers immediately after an in-window change", () => {
   mountProbe();
   expect(visibleConnectors()).toEqual(DEFAULTS);
-  act(() => connectors.setInboxConnectorEnabled("linear", false));
-  expect(visibleConnectors()).toEqual({ ...DEFAULTS, linear: false });
-  act(() => connectors.setInboxConnectorEnabled("linear", true));
+  act(() => connectors.setInboxConnectorEnabled("jira", false));
+  expect(visibleConnectors()).toEqual({ ...DEFAULTS, jira: false });
+  act(() => connectors.setInboxConnectorEnabled("jira", true));
   expect(visibleConnectors()).toEqual(DEFAULTS);
 });
 
 it("synchronizes another window's changes and storage clearing", () => {
   mountProbe();
   act(() => {
-    localStorage.setItem(KEY, JSON.stringify({ azuredevops: false }));
+    localStorage.setItem(KEY, JSON.stringify({ gitlab: false }));
     window.dispatchEvent(new StorageEvent("storage", { key: KEY }));
   });
-  expect(visibleConnectors()).toEqual({ ...DEFAULTS, azuredevops: false });
+  expect(visibleConnectors()).toEqual({ ...DEFAULTS, gitlab: false });
   act(() => {
     localStorage.clear();
     window.dispatchEvent(new StorageEvent("storage", { key: null }));
@@ -167,5 +190,5 @@ it("keeps local changes usable when storage access is unavailable", () => {
     github: false,
     jira: false,
   });
-  expect(connectors.isInboxConnectorEnabled("linear")).toBe(true);
+  expect(connectors.isInboxConnectorEnabled("gitlab")).toBe(true);
 });

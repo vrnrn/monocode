@@ -304,25 +304,6 @@ describe("InboxDetail layout", () => {
     expect(inboxShowsFullFileDiff(item({ kind: "issue" }))).toBe(false);
   });
 
-  it("keeps the Linear project picker beside the pinned send action", () => {
-    const markup = renderDetail(
-      item({
-        provider: "linear",
-        kind: "linear",
-        id: "linear-157",
-        identifier: "ENG-157",
-        teamName: "Engineering",
-      }),
-    );
-    const headerIndex = markup.indexOf("data-inbox-detail-header");
-    const scrollIndex = markup.indexOf("data-inbox-detail-scroll");
-    const header = markup.slice(headerIndex, scrollIndex);
-
-    expect(header).toContain("Send to agent");
-    expect(header).toContain("Choose project");
-    expect(header).not.toContain("overflow-y-auto");
-  });
-
   it("shows why a remote GitLab item needs attention and asks for a workspace", () => {
     const markup = renderDetail(
       item({

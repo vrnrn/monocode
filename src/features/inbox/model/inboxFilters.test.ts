@@ -1,26 +1,32 @@
+// @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   applyInboxFilters,
   DEFAULT_INBOX_FILTERS,
   filterInboxByKind,
-  filterInboxByLinearProject,
   filterInboxByProject,
   filterInboxByProvider,
   filterInboxByStatus,
   filterInboxByTime,
   hasActiveInboxFilters,
   inboxFetchState,
-  LINEAR_NO_PROJECT,
-  linearProjectOptions,
   pruneInboxFilters,
   connectableInboxSources,
   loadInboxConnections,
+  loadInboxSource,
   resolveInboxSource,
   saveInboxConnections,
   visibleInboxSources,
 } from "./inboxFilters";
 import type { InboxConnectors } from "./inboxConnectors";
 import type { InboxItem } from "./githubTasks";
+
+it("falls back to GitHub for a saved removed-provider selection", () => {
+  for (const source of ["linear", "azuredevops"]) {
+    localStorage.setItem("monocode.inboxSource", source);
+    expect(loadInboxSource()).toBe("github");
+  }
+});
 
 function item(
   overrides: Partial<InboxItem> & Pick<InboxItem, "number" | "updatedAt">,
@@ -58,123 +64,6 @@ describe("filterInboxByProject", () => {
       filterInboxByProject(rows, ["/tmp/web/"]).map((row) => row.number),
     ).toEqual([2]);
   });
-
-  it("keeps Linear issues that are not tied to a folder", () => {
-    const rows = [
-      item({
-        number: 1,
-        updatedAt: "2026-08-27T10:00:00Z",
-        projectPath: "/tmp/web",
-      }),
-      item({
-        number: 9,
-        kind: "linear",
-        provider: "linear",
-        projectPath: "",
-        updatedAt: "2026-08-27T10:00:00Z",
-      }),
-    ];
-    expect(
-      filterInboxByProject(rows, ["/tmp/web"]).map((row) => row.number),
-    ).toEqual([9]);
-  });
-});
-
-describe("linearProjectOptions", () => {
-  function linearItem(number: number, project?: { id: string; name: string }) {
-    return item({
-      number,
-      kind: "linear",
-      provider: "linear",
-      projectPath: "",
-      projectId: project?.id ?? "",
-      projectName: project?.name ?? "",
-      updatedAt: "2026-08-27T10:00:00Z",
-    });
-  }
-
-  it("collects distinct projects sorted by name", () => {
-    const rows = [
-      linearItem(1, { id: "p2", name: "Onboarding" }),
-      linearItem(2, { id: "p1", name: "Billing" }),
-      linearItem(3, { id: "p1", name: "Billing" }),
-    ];
-    expect(linearProjectOptions(rows)).toEqual([
-      { id: "p1", name: "Billing" },
-      { id: "p2", name: "Onboarding" },
-    ]);
-  });
-
-  it("appends a No project row when an issue sits outside every project", () => {
-    const rows = [linearItem(1, { id: "p1", name: "Billing" }), linearItem(2)];
-    expect(linearProjectOptions(rows)).toEqual([
-      { id: "p1", name: "Billing" },
-      { id: LINEAR_NO_PROJECT, name: "No project" },
-    ]);
-  });
-
-  it("ignores GitHub items", () => {
-    const rows = [item({ number: 1, updatedAt: "2026-08-27T10:00:00Z" })];
-    expect(linearProjectOptions(rows)).toEqual([]);
-  });
-
-  it("falls back to the id when a project has no name", () => {
-    expect(
-      linearProjectOptions([linearItem(1, { id: "p1", name: "" })]),
-    ).toEqual([{ id: "p1", name: "p1" }]);
-  });
-});
-
-describe("filterInboxByLinearProject", () => {
-  const rows = [
-    item({
-      number: 1,
-      kind: "linear",
-      provider: "linear",
-      projectPath: "",
-      projectId: "p1",
-      projectName: "Billing",
-      updatedAt: "2026-08-27T10:00:00Z",
-    }),
-    item({
-      number: 2,
-      kind: "linear",
-      provider: "linear",
-      projectPath: "",
-      projectId: "",
-      projectName: "",
-      updatedAt: "2026-08-27T10:00:00Z",
-    }),
-    item({ number: 3, updatedAt: "2026-08-27T10:00:00Z" }),
-  ];
-
-  it("keeps everything when nothing is hidden", () => {
-    expect(
-      filterInboxByLinearProject(rows, []).map((row) => row.number),
-    ).toEqual([1, 2, 3]);
-  });
-
-  it("hides the selected project", () => {
-    expect(
-      filterInboxByLinearProject(rows, ["p1"]).map((row) => row.number),
-    ).toEqual([2, 3]);
-  });
-
-  it("hides project-less issues via the No project sentinel", () => {
-    expect(
-      filterInboxByLinearProject(rows, [LINEAR_NO_PROJECT]).map(
-        (row) => row.number,
-      ),
-    ).toEqual([1, 3]);
-  });
-
-  it("never hides GitHub items", () => {
-    expect(
-      filterInboxByLinearProject(rows, ["p1", LINEAR_NO_PROJECT]).map(
-        (row) => row.number,
-      ),
-    ).toEqual([3]);
-  });
 });
 
 describe("filterInboxByKind", () => {
@@ -184,45 +73,17 @@ describe("filterInboxByKind", () => {
       item({ number: 2, kind: "pr", updatedAt: "2026-08-27T10:00:00Z" }),
       item({
         number: 9,
-        kind: "linear",
-        provider: "linear",
+        kind: "jira",
+        provider: "jira",
         updatedAt: "2026-08-27T10:00:00Z",
       }),
     ];
     expect(filterInboxByKind(rows, ["pr"]).map((row) => row.number)).toEqual([
       1, 9,
     ]);
-    expect(
-      filterInboxByKind(rows, ["linear"]).map((row) => row.number),
-    ).toEqual([1, 2]);
-  });
-});
-
-describe("filterInboxByProvider", () => {
-  it("keeps GitHub, GitLab, or Linear items", () => {
-    const rows = [
-      item({ number: 1, updatedAt: "2026-08-27T10:00:00Z" }),
-      item({
-        number: 2,
-        provider: "gitlab",
-        updatedAt: "2026-08-27T10:00:00Z",
-      }),
-      item({
-        number: 9,
-        kind: "linear",
-        provider: "linear",
-        updatedAt: "2026-08-27T10:00:00Z",
-      }),
-    ];
-    expect(
-      filterInboxByProvider(rows, "github").map((row) => row.number),
-    ).toEqual([1]);
-    expect(
-      filterInboxByProvider(rows, "linear").map((row) => row.number),
-    ).toEqual([9]);
-    expect(
-      filterInboxByProvider(rows, "gitlab").map((row) => row.number),
-    ).toEqual([2]);
+    expect(filterInboxByKind(rows, ["jira"]).map((row) => row.number)).toEqual([
+      1, 2,
+    ]);
   });
 });
 
@@ -323,8 +184,8 @@ describe("applyInboxFilters", () => {
       item({
         number: 9,
         title: "Fix checkout",
-        kind: "linear",
-        provider: "linear",
+        kind: "jira",
+        provider: "jira",
         updatedAt: "2026-08-27T10:00:00Z",
       }),
     ];
@@ -334,30 +195,7 @@ describe("applyInboxFilters", () => {
         DEFAULT_INBOX_FILTERS,
         "checkout",
         Date.now(),
-        "linear",
-      ).map((row) => row.number),
-    ).toEqual([9]);
-  });
-
-  it("ignores GitHub-only status filters on the Linear tab", () => {
-    const rows = [
-      item({
-        number: 9,
-        kind: "linear",
-        provider: "linear",
-        updatedAt: "2026-08-27T10:00:00Z",
-      }),
-    ];
-    expect(
-      applyInboxFilters(
-        rows,
-        {
-          ...DEFAULT_INBOX_FILTERS,
-          status: { open: false, draft: true, closed: false, merged: true },
-        },
-        "",
-        Date.now(),
-        "linear",
+        "jira",
       ).map((row) => row.number),
     ).toEqual([9]);
   });
@@ -398,55 +236,6 @@ describe("hasActiveInboxFilters", () => {
         hiddenProjects: ["/tmp/web"],
       }),
     ).toBe(true);
-  });
-
-  it("ignores GitHub-only filters on the Linear tab", () => {
-    expect(
-      hasActiveInboxFilters(
-        {
-          ...DEFAULT_INBOX_FILTERS,
-          hiddenProjects: ["/tmp/web"],
-          hiddenKinds: ["pr"],
-        },
-        "linear",
-      ),
-    ).toBe(false);
-  });
-
-  it("is true when a Linear project is hidden on the Linear tab", () => {
-    expect(
-      hasActiveInboxFilters(
-        { ...DEFAULT_INBOX_FILTERS, hiddenLinearProjects: ["p1"] },
-        "linear",
-      ),
-    ).toBe(true);
-  });
-
-  it("ignores hidden Linear projects on the GitHub tab", () => {
-    expect(
-      hasActiveInboxFilters(
-        { ...DEFAULT_INBOX_FILTERS, hiddenLinearProjects: ["p1"] },
-        "github",
-      ),
-    ).toBe(false);
-  });
-
-  it("is true when a Linear team is hidden on the Linear tab", () => {
-    expect(hasActiveInboxFilters(DEFAULT_INBOX_FILTERS, "linear", ["t1"])).toBe(
-      true,
-    );
-  });
-
-  it("ignores hidden Linear teams on the GitHub tab", () => {
-    expect(hasActiveInboxFilters(DEFAULT_INBOX_FILTERS, "github", ["t1"])).toBe(
-      false,
-    );
-  });
-
-  it("is false on the Linear tab when no team is hidden", () => {
-    expect(hasActiveInboxFilters(DEFAULT_INBOX_FILTERS, "linear", [])).toBe(
-      false,
-    );
   });
 });
 
@@ -501,51 +290,46 @@ describe("visibleInboxSources", () => {
     expect(
       visibleInboxSources({
         github: false,
-        linear: false,
+
         jira: false,
         gitlab: false,
-        azuredevops: false,
       }),
     ).toEqual([]);
     expect(
       visibleInboxSources({
         github: true,
-        linear: false,
+
         jira: false,
         gitlab: false,
-        azuredevops: false,
       }),
     ).toEqual(["github"]);
     expect(
       visibleInboxSources({
         github: false,
-        linear: true,
+
         jira: true,
         gitlab: false,
-        azuredevops: false,
       }),
-    ).toEqual(["linear", "jira"]);
+    ).toEqual(["jira"]);
     expect(
       visibleInboxSources({
         github: true,
-        linear: true,
+
         jira: true,
         gitlab: true,
-        azuredevops: true,
       }),
-    ).toEqual(["github", "linear", "jira", "gitlab", "azuredevops"]);
+    ).toEqual(["github", "jira", "gitlab"]);
   });
 
   it("keeps unresolved sources visible so tabs do not flash away", () => {
     expect(
       visibleInboxSources({
         github: null,
-        linear: null,
+
         jira: null,
         gitlab: null,
-        azuredevops: null,
       }),
-    ).toEqual(["github", "linear", "jira", "gitlab", "azuredevops"]);
+    ).toEqual(["github", "jira", "gitlab"]);
   });
 });
 
@@ -554,31 +338,28 @@ describe("connectableInboxSources", () => {
     expect(
       connectableInboxSources({
         github: true,
-        linear: false,
+
         jira: false,
         gitlab: true,
-        azuredevops: true,
       }),
-    ).toEqual(["linear", "jira"]);
+    ).toEqual(["jira"]);
     expect(
       connectableInboxSources({
         github: false,
-        linear: false,
+
         jira: false,
         gitlab: false,
-        azuredevops: false,
       }),
-    ).toEqual(["github", "linear", "jira", "gitlab", "azuredevops"]);
+    ).toEqual(["github", "jira", "gitlab"]);
   });
 
   it("offers nothing while the checks are unresolved", () => {
     expect(
       connectableInboxSources({
         github: null,
-        linear: null,
+
         jira: null,
         gitlab: null,
-        azuredevops: null,
       }),
     ).toEqual([]);
   });
@@ -587,54 +368,49 @@ describe("connectableInboxSources", () => {
 describe("resolveInboxSource", () => {
   it("falls back to the first visible source when the selection disconnects", () => {
     expect(
-      resolveInboxSource("linear", {
+      resolveInboxSource("jira", {
         github: true,
-        linear: false,
+
         jira: false,
         gitlab: true,
-        azuredevops: false,
       }),
     ).toBe("github");
     expect(
       resolveInboxSource("github", {
         github: false,
-        linear: false,
+
         jira: false,
         gitlab: true,
-        azuredevops: false,
       }),
     ).toBe("gitlab");
   });
 
   it("keeps GitHub as an internal fallback when every source is disconnected", () => {
     expect(
-      resolveInboxSource("linear", {
+      resolveInboxSource("jira", {
         github: false,
-        linear: false,
+
         jira: false,
         gitlab: false,
-        azuredevops: false,
       }),
     ).toBe("github");
   });
 
   it("leaves a still-visible selection alone", () => {
     expect(
-      resolveInboxSource("linear", {
+      resolveInboxSource("jira", {
         github: false,
-        linear: true,
+
         jira: true,
         gitlab: false,
-        azuredevops: false,
       }),
-    ).toBe("linear");
+    ).toBe("jira");
     expect(
       resolveInboxSource("github", {
         github: true,
-        linear: false,
-        jira: false,
+
+        jira: true,
         gitlab: false,
-        azuredevops: false,
       }),
     ).toBe("github");
   });
@@ -671,27 +447,24 @@ describe("inbox connection cache", () => {
   it("round-trips the last known connect state", () => {
     saveInboxConnections({
       github: true,
-      linear: true,
+
       jira: true,
       gitlab: false,
-      azuredevops: false,
     });
     expect(loadInboxConnections()).toEqual({
       github: true,
-      linear: true,
+
       jira: true,
       gitlab: false,
-      azuredevops: false,
     });
   });
 
   it("reads unknown when nothing is stored", () => {
     expect(loadInboxConnections()).toEqual({
       github: null,
-      linear: null,
+
       jira: null,
       gitlab: null,
-      azuredevops: null,
     });
   });
 
@@ -699,18 +472,16 @@ describe("inbox connection cache", () => {
     localStorage.setItem(KEY, "not json");
     expect(loadInboxConnections()).toEqual({
       github: null,
-      linear: null,
+
       jira: null,
       gitlab: null,
-      azuredevops: null,
     });
-    localStorage.setItem(KEY, '{"linear":"yes"}');
+    localStorage.setItem(KEY, '{"jira":"yes"}');
     expect(loadInboxConnections()).toEqual({
       github: null,
-      linear: null,
+
       jira: null,
       gitlab: null,
-      azuredevops: null,
     });
   });
 });
@@ -719,33 +490,56 @@ describe("inbox connection cache", () => {
 describe("disabled Inbox connectors", () => {
   const enabled: InboxConnectors = {
     github: false,
-    linear: true,
+
     jira: false,
     gitlab: true,
-    azuredevops: false,
   };
 
   it("hides disabled connected and unresolved sources from tabs", () => {
-    expect(visibleInboxSources({
-      github: true, linear: true, jira: null, gitlab: true, azuredevops: null,
-    }, enabled)).toEqual(["linear", "gitlab"]);
+    expect(
+      visibleInboxSources(
+        {
+          github: true,
+          jira: null,
+          gitlab: true,
+        },
+        enabled,
+      ),
+    ).toEqual(["gitlab"]);
   });
 
   it("hides disabled disconnected sources from Add connection", () => {
-    expect(connectableInboxSources({
-      github: false, linear: false, jira: false, gitlab: false, azuredevops: false,
-    }, enabled)).toEqual(["linear", "gitlab"]);
+    expect(
+      connectableInboxSources(
+        {
+          github: false,
+          jira: false,
+          gitlab: false,
+        },
+        enabled,
+      ),
+    ).toEqual(["gitlab"]);
   });
 
   it("selects the next enabled connected source after switching one off", () => {
-    expect(resolveInboxSource("github", {
-      github: true, linear: true, jira: true, gitlab: true, azuredevops: true,
-    }, enabled)).toBe("linear");
+    expect(
+      resolveInboxSource(
+        "github",
+        {
+          github: true,
+          jira: true,
+          gitlab: true,
+        },
+        enabled,
+      ),
+    ).toBe("gitlab");
   });
 
   it("shows no source tabs or connect actions when every connector is off", () => {
-    const disabled = Object.fromEntries(Object.keys(enabled).map((key) => [key, false])) as InboxConnectors;
-    const connections = { github: true, linear: false, jira: null, gitlab: true, azuredevops: false };
+    const disabled = Object.fromEntries(
+      Object.keys(enabled).map((key) => [key, false]),
+    ) as InboxConnectors;
+    const connections = { github: true, jira: null, gitlab: true };
     expect(visibleInboxSources(connections, disabled)).toEqual([]);
     expect(connectableInboxSources(connections, disabled)).toEqual([]);
   });
