@@ -77,6 +77,27 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   localStorage.clear();
   resetHarnessModelOverlays();
+  setHarnessModels("antigravity", [
+    {
+      id: "antigravity:demo-pro",
+      harness: "antigravity",
+      name: "Demo Pro",
+      settings: [
+        {
+          id: "effort",
+          label: "Reasoning",
+          kind: "select",
+          value: "high",
+          options: [
+            { value: "xhigh", label: "Extra High" },
+            { value: "high", label: "High" },
+            { value: "low", label: "Low" },
+          ],
+        },
+      ],
+    },
+    { id: "antigravity:demo-fast", harness: "antigravity", name: "Demo Fast" },
+  ]);
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -134,8 +155,8 @@ describe("model picker", () => {
     act(() =>
       root.render(
         createElement(ModelPicker, {
-          harness: "grok",
-          model: "grok:grok-4.6",
+          harness: "antigravity",
+          model: "antigravity:demo-pro",
           values: { effort: "high" },
           onChange,
           onSettingsChange,
@@ -146,9 +167,9 @@ describe("model picker", () => {
     const trigger = container.querySelector<HTMLButtonElement>(
       'button[aria-haspopup="menu"]',
     )!;
-    expect(trigger.textContent).toBe("Grok 4.6High");
+    expect(trigger.textContent).toBe("Demo ProHigh");
     expect(trigger.getAttribute("aria-label")).toBe(
-      "Grok Build Grok 4.6, effort High",
+      "Antigravity Demo Pro, effort High",
     );
     expect(trigger.querySelector(".text-content\\/50")?.textContent).toBe(
       "High",
@@ -159,16 +180,16 @@ describe("model picker", () => {
     const modelRow = [
       ...container.querySelectorAll<HTMLButtonElement>("button"),
     ].find((button) => button.textContent?.startsWith("Model"))!;
-    expect(modelRow.textContent).toContain("Grok 4.6");
-    expect(modelRow.querySelectorAll("svg")).toHaveLength(2);
+    expect(modelRow.textContent).toContain("Demo Pro");
+    expect(modelRow.querySelectorAll("svg")).toHaveLength(1);
 
     hover(modelRow);
     const modelFlyout = container.querySelector<HTMLElement>(
       '[role="dialog"][aria-label="Models"]',
     )!;
-    expect(modelFlyout.style.height).toBe("440px");
-    expect(modelFlyout.dataset.minHeight).toBe("442");
-    expect(modelFlyout.dataset.maxHeight).toBe("442");
+    expect(modelFlyout.style.height).toBe("224px");
+    expect(modelFlyout.dataset.minHeight).toBe("226");
+    expect(modelFlyout.dataset.maxHeight).toBe("226");
     expect(
       container.querySelector('[role="tablist"][aria-orientation="vertical"]'),
     ).not.toBeNull();
@@ -179,7 +200,7 @@ describe("model picker", () => {
       container.querySelector('[role="tab"][aria-label="Antigravity"]'),
     ).not.toBeNull();
     const grokTab = container.querySelector<HTMLButtonElement>(
-      '[role="tab"][aria-label="Grok Build"]',
+      '[role="tab"][aria-label="Antigravity"]',
     )!;
     expect(grokTab.className).toContain("rounded-md");
     expect(grokTab.className).not.toContain("transition");
@@ -187,7 +208,7 @@ describe("model picker", () => {
     expect(grokTab.getAttribute("aria-selected")).toBe("true");
     expect(
       [...container.querySelectorAll('[role="option"]')].some(
-        (option) => option.textContent === "Grok 4.6",
+        (option) => option.textContent === "Demo Pro",
       ),
     ).toBe(true);
     const selectedOption = container.querySelector<HTMLButtonElement>(
@@ -342,24 +363,24 @@ describe("model picker", () => {
   });
 
   it("groups OpenCode models by provider and searches provider names", () => {
-    setHarnessModels("opencode", [
+    setHarnessModels("omp", [
       {
-        id: "opencode:opencode-go/gpt-5.6-luna",
-        harness: "opencode",
+        id: "omp:opencode-go/gpt-5.6-luna",
+        harness: "omp",
         name: "GPT-5.6 Luna",
         nativeId: "opencode-go/gpt-5.6-luna",
         provider: { id: "opencode-go", name: "OpenCode Go" },
       },
       {
-        id: "opencode:openai/gpt-5.6-luna",
-        harness: "opencode",
+        id: "omp:openai/gpt-5.6-luna",
+        harness: "omp",
         name: "GPT-5.6 Luna",
         nativeId: "openai/gpt-5.6-luna",
         provider: { id: "openai", name: "OpenAI" },
       },
       {
-        id: "opencode:openai/gpt-5.6-luna-fast",
-        harness: "opencode",
+        id: "omp:openai/gpt-5.6-luna-fast",
+        harness: "omp",
         name: "GPT-5.6 Luna Fast",
         nativeId: "openai/gpt-5.6-luna-fast",
         provider: { id: "openai", name: "OpenAI" },
@@ -369,8 +390,8 @@ describe("model picker", () => {
     act(() =>
       root.render(
         createElement(ModelPicker, {
-          harness: "opencode",
-          model: "opencode:opencode-go/gpt-5.6-luna",
+          harness: "omp",
+          model: "omp:opencode-go/gpt-5.6-luna",
           values: {},
           onChange: vi.fn(),
           onSettingsChange: vi.fn(),
@@ -382,7 +403,7 @@ describe("model picker", () => {
       'button[aria-haspopup="menu"]',
     )!;
     expect(trigger.getAttribute("aria-label")).toBe(
-      "OpenCode, OpenCode Go, GPT-5.6 Luna",
+      "omp, OpenCode Go, GPT-5.6 Luna",
     );
     act(() => trigger.click());
     const modelRow = [
@@ -476,13 +497,11 @@ describe("model picker", () => {
     const options = [
       ...container.querySelectorAll<HTMLButtonElement>('[role="option"]'),
     ];
-    expect(options.map((option) => option.getAttribute("aria-label"))).toEqual(
-      [
-        "Claude Sonnet 5, Anthropic",
-        "Claude Opus 5, Anthropic",
-        "Claude Sonnet 5, GitHub Copilot",
-      ],
-    );
+    expect(options.map((option) => option.getAttribute("aria-label"))).toEqual([
+      "Claude Sonnet 5, Anthropic",
+      "Claude Opus 5, Anthropic",
+      "Claude Sonnet 5, GitHub Copilot",
+    ]);
     // The next row down is the next visible row, not the next catalog entry.
     options[0].focus();
     keyDown(options[0], "ArrowDown");
@@ -491,24 +510,24 @@ describe("model picker", () => {
   });
 
   it("names the source of same-name favorites from different providers", () => {
-    setHarnessModels("cursor", [
+    setHarnessModels("pi", [
       {
-        id: "cursor:auto",
-        harness: "cursor",
+        id: "pi:auto",
+        harness: "pi",
         name: "Auto",
         nativeId: "auto",
       },
       {
-        id: "cursor:muse-spark-1.3",
-        harness: "cursor",
+        id: "pi:muse-spark-1.3",
+        harness: "pi",
         name: "Muse Spark 1.3",
         nativeId: "muse-spark-1.3",
       },
     ]);
-    setHarnessModels("opencode", [
+    setHarnessModels("omp", [
       {
-        id: "opencode:opencode-go/muse-spark-1.3",
-        harness: "opencode",
+        id: "omp:opencode-go/muse-spark-1.3",
+        harness: "omp",
         name: "Muse Spark 1.3",
         nativeId: "opencode-go/muse-spark-1.3",
         provider: { id: "opencode-go", name: "OpenCode Go" },
@@ -517,17 +536,17 @@ describe("model picker", () => {
     localStorage.setItem(
       "monocode.favoriteModels",
       JSON.stringify([
-        "cursor:auto",
-        "cursor:muse-spark-1.3",
-        "opencode:opencode-go/muse-spark-1.3",
+        "pi:auto",
+        "pi:muse-spark-1.3",
+        "omp:opencode-go/muse-spark-1.3",
       ]),
     );
 
     act(() =>
       root.render(
         createElement(ModelPicker, {
-          harness: "cursor",
-          model: "cursor:auto",
+          harness: "pi",
+          model: "pi:auto",
           values: {},
           onChange: vi.fn(),
           onSettingsChange: vi.fn(),
@@ -552,8 +571,8 @@ describe("model picker", () => {
       (option) => option.getAttribute("aria-label"),
     );
     expect(options).toEqual([
-      "Auto, Cursor",
-      "Muse Spark 1.3, Cursor",
+      "Auto, Pi",
+      "Muse Spark 1.3, Pi",
       "Muse Spark 1.3, OpenCode Go",
     ]);
   });
@@ -566,16 +585,16 @@ describe("model picker", () => {
           "div",
           null,
           createElement(ModelPicker, {
-            harness: "grok",
-            model: "grok:grok-4.6",
+            harness: "antigravity",
+            model: "antigravity:demo-pro",
             values: { effort: "high" },
             hideSettings: true,
             onChange: vi.fn(),
             onSettingsChange,
           }),
           createElement(ModelControlPills, {
-            harness: "grok",
-            model: "grok:grok-4.6",
+            harness: "antigravity",
+            model: "antigravity:demo-pro",
             values: { effort: "high" },
             onSettingsChange,
           }),
@@ -584,9 +603,9 @@ describe("model picker", () => {
     );
 
     const modelTrigger = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Grok Build Grok 4.6"]',
+      'button[aria-label="Antigravity Demo Pro"]',
     )!;
-    expect(modelTrigger.textContent).toBe("Grok 4.6");
+    expect(modelTrigger.textContent).toBe("Demo Pro");
     act(() => modelTrigger.click());
     expect(
       [...container.querySelectorAll<HTMLButtonElement>("button")].some(
@@ -610,11 +629,11 @@ describe("model picker", () => {
   });
 
   it("opens the model list with no intermediate menu when settings live beside the picker", () => {
-    setHarnessModels("cursor", [
+    setHarnessModels("pi", [
       {
-        id: "cursor:composer-2.5",
-        harness: "cursor",
-        name: "Composer 2.5",
+        id: "pi:default",
+        harness: "pi",
+        name: "Default",
         nativeId: "composer-2.5",
         settings: [
           {
@@ -637,16 +656,16 @@ describe("model picker", () => {
           "div",
           null,
           createElement(ModelPicker, {
-            harness: "cursor",
-            model: "cursor:composer-2.5",
+            harness: "pi",
+            model: "pi:default",
             values: { fast: "false" },
             hideSettings: true,
             onChange: vi.fn(),
             onSettingsChange,
           }),
           createElement(ModelControlPills, {
-            harness: "cursor",
-            model: "cursor:composer-2.5",
+            harness: "pi",
+            model: "pi:default",
             values: { fast: "false" },
             onSettingsChange,
           }),
@@ -672,11 +691,11 @@ describe("model picker", () => {
   });
 
   it("focuses the model search when the models submenu opens", async () => {
-    setHarnessModels("cursor", [
+    setHarnessModels("pi", [
       {
-        id: "cursor:composer-2.5",
-        harness: "cursor",
-        name: "Composer 2.5",
+        id: "pi:default",
+        harness: "pi",
+        name: "Default",
         nativeId: "composer-2.5",
         settings: [],
       },
@@ -684,8 +703,8 @@ describe("model picker", () => {
     act(() =>
       root.render(
         createElement(ModelPicker, {
-          harness: "cursor",
-          model: "cursor:composer-2.5",
+          harness: "pi",
+          model: "pi:default",
           values: {},
           onChange: vi.fn(),
           onSettingsChange: vi.fn(),
@@ -712,10 +731,10 @@ describe("model picker", () => {
   });
 
   it("renders the OpenCode variant as a beside-picker pill", () => {
-    setHarnessModels("opencode", [
+    setHarnessModels("omp", [
       {
-        id: "opencode:some-cloud/spark-1",
-        harness: "opencode",
+        id: "omp:some-cloud/spark-1",
+        harness: "omp",
         name: "Spark 1",
         nativeId: "some-cloud/spark-1",
         provider: { id: "some-cloud", name: "Some Cloud" },
@@ -738,8 +757,8 @@ describe("model picker", () => {
     act(() =>
       root.render(
         createElement(ModelControlPills, {
-          harness: "opencode",
-          model: "opencode:some-cloud/spark-1",
+          harness: "omp",
+          model: "omp:some-cloud/spark-1",
           values: { variant: "high" },
           onSettingsChange: vi.fn(),
         }),
@@ -849,8 +868,8 @@ describe("model picker", () => {
       values: { reasoningEffort: "high" },
     },
     {
-      harness: "opencode" as const,
-      modelId: "opencode:spark/spark-1",
+      harness: "omp" as const,
+      modelId: "omp:spark/spark-1",
       settingId: "variant",
       settingLabel: "Variant",
       values: { variant: "high" },
@@ -863,8 +882,8 @@ describe("model picker", () => {
       values: { effort: "high" },
     },
     {
-      harness: "cursor" as const,
-      modelId: "cursor:gpt-5",
+      harness: "pi" as const,
+      modelId: "pi:gpt-5",
       settingId: "effort",
       settingLabel: "Effort",
       values: { effort: "high" },
@@ -1095,11 +1114,11 @@ describe("model picker", () => {
   });
 
   it("opens the model list directly when settings live beside the picker", async () => {
-    setHarnessModels("cursor", [
+    setHarnessModels("pi", [
       {
-        id: "cursor:composer-2.5",
-        harness: "cursor",
-        name: "Composer 2.5",
+        id: "pi:default",
+        harness: "pi",
+        name: "Default",
         nativeId: "composer-2.5",
         settings: [
           {
@@ -1119,8 +1138,8 @@ describe("model picker", () => {
     act(() =>
       root.render(
         createElement(ModelPicker, {
-          harness: "cursor",
-          model: "cursor:composer-2.5",
+          harness: "pi",
+          model: "pi:default",
           values: { fast: "false" },
           hideSettings: true,
           onChange,
@@ -1138,7 +1157,7 @@ describe("model picker", () => {
       '[role="dialog"][aria-label="Models"]',
     )!;
     expect(flyout).not.toBeNull();
-    expect(flyout.textContent).toContain("Composer 2.5");
+    expect(flyout.textContent).toContain("Default");
 
     // Search takes focus once the flyout is on screen.
     await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
@@ -1150,20 +1169,20 @@ describe("model picker", () => {
       '[role="option"][aria-selected="true"]',
     )!;
     act(() => selected.click());
-    expect(onChange).toHaveBeenCalledWith("cursor", "cursor:composer-2.5");
+    expect(onChange).toHaveBeenCalledWith("pi", "pi:default");
   });
 
   it("picks the highlighted model on Enter even when focus sits on another row", () => {
-    setHarnessModels("cursor", [
+    setHarnessModels("pi", [
       {
-        id: "cursor:first",
-        harness: "cursor",
+        id: "pi:first",
+        harness: "pi",
         name: "First",
         nativeId: "first",
       },
       {
-        id: "cursor:second",
-        harness: "cursor",
+        id: "pi:second",
+        harness: "pi",
         name: "Second",
         nativeId: "second",
       },
@@ -1172,8 +1191,8 @@ describe("model picker", () => {
     act(() =>
       root.render(
         createElement(ModelPicker, {
-          harness: "cursor",
-          model: "cursor:first",
+          harness: "pi",
+          model: "pi:first",
           values: {},
           hideSettings: true,
           onChange,
@@ -1195,20 +1214,20 @@ describe("model picker", () => {
     keyDown(options[0], "ArrowDown");
     keyDown(options[0], "Enter");
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith("cursor", "cursor:second");
+    expect(onChange).toHaveBeenCalledWith("pi", "pi:second");
   });
 
   it("leaves favorite toggles to native activation on Enter", () => {
-    setHarnessModels("cursor", [
+    setHarnessModels("pi", [
       {
-        id: "cursor:first",
-        harness: "cursor",
+        id: "pi:first",
+        harness: "pi",
         name: "First",
         nativeId: "first",
       },
       {
-        id: "cursor:second",
-        harness: "cursor",
+        id: "pi:second",
+        harness: "pi",
         name: "Second",
         nativeId: "second",
       },
@@ -1217,8 +1236,8 @@ describe("model picker", () => {
     act(() =>
       root.render(
         createElement(ModelPicker, {
-          harness: "cursor",
-          model: "cursor:first",
+          harness: "pi",
+          model: "pi:first",
           values: {},
           hideSettings: true,
           onChange,
@@ -1244,8 +1263,8 @@ describe("model picker", () => {
     act(() =>
       root.render(
         createElement(ModelPicker, {
-          harness: "grok",
-          model: "grok:grok-4.6",
+          harness: "antigravity",
+          model: "antigravity:demo-pro",
           values: { effort: "high" },
           onChange: vi.fn(),
           onSettingsChange: vi.fn(),
@@ -1263,7 +1282,7 @@ describe("model picker", () => {
     hover(modelRow);
 
     const openCodeTab = container.querySelector<HTMLButtonElement>(
-      '[role="tab"][aria-label="OpenCode"]',
+      '[role="tab"][aria-label="omp"]',
     )!;
     hover(openCodeTab);
     expect(openCodeTab.getAttribute("aria-selected")).toBe("true");
@@ -1277,20 +1296,20 @@ describe("model picker", () => {
 
     expect(
       container
-        .querySelector('[role="tab"][aria-label="Grok Build"]')
+        .querySelector('[role="tab"][aria-label="Antigravity"]')
         ?.getAttribute("aria-selected"),
     ).toBe("true");
   });
 
   it("quick-switches between recently used models on right-click", () => {
     saveRecentModelChoice("claude", "claude:opus-5");
-    saveRecentModelChoice("cursor", "cursor:composer-2.5");
+    saveRecentModelChoice("pi", "pi:default");
     const onChange = vi.fn();
     act(() =>
       root.render(
         createElement(ModelPicker, {
-          harness: "grok",
-          model: "grok:grok-4.6",
+          harness: "antigravity",
+          model: "antigravity:demo-pro",
           values: { effort: "high" },
           hotkeys: true,
           onChange,
@@ -1316,15 +1335,15 @@ describe("model picker", () => {
     ];
     expect(recentItems).toHaveLength(3);
     const grokModel = recentItems.find((item) =>
-      item.textContent?.includes("Grok 4.6"),
+      item.textContent?.includes("Demo Pro"),
     )!;
     const claudeModel = recentItems.find((item) =>
       item.textContent?.includes("Opus 5"),
     )!;
     const cursorModel = recentItems.find((item) =>
-      item.textContent?.includes("Composer 2.5"),
+      item.textContent?.includes("Default"),
     )!;
-    expect(cursorModel.textContent).toContain("Cursor");
+    expect(cursorModel.textContent).toContain("Pi");
     expect(cursorModel.querySelector("svg")).not.toBeNull();
 
     // The composer can retain focus after opening its toolbar menu. Recent
@@ -1339,7 +1358,7 @@ describe("model picker", () => {
     expect(cursorModel.className).toContain("bg-selection");
 
     keyDown(trigger, "Enter");
-    expect(onChange).toHaveBeenCalledWith("cursor", "cursor:composer-2.5");
+    expect(onChange).toHaveBeenCalledWith("pi", "pi:default");
     expect(
       container.querySelector(
         '[role="menu"][aria-label="Recently used models"]',

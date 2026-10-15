@@ -31,7 +31,7 @@ function session(id: string, cwd: string): Session {
   return {
     id,
     cwd,
-    harness: "cursor",
+    harness: "pi",
     title: "",
     blocks: [],
     busy: false,
@@ -59,10 +59,15 @@ describe("focusedWorkspaceTabCwd", () => {
       };
       expect(workspaceTabCwd(worktreeTab, [])).toBe("/repo");
       expect(focusedWorkspaceTabCwd(worktreeTab, [])).toBe("/repo");
-      expect(planProjectReturn({
-        tabs: [worktreeTab], sessions: [], memory: new Map(),
-        activeTabId: "elsewhere", projectPath: "/repo",
-      })).toMatchObject({ action: "activate", tabId: "tree-tab" });
+      expect(
+        planProjectReturn({
+          tabs: [worktreeTab],
+          sessions: [],
+          memory: new Map(),
+          activeTabId: "elsewhere",
+          projectPath: "/repo",
+        }),
+      ).toMatchObject({ action: "activate", tabId: "tree-tab" });
     },
   );
 
@@ -246,10 +251,7 @@ describe("workspaceTabProject", () => {
 describe("findTabForProject", () => {
   it("matches a tab by project path, ignoring trailing slashes", () => {
     const tabs = [tab("t1", "s1"), tab("t2", "s2")];
-    const sessions = [
-      session("s1", "/tmp/alpha"),
-      session("s2", "/tmp/beta"),
-    ];
+    const sessions = [session("s1", "/tmp/alpha"), session("s2", "/tmp/beta")];
     expect(findTabForProject(tabs, sessions, "/tmp/beta/")?.id).toBe("t2");
   });
 
@@ -421,11 +423,7 @@ describe("applyPlaceSessionOnPane", () => {
       createReplacement: replacementFrom,
     });
     expect(leafIds(next!.tabs[0]!.layout)).toEqual(["m2"]);
-    expect(next?.sessions.map((entry) => entry.id)).toEqual([
-      "m1",
-      "m2",
-      "r1",
-    ]);
+    expect(next?.sessions.map((entry) => entry.id)).toEqual(["m1", "m2", "r1"]);
   });
 
   it("relocates a session from another tab and closes that tab", () => {
@@ -616,12 +614,9 @@ describe("applyDetachPaneToTab", () => {
 
 describe("replaceGroupInTabOrder", () => {
   it("swaps a contiguous slice of ids", () => {
-    expect(replaceGroupInTabOrder(["a", "b", "c", "d"], 1, 2, ["d", "c"])).toEqual([
-      "a",
-      "d",
-      "c",
-      "d",
-    ]);
+    expect(
+      replaceGroupInTabOrder(["a", "b", "c", "d"], 1, 2, ["d", "c"]),
+    ).toEqual(["a", "d", "c", "d"]);
   });
 });
 

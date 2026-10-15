@@ -7,8 +7,6 @@ import {
 } from "../../../features/sessions/model/attachments";
 import { buildClaudeUserMessage } from "../providers/claude/claudeProtocol";
 import { buildPiPrompt, buildPiSteer } from "../providers/pi/piProtocol";
-import { grokPromptBlocks } from "../providers/grok/grokProtocol";
-import { toOpenCodePromptParts } from "../providers/opencode/opencodeProtocol";
 
 const document: Attachment = {
   id: "document",
@@ -44,26 +42,26 @@ function claudeContent(text: string, attachments: Attachment[]) {
 }
 
 describe("native file attachment formats", () => {
-  it.each([
-    ["Cursor ACP", promptBlocks],
-    ["Grok ACP", grokPromptBlocks],
-  ] as const)("keeps %s documents as resource links", (_name, build) => {
-    expect(build("", [document])).toEqual([
-      { type: "text", text: ATTACHMENT_ONLY_PROMPT },
-      {
-        type: "resource_link",
-        uri: "file:///tmp/report.pdf",
-        name: "report.pdf",
-        mimeType: "application/pdf",
-        size: 100,
-      },
-    ]);
-    expect(build("look", [image])[1]).toMatchObject({
-      type: "image",
-      mimeType: "image/png",
-      data: "YWJj",
-    });
-  });
+  it.each([["Antigravity ACP", promptBlocks]] as const)(
+    "keeps %s documents as resource links",
+    (_name, build) => {
+      expect(build("", [document])).toEqual([
+        { type: "text", text: ATTACHMENT_ONLY_PROMPT },
+        {
+          type: "resource_link",
+          uri: "file:///tmp/report.pdf",
+          name: "report.pdf",
+          mimeType: "application/pdf",
+          size: 100,
+        },
+      ]);
+      expect(build("look", [image])[1]).toMatchObject({
+        type: "image",
+        mimeType: "image/png",
+        data: "YWJj",
+      });
+    },
+  );
 
   it("sends a folder as its path, never as a resource link", () => {
     const expected = [
@@ -72,7 +70,7 @@ describe("native file attachment formats", () => {
         text: 'Attached folder (list or read the files inside from this path): "/tmp/reports"',
       },
     ];
-    for (const build of [promptBlocks, grokPromptBlocks]) {
+    for (const build of [promptBlocks]) {
       expect(build("", [folder])).toEqual([
         { type: "text", text: ATTACHMENT_ONLY_PROMPT },
         ...expected,
@@ -80,60 +78,11 @@ describe("native file attachment formats", () => {
     }
   });
 
-  it("gives a folder to Claude and OpenCode as a path they can read", () => {
+  it("gives a folder to Claude as a path they can read", () => {
     const folderText = expect.stringContaining("Attached folder");
     expect(claudeContent("look", [folder])).toEqual([
       { type: "text", text: "look" },
       { type: "text", text: folderText },
-    ]);
-    // OpenCode joins the prompt and the path into one text part.
-    expect(toOpenCodePromptParts("look", [folder])).toEqual([
-      { type: "text", text: folderText },
-    ]);
-  });
-
-  it("keeps OpenCode's native file parts for supported text and images", () => {
-    const text = {
-      ...document,
-      name: "notes.md",
-      mimeType: "text/markdown",
-      path: "/tmp/notes.md",
-    };
-    expect(
-      toOpenCodePromptParts("", [text, { ...image, path: undefined }]),
-    ).toEqual([
-      { type: "text", text: ATTACHMENT_ONLY_PROMPT },
-      {
-        type: "file",
-        mime: "text/markdown",
-        filename: "notes.md",
-        url: "file:///tmp/notes.md",
-      },
-      {
-        type: "file",
-        mime: "image/png",
-        filename: "screenshot.png",
-        url: "data:image/png;base64,YWJj",
-      },
-    ]);
-  });
-
-  it("gives OpenCode unsupported and provider-dependent files as local paths", () => {
-    const plist = {
-      ...document,
-      name: "Info.plist",
-      mimeType: "application/octet-stream",
-      path: "/tmp/Info.plist",
-    };
-    expect(toOpenCodePromptParts("Inspect these", [plist, document])).toEqual([
-      {
-        type: "text",
-        text: [
-          "Inspect these",
-          'Attached file (read from disk): "/tmp/Info.plist"',
-          'Attached file (read from disk): "/tmp/report.pdf"',
-        ].join("\n\n"),
-      },
     ]);
   });
 });
@@ -151,11 +100,6 @@ describe("attachment-only turns", () => {
     expect(promptBlocks("", [document])[0]).toEqual({
       type: "text",
       text: ATTACHMENT_ONLY_PROMPT,
-    });
-    // OpenCode joins the stand-in and the path into one text part.
-    expect(toOpenCodePromptParts("", [document])[0]).toEqual({
-      type: "text",
-      text: expect.stringContaining(ATTACHMENT_ONLY_PROMPT),
     });
   });
 
@@ -263,7 +207,6 @@ describe("file paths in native harness prompts", () => {
       () => buildPiPrompt({ text: "Review", attachments: files }),
       () => buildPiSteer({ text: "Review", attachments: files }),
       () => promptBlocks("Review", files),
-      () => toOpenCodePromptParts("Review", files),
     ];
     for (const build of builders)
       expect(build).toThrow(/report\.pdf.*no local file path/);

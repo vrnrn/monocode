@@ -1,7 +1,7 @@
 export type McpServer = { name: string; status: string };
 
 export type McpConnection = {
-  provider: "claude" | "claude_desktop" | "codex" | "cursor" | "opencode";
+  provider: "claude" | "claude_desktop" | "codex";
   name: string;
   scope: "local" | "project" | "user";
   configPath: string;
@@ -13,8 +13,6 @@ export const MCP_PROVIDER_LABELS: Record<McpConnection["provider"], string> = {
   claude: "Claude Code",
   claude_desktop: "Claude Desktop",
   codex: "Codex",
-  cursor: "Cursor",
-  opencode: "OpenCode",
 };
 
 /** Claude's list output is for humans; keep only names and health text. */

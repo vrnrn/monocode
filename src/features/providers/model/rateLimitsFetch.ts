@@ -4,15 +4,10 @@ import {
   errorRateLimits,
   parseClaudeOAuthUsage,
   parseCodexRateLimits,
-  parseDevinUsage,
-  parseOpencodeGoUsage,
   unavailableRateLimits,
-  type DevinUsage,
   type ProviderRateLimits,
 } from "./rateLimits";
-import type { ProviderAccountIdentity } from "./providerAccountIdentity";
 import {
-  inspectHarnessBinary,
   killChild,
   resolveCodexBinary,
   spawnChild,
@@ -25,109 +20,6 @@ import { JsonRpcClient } from "../../../integrations/harness/core/jsonRpc";
 const USAGE_CHILD_ID = "monocode-codex-usage";
 const DISCOVERY_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 12_000;
-
-type OpencodeGoUsageFetch = {
-  status: "ok" | "error" | "unavailable" | string;
-  httpStatus?: number | null;
-  body?: string | null;
-  error?: string | null;
-};
-
-/**
- * Fetch OpenCode Go 5h / weekly / monthly usage via the official API.
- * Runs through a Tauri command so the webview CORS policy does not apply.
- */
-export async function fetchOpencodeGoRateLimits(): Promise<ProviderRateLimits> {
-  let result: OpencodeGoUsageFetch;
-  try {
-    result = await invoke<OpencodeGoUsageFetch>("fetch_opencode_go_usage");
-  } catch (error) {
-    return errorRateLimits(
-      "opencode",
-      error instanceof Error
-        ? error.message
-        : "OpenCode Go usage unavailable",
-    );
-  }
-  if (result.status === "ok" && result.body) {
-    try {
-      const parsed = parseOpencodeGoUsage(JSON.parse(result.body));
-      if (parsed.session || parsed.weekly || parsed.monthly) return parsed;
-    } catch {
-      return errorRateLimits("opencode", "OpenCode Go response was not JSON");
-    }
-    // A 200 with no usable windows is malformed: report an error so the
-    // footer retries instead of sticking in "unavailable" forever.
-    return errorRateLimits(
-      "opencode",
-      "OpenCode Go usage response was unexpected",
-    );
-  }
-  if (result.status === "unavailable") {
-    return unavailableRateLimits(
-      "opencode",
-      result.error?.trim() || "OpenCode Go not connected",
-    );
-  }
-  return errorRateLimits(
-    "opencode",
-    result.error?.trim() || "OpenCode Go usage unavailable",
-  );
-}
-
-type DevinUsageFetch = {
-  status: "ok" | "error" | "unavailable" | string;
-  httpStatus?: number | null;
-  usage?: DevinUsage | null;
-  error?: string | null;
-};
-
-let devinIdentity: ProviderAccountIdentity | null = null;
-
-/** Identity from the latest Devin usage read; Devin caches none on disk. */
-export function cachedDevinIdentity(): ProviderAccountIdentity | null {
-  return devinIdentity;
-}
-
-/**
- * Devin's API server reports the plan's daily and weekly quota. The request
- * names the installed CLI's version, read from the binary rather than pinned.
- */
-export async function fetchDevinRateLimits(): Promise<ProviderRateLimits> {
-  let cliVersion: string | undefined;
-  try {
-    const inspected = await inspectHarnessBinary("devin");
-    cliVersion = /\d+(?:\.\d+)+/.exec(inspected.version ?? "")?.[0];
-  } catch {
-    return unavailableRateLimits("devin", "Devin CLI not found");
-  }
-  if (!cliVersion) return errorRateLimits("devin", "Devin CLI version unknown");
-  let result: DevinUsageFetch;
-  try {
-    result = await invoke<DevinUsageFetch>("fetch_devin_usage", { cliVersion });
-  } catch (error) {
-    return errorRateLimits(
-      "devin",
-      error instanceof Error ? error.message : "Devin usage unavailable",
-    );
-  }
-  if (result.status === "ok" && result.usage) {
-    devinIdentity = {
-      name: result.usage.name ?? null,
-      email: result.usage.email ?? null,
-      plan: result.usage.plan ?? null,
-    };
-    return parseDevinUsage(result.usage);
-  }
-  if (result.status === "unavailable") {
-    devinIdentity = null;
-    return unavailableRateLimits("devin", result.error?.trim() || "Devin not signed in");
-  }
-  // A rejected key means that account is no longer signed in; a network
-  // failure keeps the identity beside the last usage snapshot.
-  if (result.httpStatus === 401 || result.httpStatus === 403) devinIdentity = null;
-  return errorRateLimits("devin", result.error?.trim() || "Devin usage unavailable");
-}
 
 export type CodexRateLimitResetOutcome =
   "reset" | "nothingToReset" | "noCredit" | "alreadyRedeemed";

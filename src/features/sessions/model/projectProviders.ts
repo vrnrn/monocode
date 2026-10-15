@@ -1,5 +1,5 @@
 import { pathKey } from "../../../shared/lib/paths";
-import type { HarnessId } from "./session";
+import { isHarnessId, type HarnessId } from "./harnessIds";
 
 /**
  * Per-project overrides for the Providers settings: which provider new
@@ -174,17 +174,21 @@ function parse(raw: string | null): Stored {
 
 function normalize(value: ProjectProviderSettings): ProjectProviderSettings {
   const next: ProjectProviderSettings = {};
-  if (typeof value.defaultHarness === "string") {
+  if (isHarnessId(value.defaultHarness)) {
     next.defaultHarness = value.defaultHarness;
   }
-  if (typeof value.defaultModel === "string" && value.defaultModel) {
+  if (
+    next.defaultHarness &&
+    typeof value.defaultModel === "string" &&
+    value.defaultModel
+  ) {
     next.defaultModel = value.defaultModel;
   }
   if (value.models && typeof value.models === "object") {
     const models: Partial<Record<HarnessId, string>> = {};
     for (const [harness, model] of Object.entries(value.models)) {
-      if (typeof model === "string" && model) {
-        models[harness as HarnessId] = model;
+      if (isHarnessId(harness) && typeof model === "string" && model) {
+        models[harness] = model;
       }
     }
     if (Object.keys(models).length > 0) next.models = models;
@@ -192,8 +196,8 @@ function normalize(value: ProjectProviderSettings): ProjectProviderSettings {
   if (Array.isArray(value.hidden)) {
     const hidden = [
       ...new Set(
-        (value.hidden as unknown[]).filter(
-          (id): id is HarnessId => typeof id === "string" && id.length > 0,
+        (value.hidden as unknown[]).filter((id): id is HarnessId =>
+          isHarnessId(id),
         ),
       ),
     ];

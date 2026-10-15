@@ -37,19 +37,11 @@ type Scope = McpConnection["scope"];
 type ServerRow = McpServerRow;
 type Filter = "all" | McpConnection["provider"];
 type Provider = McpConnection["provider"];
-const PROVIDERS: Provider[] = [
-  "claude",
-  "claude_desktop",
-  "codex",
-  "cursor",
-  "opencode",
-];
+const PROVIDERS: Provider[] = ["claude", "claude_desktop", "codex"];
 const SCOPES: Record<Provider, Scope[]> = {
   claude: ["local", "project", "user"],
   claude_desktop: ["user"],
   codex: ["user"],
-  cursor: ["project", "user"],
-  opencode: ["project", "user"],
 };
 
 function ProviderIcon({ provider }: { provider: Provider }) {
@@ -241,7 +233,7 @@ function AddServerModal({
           </span>
           <input
             value={name}
-            pattern={provider === "opencode" ? undefined : "[A-Za-z0-9_-]*"}
+            pattern="[A-Za-z0-9_-]*"
             onChange={(event) => setName(event.target.value)}
             className="mt-1 block w-full rounded-md border border-stroke bg-background-base px-2 py-1.5 text-sm text-content"
             placeholder="my-server"

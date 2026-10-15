@@ -20,12 +20,9 @@ import {
 } from "./handoff";
 import { newSession, type Block, type Session } from "./session";
 
-function sessionWith(
-  blocks: Block[],
-  extra?: Partial<Session>,
-): Session {
+function sessionWith(blocks: Block[], extra?: Partial<Session>): Session {
   return {
-    ...newSession("cursor", "/tmp/project"),
+    ...newSession("pi", "/tmp/project"),
     blocks,
     ...extra,
   };
@@ -33,21 +30,20 @@ function sessionWith(
 
 describe("planComposerSwitch", () => {
   it("only updates the composer on an empty session", () => {
-    expect(planComposerSwitch(newSession("cursor", "/tmp"), "claude")).toEqual({
+    expect(planComposerSwitch(newSession("pi", "/tmp"), "claude")).toEqual({
       kind: "empty",
-      forget: "cursor",
+      forget: "pi",
     });
   });
 
   it("arms a handoff for later instead of running it on picker change", () => {
-    const session = sessionWith(
-      [{ id: "u1", role: "user", text: "hey" }],
-      { providerSessionId: "acp-1" },
-    );
-    expect(planComposerSwitch(session, "fx")).toEqual({
+    const session = sessionWith([{ id: "u1", role: "user", text: "hey" }], {
+      providerSessionId: "acp-1",
+    });
+    expect(planComposerSwitch(session, "codex")).toEqual({
       kind: "arm",
       pending: {
-        from: "cursor",
+        from: "pi",
         fromModel: session.model,
         fromSettings: session.modelSettings,
         fromProviderSessionId: "acp-1",
@@ -57,10 +53,10 @@ describe("planComposerSwitch", () => {
 
   it("keeps the original provider when retargeting before send", () => {
     const session = sessionWith([{ id: "u1", role: "user", text: "hey" }], {
-      harness: "fx",
+      harness: "codex",
       pendingSwitch: {
-        from: "cursor",
-        fromModel: "cursor:composer-2",
+        from: "pi",
+        fromModel: "pi:composer-2",
         fromSettings: {},
         fromProviderSessionId: "acp-1",
       },
@@ -68,21 +64,21 @@ describe("planComposerSwitch", () => {
     const plan = planComposerSwitch(session, "claude");
     expect(plan).toMatchObject({
       kind: "arm",
-      pending: { from: "cursor", fromProviderSessionId: "acp-1" },
+      pending: { from: "pi", fromProviderSessionId: "acp-1" },
     });
   });
 
   it("reverts to the original provider if the user switches back", () => {
     const session = sessionWith([{ id: "u1", role: "user", text: "hey" }], {
-      harness: "fx",
+      harness: "codex",
       pendingSwitch: {
-        from: "cursor",
-        fromModel: "cursor:composer-2",
+        from: "pi",
+        fromModel: "pi:composer-2",
         fromSettings: {},
         fromProviderSessionId: "acp-1",
       },
     });
-    expect(planComposerSwitch(session, "cursor")).toEqual({
+    expect(planComposerSwitch(session, "pi")).toEqual({
       kind: "revert",
       restoreProviderSessionId: "acp-1",
     });
@@ -186,7 +182,7 @@ describe("deterministic handoff", () => {
       shouldAskOutgoingAgent({
         ...session,
         pendingSwitch: {
-          from: "cursor",
+          from: "pi",
           fromModel: session.model,
           fromSettings: {},
           fromProviderSessionId: "acp-1",
@@ -214,7 +210,7 @@ describe("handoff block lifecycle", () => {
   it("keeps the inject pending until the incoming harness accepts a turn", () => {
     let session = appendPreparingHandoff(
       sessionWith([{ id: "u1", role: "user", text: "go" }]),
-      "cursor",
+      "pi",
       "claude",
     );
     session = completeHandoff(session, "Left: tests");
@@ -226,13 +222,13 @@ describe("handoff block lifecycle", () => {
   it("keeps a ready divider pending so a failed first turn can retry the wrap", () => {
     const session = appendReadyHandoff(
       sessionWith([{ id: "u1", role: "user", text: "go" }]),
-      "cursor",
-      "fx",
+      "pi",
+      "codex",
       "Session so far: go",
     );
     expect(pendingHandoff(session)).toEqual({
-      from: "cursor",
-      to: "fx",
+      from: "pi",
+      to: "codex",
       text: "Session so far: go",
     });
     const afterFailedSend = {
@@ -243,7 +239,7 @@ describe("handoff block lifecycle", () => {
         { id: "e1", role: "system", text: "fx did not start. fx exited" },
       ],
     };
-    expect(pendingHandoff(afterFailedSend)?.from).toBe("cursor");
+    expect(pendingHandoff(afterFailedSend)?.from).toBe("pi");
     expect(userMessagesAfterHandoff(afterFailedSend)).toEqual([
       "hey what is this",
     ]);
@@ -253,25 +249,22 @@ describe("handoff block lifecycle", () => {
     const armed = sessionWith([{ id: "u1", role: "user", text: "go" }], {
       harness: "claude",
       pendingSwitch: {
-        from: "cursor",
-        fromModel: "cursor:composer-2",
+        from: "pi",
+        fromModel: "pi:composer-2",
         fromSettings: {},
       },
     });
-    expect(sessionChildHarnesses(armed).sort()).toEqual(["claude", "cursor"]);
+    expect(sessionChildHarnesses(armed).sort()).toEqual(["claude", "pi"]);
 
     const preparing = {
       ...appendPreparingHandoff(
         sessionWith([{ id: "u1", role: "user", text: "go" }]),
-        "cursor",
+        "pi",
         "claude",
       ),
       harness: "claude" as const,
     };
-    expect(sessionChildHarnesses(preparing).sort()).toEqual([
-      "claude",
-      "cursor",
-    ]);
+    expect(sessionChildHarnesses(preparing).sort()).toEqual(["claude", "pi"]);
   });
 });
 
@@ -318,14 +311,14 @@ describe("handoff composer card", () => {
     expect(
       handoffTurnCard(
         buildHandoffComposerCard({
-          from: "cursor",
+          from: "pi",
           to: "pi",
           brief: "hello",
           userRequest: "   ",
           files: [],
         }),
       ),
-    ).toEqual({ from: "cursor", to: "pi", kind: "handoff" });
+    ).toEqual({ from: "pi", to: "pi", kind: "handoff" });
   });
 });
 
@@ -333,12 +326,12 @@ describe("wrapHandoffPrompt", () => {
   it("leads with the user request and says this is not a new session", () => {
     const prompt = wrapHandoffPrompt(
       "Session so far: hello",
-      "cursor",
+      "pi",
       "do the sidebar",
     );
     expect(prompt).toContain("not a new session");
     expect(prompt).toContain("do the sidebar");
-    expect(prompt).toContain("Cursor");
+    expect(prompt).toContain("Pi");
     expect(prompt.indexOf("do the sidebar")).toBeLessThan(
       prompt.indexOf("Session so far"),
     );
@@ -347,7 +340,7 @@ describe("wrapHandoffPrompt", () => {
   it("does not forward a Goal heading in the recap", () => {
     const prompt = wrapHandoffPrompt(
       "## Goal\nhey whats happening\n\n## Session so far\nUser: hey",
-      "cursor",
+      "pi",
       "hey whats happening",
     );
     expect(prompt).toContain("hey whats happening");
@@ -358,7 +351,7 @@ describe("wrapHandoffPrompt", () => {
   it("includes user messages sent after the switch when retrying", () => {
     const prompt = wrapHandoffPrompt(
       "## Session so far\nhey what is this",
-      "cursor",
+      "pi",
       "hello",
       ["hey what is this"],
     );

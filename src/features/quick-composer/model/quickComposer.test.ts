@@ -141,7 +141,7 @@ describe("filterQuickModels", () => {
     { id: "claude-opus", harness: "claude", name: "Claude Opus" },
     {
       id: "opencode/kimi",
-      harness: "opencode",
+      harness: "omp",
       name: "Kimi K3",
       provider: { id: "moonshot", name: "Moonshot" },
     },
@@ -154,7 +154,7 @@ describe("filterQuickModels", () => {
     expect(filterQuickModels(models, "moonshot").map((m) => m.id)).toEqual([
       "opencode/kimi",
     ]);
-    expect(filterQuickModels(models, "opencode").map((m) => m.id)).toEqual([
+    expect(filterQuickModels(models, "omp").map((m) => m.id)).toEqual([
       "opencode/kimi",
     ]);
   });

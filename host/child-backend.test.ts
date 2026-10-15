@@ -29,7 +29,7 @@ it("resolves every provider and runs only allowed provider commands", async () =
     const output = await backend.invoke<string>("harness_exec", {
       command: file,
       args: ["models", "--json"],
-      binaryProvider: "fx",
+      binaryProvider: "pi",
       cwd: directory,
     });
     expect(JSON.parse(output)).toEqual(["models", "--json"]);
@@ -39,33 +39,13 @@ it("resolves every provider and runs only allowed provider commands", async () =
       "delete",
       "550e8400-e29b-41d4-a716-446655440000",
     ];
-    const cleanupOutput = await backend.invoke<string>("harness_exec", {
-      command: file,
-      args: cleanupArgs,
-      binaryProvider: "grok",
-      cwd: directory,
-    });
-    expect(JSON.parse(cleanupOutput)).toEqual(cleanupArgs);
     await expect(
       backend.invoke("harness_exec", {
         command: file,
         args: ["-e", "console.log('unsafe')"],
-        binaryProvider: "fx",
+        binaryProvider: "pi",
       }),
     ).rejects.toThrow("Unsupported headless catalog command");
-    for (const args of [
-      ["service", "status"],
-      ["service", "start"],
-      ["service", "get", "password"],
-    ]) {
-      const serviceOutput = await backend.invoke<string>("harness_exec", {
-        command: file,
-        args,
-        binaryProvider: "opencode",
-        cwd: directory,
-      });
-      expect(JSON.parse(serviceOutput)).toEqual(args);
-    }
     for (const [provider, args] of [
       ["fx", ["service", "start"]],
       ["opencode", ["service", "stop"]],
@@ -104,51 +84,6 @@ it("resolves every provider and runs only allowed provider commands", async () =
   }
 });
 
-it("bridges OpenCode HTTP and event streams on loopback", async () => {
-  const server = createServer((request, response) => {
-    if (request.url === "/event") {
-      response.writeHead(200, { "Content-Type": "text/event-stream" });
-      response.write('data: {"type":"ready"}\n\n');
-    } else {
-      response.writeHead(200, { "Content-Type": "application/json" });
-      response.end('{"ok":true}');
-    }
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (!address || typeof address === "string")
-    throw new Error("No server address");
-  const backend = new HostChildBackend();
-  const events: string[] = [];
-  const unlisten = await backend.listen<{ data: string }>(
-    "harness-sse",
-    ({ payload }) => events.push(payload.data),
-  );
-  try {
-    const base = `http://127.0.0.1:${address.port}`;
-    expect(
-      await backend.invoke("harness_http", { url: base, method: "GET" }),
-    ).toEqual({ status: 200, body: '{"ok":true}' });
-    await backend.invoke("harness_sse_open", {
-      sessionId: "fixture",
-      url: `${base}/event`,
-    });
-    await vi.waitFor(() => expect(events).toEqual(['{"type":"ready"}']));
-    await backend.invoke("harness_sse_close", { sessionId: "fixture" });
-    await expect(
-      backend.invoke("harness_http", {
-        url: "https://example.com/",
-        method: "GET",
-      }),
-    ).rejects.toThrow("localhost");
-  } finally {
-    unlisten();
-    await backend.close();
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
-});
-
 it("runs the resolved Claude version fallback in headless mode", async () => {
   const backend = new HostChildBackend({ claude: process.execPath });
   try {
@@ -181,41 +116,43 @@ const child = spawn(process.execPath, ['-e', ${JSON.stringify(`${stubborn ? "pro
 child.stdout.once('data', () => console.log(JSON.stringify({ child: child.pid })));
 setInterval(() => {}, 1000);
 `,
-  );
-  const backend = new HostChildBackend();
-  let descendant: number | undefined;
-  const stopListening = await backend.listen<{ line: string }>(
-    "harness-stdout",
-    ({ payload }) => {
-      descendant = JSON.parse(payload.line).child;
-    },
-  );
-  try {
-    await backend.invoke("harness_spawn", {
-      sessionId: "tree",
-      command: file,
-      args: [],
-      cwd: directory,
-    });
-    await vi.waitFor(() => expect(descendant).toBeTruthy());
-    await backend.kill("tree");
-    await vi.waitFor(
-      () => expect(() => process.kill(descendant!, 0)).toThrow(),
-      { timeout: 5000 },
     );
-  } finally {
-    stopListening();
-    await backend.close();
-    if (descendant) {
-      try {
-        process.kill(descendant, "SIGKILL");
-      } catch {
-        /* gone */
+    const backend = new HostChildBackend();
+    let descendant: number | undefined;
+    const stopListening = await backend.listen<{ line: string }>(
+      "harness-stdout",
+      ({ payload }) => {
+        descendant = JSON.parse(payload.line).child;
+      },
+    );
+    try {
+      await backend.invoke("harness_spawn", {
+        sessionId: "tree",
+        command: file,
+        args: [],
+        cwd: directory,
+      });
+      await vi.waitFor(() => expect(descendant).toBeTruthy());
+      await backend.kill("tree");
+      await vi.waitFor(
+        () => expect(() => process.kill(descendant!, 0)).toThrow(),
+        { timeout: 5000 },
+      );
+    } finally {
+      stopListening();
+      await backend.close();
+      if (descendant) {
+        try {
+          process.kill(descendant, "SIGKILL");
+        } catch {
+          /* gone */
+        }
       }
+      rmSync(directory, { recursive: true, force: true });
     }
-    rmSync(directory, { recursive: true, force: true });
-  }
-}, 15_000);
+  },
+  15_000,
+);
 
 it("stops a provider tree when its host pipe closes unexpectedly", async () => {
   const directory = mkdtempSync(join(tmpdir(), "monocode-provider-crash-"));

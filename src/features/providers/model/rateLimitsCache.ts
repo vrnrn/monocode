@@ -6,12 +6,7 @@ import {
   type ProviderRateLimits,
   type RateLimitProvider,
 } from "./rateLimits";
-import {
-  fetchClaudeRateLimits,
-  fetchCodexRateLimits,
-  fetchDevinRateLimits,
-  fetchOpencodeGoRateLimits,
-} from "./rateLimitsFetch";
+import { fetchClaudeRateLimits, fetchCodexRateLimits } from "./rateLimitsFetch";
 
 const snapshots = new Map<string, ProviderRateLimits>();
 const pending = new Map<string, Promise<ProviderRateLimits>>();
@@ -48,8 +43,6 @@ export function getCachedRateLimits(
 const idle: Record<RateLimitProvider, ProviderRateLimits> = {
   claude: idleRateLimits("claude"),
   codex: idleRateLimits("codex"),
-  opencode: idleRateLimits("opencode"),
-  devin: idleRateLimits("devin"),
 };
 
 export function useCachedRateLimits(
@@ -99,11 +92,7 @@ export function loadRateLimits(
       const result =
         provider === "claude"
           ? await fetchClaudeRateLimits(accountId)
-          : provider === "codex"
-            ? await fetchCodexRateLimits(accountId)
-            : provider === "devin"
-              ? await fetchDevinRateLimits()
-              : await fetchOpencodeGoRateLimits();
+          : await fetchCodexRateLimits(accountId);
       publish(key, result);
       return result;
     } catch (error) {

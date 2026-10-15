@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -18,8 +17,6 @@ use crate::passwd_identity;
 const STDOUT_EVENT: &str = "harness-stdout";
 const STDERR_EVENT: &str = "harness-stderr";
 const EXIT_EVENT: &str = "harness-exit";
-const SSE_EVENT: &str = "harness-sse";
-const SSE_END_EVENT: &str = "harness-sse-end";
 
 const DEFAULT_PROVIDER_ACCOUNT_ID: &str = "default";
 
@@ -51,13 +48,6 @@ struct HarnessExit {
     session_id: String,
     code: Option<i32>,
     pid: u32,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct HarnessSseBatch {
-    session_id: String,
-    events: Vec<String>,
 }
 
 /// Each `emit` is a JS eval in every window, and a streaming agent prints a
@@ -110,23 +100,9 @@ where
     (tx, done_rx)
 }
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct HarnessSseEnd {
-    session_id: String,
-    error: Option<String>,
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct HarnessHttpResponse {
-    pub status: u16,
-    pub body: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CursorBinary {
+pub struct HarnessBinary {
     pub path: String,
 }
 
@@ -159,10 +135,6 @@ struct LiveChild {
     account: Option<HarnessAccount>,
 }
 
-struct LiveSse {
-    stop: Arc<AtomicBool>,
-}
-
 struct HarnessInner {
     children: HashMap<String, Arc<LiveChild>>,
     epochs: HashMap<String, u64>,
@@ -170,7 +142,6 @@ struct HarnessInner {
 
 pub struct HarnessHost {
     inner: Mutex<HarnessInner>,
-    sse: Mutex<HashMap<String, Arc<LiveSse>>>,
     runtime_binary_paths: Mutex<Option<HashMap<String, String>>>,
     /// Bumped by `kill_all` so a spawn that started before quit cannot reinsert.
     kill_all_gen: AtomicU64,
@@ -200,7 +171,6 @@ impl HarnessHost {
                 children: HashMap::new(),
                 epochs: HashMap::new(),
             }),
-            sse: Mutex::new(HashMap::new()),
             runtime_binary_paths: Mutex::new(None),
             kill_all_gen: AtomicU64::new(0),
         }
@@ -290,9 +260,6 @@ impl HarnessHost {
                 })
                 .collect()
         };
-        for (session_id, _) in &children {
-            self.stop_sse(session_id);
-        }
         let pids: Vec<u32> = children.iter().map(|(_, child)| child.pid).collect();
         drop(children);
         terminate_all(&pids);
@@ -304,39 +271,10 @@ impl HarnessHost {
             self.kill_all_gen.fetch_add(1, Ordering::SeqCst);
             inner.children.drain().map(|(_, child)| child).collect()
         };
-        self.stop_all_sse();
         let pids: Vec<u32> = kids.iter().map(|live| live.pid).collect();
         // Drop stdin before signaling so ACP CLIs that watch the pipe can exit.
         drop(kids);
         terminate_all(&pids);
-    }
-
-    fn insert_sse(&self, session_id: String, live: Arc<LiveSse>) -> Option<Arc<LiveSse>> {
-        self.sse
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(session_id, live)
-    }
-
-    fn stop_sse(&self, session_id: &str) {
-        if let Some(live) = self
-            .sse
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(session_id)
-        {
-            live.stop.store(true, Ordering::SeqCst);
-        }
-    }
-
-    fn stop_all_sse(&self) {
-        let streams: Vec<Arc<LiveSse>> = {
-            let mut map = self.sse.lock().unwrap_or_else(|e| e.into_inner());
-            map.drain().map(|(_, live)| live).collect()
-        };
-        for live in streams {
-            live.stop.store(true, Ordering::SeqCst);
-        }
     }
 }
 
@@ -346,38 +284,15 @@ impl Drop for HarnessHost {
     }
 }
 
-/// Resolve the Cursor CLI (`cursor-agent`), never Grok's `agent` shim.
-#[tauri::command(async)]
-pub fn harness_resolve_cursor() -> Result<CursorBinary, String> {
-    resolve_cursor_agent()
-        .map(|path| CursorBinary {
-            path: path.to_string_lossy().into_owned(),
-        })
-        .ok_or_else(|| "Cursor CLI not found. Install it and run `agent login`, then retry.".into())
-}
-
 /// Resolve the Codex CLI (`codex`).
 #[tauri::command(async)]
-pub fn harness_resolve_codex() -> Result<CursorBinary, String> {
+pub fn harness_resolve_codex() -> Result<HarnessBinary, String> {
     resolve_codex()
-        .map(|path| CursorBinary {
+        .map(|path| HarnessBinary {
             path: path.to_string_lossy().into_owned(),
         })
         .ok_or_else(|| {
             "Codex CLI not found. Install it from https://developers.openai.com/codex/cli and run `codex login`, then retry."
-                .into()
-        })
-}
-
-/// Resolve the OpenCode CLI (`opencode`).
-#[tauri::command(async)]
-pub fn harness_resolve_opencode() -> Result<CursorBinary, String> {
-    resolve_opencode()
-        .map(|path| CursorBinary {
-            path: path.to_string_lossy().into_owned(),
-        })
-        .ok_or_else(|| {
-            "OpenCode CLI not found. Install it from https://opencode.ai and run `opencode auth login`, then retry."
                 .into()
         })
 }
@@ -401,7 +316,12 @@ fn initialize_runtime_binary_paths(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if runtime.is_none() {
-        *runtime = Some(paths);
+        *runtime = Some(
+            paths
+                .into_iter()
+                .filter(|(provider, _)| is_supported_provider(provider))
+                .collect(),
+        );
     }
     runtime.clone().unwrap_or_default()
 }
@@ -416,9 +336,9 @@ pub fn harness_runtime_binary_paths(
 
 /// Resolve the Claude Code CLI (`claude`).
 #[tauri::command(async)]
-pub fn harness_resolve_claude() -> Result<CursorBinary, String> {
+pub fn harness_resolve_claude() -> Result<HarnessBinary, String> {
     resolve_claude()
-        .map(|path| CursorBinary {
+        .map(|path| HarnessBinary {
             path: path.to_string_lossy().into_owned(),
         })
         .ok_or_else(|| {
@@ -428,7 +348,7 @@ pub fn harness_resolve_claude() -> Result<CursorBinary, String> {
 }
 
 fn resolve_mcp_binary(provider: &str, binary_path: Option<&str>) -> Result<PathBuf, String> {
-    if !matches!(provider, "claude" | "codex" | "cursor" | "opencode") {
+    if !matches!(provider, "claude" | "codex") {
         return Err("Unsupported MCP provider".into());
     }
     match binary_path {
@@ -585,27 +505,6 @@ pub(crate) fn add_mcp_via_cli(
     Ok(())
 }
 
-pub(crate) fn opencode_major_version(cwd: &str, binary_path: Option<&str>) -> Result<u32, String> {
-    let binary = resolve_mcp_binary("opencode", binary_path)?;
-    let version = mcp_command(
-        binary,
-        vec!["--version".into()],
-        cwd.to_owned(),
-        Duration::from_secs(10),
-    )?;
-    version
-        .split_whitespace()
-        .find_map(|part| {
-            part.trim_start_matches('v')
-                .split('.')
-                .next()?
-                .parse::<u32>()
-                .ok()
-        })
-        .filter(|major| matches!(major, 1 | 2))
-        .ok_or_else(|| format!("Unsupported OpenCode version: {version}"))
-}
-
 fn mcp_add_args(
     provider: &str,
     scope: &str,
@@ -752,19 +651,14 @@ pub async fn mcp_provider_login(
     provider: String,
     name: String,
 ) -> Result<(), String> {
-    let valid_name = if provider == "opencode" {
-        !name.trim().is_empty() && !name.chars().any(char::is_control)
-    } else {
-        valid_mcp_name(&name)
-    };
+    let valid_name = valid_mcp_name(&name);
     if !valid_name {
         return Err("Invalid MCP server name".into());
     }
     let binary_path = host.runtime_binary_path(&provider);
     tauri::async_runtime::spawn_blocking(move || {
         let args = match provider.as_str() {
-            "claude" | "codex" | "cursor" => vec!["mcp", "login"],
-            "opencode" => vec!["mcp", "auth"],
+            "claude" | "codex" => vec!["mcp", "login"],
             _ => return Err("Unsupported MCP provider".into()),
         };
         let binary = resolve_mcp_binary(&provider, binary_path.as_deref())?;
@@ -789,9 +683,9 @@ fn valid_mcp_name(name: &str) -> bool {
 
 /// Resolve the Pi coding agent CLI (`pi`).
 #[tauri::command(async)]
-pub fn harness_resolve_pi() -> Result<CursorBinary, String> {
+pub fn harness_resolve_pi() -> Result<HarnessBinary, String> {
     resolve_pi()
-        .map(|path| CursorBinary {
+        .map(|path| HarnessBinary {
             path: path.to_string_lossy().into_owned(),
         })
         .ok_or_else(|| {
@@ -802,63 +696,13 @@ pub fn harness_resolve_pi() -> Result<CursorBinary, String> {
 
 /// Resolve the omp (oh-my-pi) coding agent CLI.
 #[tauri::command(async)]
-pub fn harness_resolve_omp() -> Result<CursorBinary, String> {
+pub fn harness_resolve_omp() -> Result<HarnessBinary, String> {
     resolve_omp()
-        .map(|path| CursorBinary {
+        .map(|path| HarnessBinary {
             path: path.to_string_lossy().into_owned(),
         })
         .ok_or_else(|| {
             "omp CLI not found. Install it with `curl -fsSL https://omp.sh/install | sh` and authenticate, then retry."
-                .into()
-        })
-}
-
-/// Resolve the Vercel fx coding agent CLI (`fx`), never the JSON viewer of the same name.
-#[tauri::command(async)]
-pub fn harness_resolve_fx() -> Result<CursorBinary, String> {
-    resolve_fx()
-        .map(|path| CursorBinary {
-            path: path.to_string_lossy().into_owned(),
-        })
-        .ok_or_else(|| {
-            "fx CLI not found. Install it from https://fx.sh and run `fx login`, then retry.".into()
-        })
-}
-
-/// Resolve xAI Grok Build (`grok`).
-#[tauri::command(async)]
-pub fn harness_resolve_grok() -> Result<CursorBinary, String> {
-    resolve_grok()
-        .map(|path| CursorBinary {
-            path: path.to_string_lossy().into_owned(),
-        })
-        .ok_or_else(|| {
-            "Grok Build CLI not found. Install it with `curl -fsSL https://x.ai/cli/install.sh | bash` and run `grok login`, then retry.".into()
-        })
-}
-
-/// Resolve Nous Research Hermes Agent (`hermes`).
-#[tauri::command(async)]
-pub fn harness_resolve_hermes() -> Result<CursorBinary, String> {
-    resolve_hermes()
-        .map(|path| CursorBinary {
-            path: path.to_string_lossy().into_owned(),
-        })
-        .ok_or_else(|| {
-            "Hermes Agent CLI not found. Install it from https://hermes-agent.nousresearch.com, run `hermes model`, then retry."
-                .into()
-        })
-}
-
-/// Resolve Cognition's Devin CLI (`devin`).
-#[tauri::command(async)]
-pub fn harness_resolve_devin() -> Result<CursorBinary, String> {
-    resolve_devin()
-        .map(|path| CursorBinary {
-            path: path.to_string_lossy().into_owned(),
-        })
-        .ok_or_else(|| {
-            "Devin CLI not found. Install it with `curl -fsSL https://cli.devin.ai/install.sh | bash` (Windows: `irm https://static.devin.ai/cli/setup.ps1 | iex`) and run `devin auth login`, then retry."
                 .into()
         })
 }
@@ -874,15 +718,6 @@ pub fn harness_resolve_antigravity() -> Result<AntigravityBinary, String> {
         .ok_or_else(|| {
             "Antigravity ACP server (agy_acp_server.par) not found. Install Antigravity and run `agy` once in Terminal.".into()
         })
-}
-
-/// Bind an ephemeral loopback port for `opencode serve`.
-#[tauri::command]
-pub fn harness_free_port() -> Result<u16, String> {
-    TcpListener::bind("127.0.0.1:0")
-        .and_then(|listener| listener.local_addr())
-        .map(|addr| addr.port())
-        .map_err(|e| format!("Failed to reserve a local port: {e}"))
 }
 
 /// Off the main thread: fork/exec, and `apply_gui_env` can wait on the first
@@ -901,7 +736,6 @@ pub fn harness_spawn(
     binary_provider: Option<String>,
     binary_path: Option<String>,
     codex_store: Option<String>,
-    devin_ask_edits: Option<bool>,
 ) -> Result<u32, String> {
     let workdir = expand_home(&cwd);
     if !workdir.is_dir() {
@@ -914,15 +748,6 @@ pub fn harness_spawn(
         return Err("harness_spawn: not a resolved harness CLI".to_string());
     }
 
-    // `--config` is a global option, so it precedes the `acp` subcommand.
-    let devin_config = match devin_ask_edits {
-        None | Some(false) => Vec::new(),
-        Some(true) if binary_provider.as_deref() == Some("devin") && args == ["acp"] => {
-            crate::devin_config::supervised_args(&app)?
-        }
-        Some(true) => return Err("Edit approvals are only supported for `devin acp`".into()),
-    };
-
     let _reservation = crate::worktree_lifecycle::reserve_spawn(&workdir)?;
     let (epoch, kill_all, prev) = host.begin_spawn(&session_id);
     if let Some(prev) = prev {
@@ -930,8 +755,7 @@ pub fn harness_spawn(
     }
 
     let mut cmd = Command::new(&command);
-    cmd.args(&devin_config)
-        .args(&args)
+    cmd.args(&args)
         .current_dir(&workdir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1053,9 +877,7 @@ pub fn harness_spawn(
             store.sync_auth();
         }
         if let Some(host) = wait_app.try_state::<HarnessHost>() {
-            if host.remove_if_pid(&wait_id, wait_pid).is_some() {
-                host.stop_sse(&wait_id);
-            }
+            if host.remove_if_pid(&wait_id, wait_pid).is_some() {}
         }
         let _ = wait_app.emit(
             EXIT_EVENT,
@@ -1215,7 +1037,6 @@ pub async fn harness_write(
 /// blocked on a wedged child's stdin.
 #[tauri::command(async)]
 pub fn harness_kill(host: State<'_, HarnessHost>, session_id: String) -> Result<(), String> {
-    host.stop_sse(&session_id);
     if let Some(live) = host.kill_session(&session_id) {
         terminate(live.pid);
     }
@@ -1230,173 +1051,6 @@ pub fn harness_kill_all(host: State<'_, HarnessHost>) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-pub async fn harness_http(
-    url: String,
-    method: String,
-    headers: Option<HashMap<String, String>>,
-    body: Option<String>,
-    timeout_ms: Option<u64>,
-) -> Result<HarnessHttpResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        assert_loopback(&url)?;
-        let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000).max(1));
-        let agent = ureq::AgentBuilder::new().timeout(timeout).build();
-        let mut request = agent.request(&method, &url);
-        if let Some(headers) = &headers {
-            for (key, value) in headers {
-                request = request.set(key, value);
-            }
-        }
-        let result = match body {
-            Some(payload) => request.send_string(&payload),
-            None => request.call(),
-        };
-        match result {
-            Ok(response) => read_http_response(response),
-            Err(ureq::Error::Status(status, response)) => {
-                let body = response.into_string().unwrap_or_default();
-                Ok(HarnessHttpResponse { status, body })
-            }
-            Err(error) => Err(format!("OpenCode HTTP failed: {error}")),
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub fn harness_sse_open(
-    app: AppHandle,
-    host: State<HarnessHost>,
-    session_id: String,
-    url: String,
-    headers: Option<HashMap<String, String>>,
-) -> Result<(), String> {
-    assert_loopback(&url)?;
-    host.stop_sse(&session_id);
-    let stop = Arc::new(AtomicBool::new(false));
-    host.insert_sse(
-        session_id.clone(),
-        Arc::new(LiveSse {
-            stop: Arc::clone(&stop),
-        }),
-    );
-
-    thread::spawn(move || {
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(10))
-            .timeout_read(Duration::from_secs(60 * 60 * 6))
-            .timeout_write(Duration::from_secs(30))
-            .build();
-        let mut request = agent.get(&url).set("Accept", "text/event-stream");
-        if let Some(headers) = &headers {
-            for (key, value) in headers {
-                request = request.set(key, value);
-            }
-        }
-        let result = request.call();
-        if stop.load(Ordering::SeqCst) {
-            emit_sse_end(&app, &session_id, None);
-            return;
-        }
-        match result {
-            Ok(response) => {
-                let reader = BufReader::new(response.into_reader());
-                let events_app = app.clone();
-                let events_id = session_id.clone();
-                let (tx, drained) = spawn_output_batcher(move |events| {
-                    let _ = events_app.emit(
-                        SSE_EVENT,
-                        HarnessSseBatch {
-                            session_id: events_id.clone(),
-                            events,
-                        },
-                    );
-                });
-                read_sse(reader, &stop, |data| {
-                    let _ = tx.send(data);
-                });
-                drop(tx);
-                let _ = drained.recv();
-                emit_sse_end(&app, &session_id, None);
-            }
-            Err(error) => {
-                emit_sse_end(
-                    &app,
-                    &session_id,
-                    Some(format!("OpenCode event stream failed: {error}")),
-                );
-            }
-        }
-    });
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn harness_sse_close(host: State<HarnessHost>, session_id: String) -> Result<(), String> {
-    host.stop_sse(&session_id);
-    Ok(())
-}
-
-fn read_http_response(response: ureq::Response) -> Result<HarnessHttpResponse, String> {
-    let status = response.status();
-    let body = response
-        .into_string()
-        .map_err(|e| format!("Failed to read OpenCode response: {e}"))?;
-    Ok(HarnessHttpResponse { status, body })
-}
-
-fn read_sse<R: BufRead>(reader: R, stop: &AtomicBool, mut send: impl FnMut(String)) {
-    let mut data = String::new();
-    for line in reader.lines() {
-        if stop.load(Ordering::SeqCst) {
-            break;
-        }
-        let Ok(line) = line else { break };
-        if line.starts_with(':') {
-            continue;
-        }
-        if line.is_empty() {
-            if data.is_empty() {
-                continue;
-            }
-            send(std::mem::take(&mut data));
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("data:") {
-            let piece = rest.strip_prefix(' ').unwrap_or(rest);
-            if !data.is_empty() {
-                data.push('\n');
-            }
-            data.push_str(piece);
-        }
-    }
-}
-
-fn emit_sse_end(app: &AppHandle, session_id: &str, error: Option<String>) {
-    let _ = app.emit(
-        SSE_END_EVENT,
-        HarnessSseEnd {
-            session_id: session_id.to_string(),
-            error,
-        },
-    );
-}
-
-fn assert_loopback(url: &str) -> Result<(), String> {
-    let lower = url.to_ascii_lowercase();
-    if lower.starts_with("http://127.0.0.1:")
-        || lower.starts_with("http://127.0.0.1/")
-        || lower.starts_with("http://localhost:")
-        || lower.starts_with("http://localhost/")
-    {
-        return Ok(());
-    }
-    Err("OpenCode HTTP is limited to localhost".into())
-}
-
 const EXEC_ALLOWED_ARGS: &[&[&str]] = &[
     &["--version"],
     &["--list-models"],
@@ -1407,27 +1061,10 @@ const EXEC_ALLOWED_ARGS: &[&[&str]] = &[
     &["agent", "list"],
 ];
 
-// OpenCode 2.x runs as a background service; other providers' CLIs may give
-// these subcommands unrelated meanings, so they stay OpenCode-only.
-const OPENCODE_EXEC_ALLOWED_ARGS: &[&[&str]] = &[
-    &["service", "status"],
-    &["service", "start"],
-    &["service", "get", "password"],
-];
-
-fn exec_args_allowed(binary_provider: Option<&str>, args: &[String]) -> bool {
-    let matches = |a: &&[&str]| a.len() == args.len() && a.iter().zip(args).all(|(x, y)| x == y);
-    EXEC_ALLOWED_ARGS.iter().any(matches)
-        || (binary_provider == Some("opencode") && OPENCODE_EXEC_ALLOWED_ARGS.iter().any(matches))
-        // Devin reads its login location from `auth status`.
-        || (binary_provider == Some("devin") && matches(&&["auth", "status"][..]))
-        || (binary_provider == Some("grok")
-            && args.len() == 4
-            && args[0] == "--no-auto-update"
-            && args[1] == "sessions"
-            && args[2] == "delete"
-            && args[3].len() == 36
-            && uuid::Uuid::parse_str(&args[3]).is_ok())
+fn exec_args_allowed(_binary_provider: Option<&str>, args: &[String]) -> bool {
+    EXEC_ALLOWED_ARGS
+        .iter()
+        .any(|a| a.len() == args.len() && a.iter().zip(args).all(|(x, y)| x == y))
 }
 
 /// Must be a path a resolver would hand back, not an arbitrary binary
@@ -1748,19 +1385,6 @@ struct ProcessSnapshot {
     harness_parent: Option<u32>,
 }
 
-/// Kill harness trees left behind by a previous MonoCode that exited
-/// before SIGKILL ran (crash, force-quit, or the detached escalate thread).
-/// Off-thread: the sweep shells out to `ps` and then waits on a SIGKILL, and
-/// launch would otherwise hold the first window for both. Nothing this run
-/// spawns can be caught by it — our own children carry our pid as the marker.
-pub(crate) fn reap_orphaned_harness_processes() {
-    #[cfg(unix)]
-    {
-        let our_pid = std::process::id();
-        thread::spawn(move || reap_snapshots(&snapshot_processes(), our_pid));
-    }
-}
-
 #[cfg(unix)]
 fn reap_snapshots(rows: &[ProcessSnapshot], our_pid: u32) {
     let pids: Vec<u32> = rows
@@ -1783,16 +1407,7 @@ fn should_reap_process(
     if let Some(parent) = proc.harness_parent {
         return looks_like_harness_argv(&proc.args) && parent != our_pid && !parent_alive(parent);
     }
-    proc.ppid == 1 && is_legacy_orphaned_cursor_acp(&proc.args)
-}
-
-/// Pre-marker leftovers: `cursor-agent acp` reparented to launchd.
-#[cfg(any(unix, test))]
-fn is_legacy_orphaned_cursor_acp(args: &str) -> bool {
-    if !args.contains("cursor-agent") {
-        return false;
-    }
-    args.split_whitespace().any(|part| part == "acp")
+    false
 }
 
 /// Argv of an agent CLI we spawned — not a shell, tmux, or `npm start`.
@@ -1800,9 +1415,6 @@ fn is_legacy_orphaned_cursor_acp(args: &str) -> bool {
 /// decides what actually dies.
 #[cfg(any(unix, test))]
 fn looks_like_harness_argv(args: &str) -> bool {
-    if is_legacy_orphaned_cursor_acp(args) {
-        return true;
-    }
     args.split_whitespace().any(is_harness_argv_token)
 }
 
@@ -1814,16 +1426,10 @@ fn is_harness_argv_token(part: &str) -> bool {
         .unwrap_or(part);
     matches!(
         name,
-        "cursor-agent"
-            | "pi-coding-agent"
+        "pi-coding-agent"
             | "claude"
             | "codex"
-            | "opencode"
-            | "grok"
             | "omp"
-            | "fx"
-            | "hermes"
-            | "devin"
             | "agy_acp_server.par"
             | "pi"
             | "worker-server"
@@ -1868,21 +1474,6 @@ fn harness_parent_from_bytes(buf: &[u8]) -> Option<u32> {
         .ok()?
         .parse()
         .ok()
-}
-
-/// List processes by argv, then open environ only for agent CLIs. Linux
-/// orphans sit under `systemd --user`, not pid 1, so the marker (not ppid)
-/// is what identifies them.
-#[cfg(unix)]
-fn snapshot_processes() -> Vec<ProcessSnapshot> {
-    #[cfg(target_os = "linux")]
-    {
-        snapshot_from_proc()
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        snapshot_from_ps()
-    }
 }
 
 /// `ps -E`/`-e` dumps every process environment; skip that. List argv only,
@@ -2029,42 +1620,17 @@ fn parse_proc_ppid(stat: &str) -> Option<u32> {
         .ok()
 }
 
-fn resolve_cursor_agent() -> Option<PathBuf> {
-    let home = dirs_home().map(PathBuf::from);
-    let mut candidates: Vec<PathBuf> = Vec::new();
-
-    // Stable shims first. `command -v` often returns a versioned path
-    // (`…/versions/<build>/cursor-agent`); macOS TCC then treats each
-    // upgrade as a new binary.
-    if let Some(home) = &home {
-        candidates.push(home.join(".local/bin/cursor-agent"));
-        candidates.push(home.join(".local/bin/agent"));
-        candidates.push(home.join(".cargo/bin/cursor-agent"));
-    }
-    candidates.push(PathBuf::from("/opt/homebrew/bin/cursor-agent"));
-    candidates.push(PathBuf::from("/usr/local/bin/cursor-agent"));
-    candidates.push(PathBuf::from("/usr/bin/cursor-agent"));
-    candidates.push(PathBuf::from("/snap/bin/cursor-agent"));
-    if let Some(from_shell) = which_via_login_shell("cursor-agent") {
-        candidates.push(from_shell);
-    }
-
-    first_binary_matching(candidates, is_cursor_agent)
+pub(crate) fn is_supported_provider(provider: &str) -> bool {
+    matches!(provider, "claude" | "codex" | "pi" | "omp" | "antigravity")
 }
 
 fn resolve_harness_binary_default(provider: &str) -> Option<PathBuf> {
     match provider {
         "claude" => resolve_claude(),
         "codex" => resolve_codex(),
-        "cursor" => resolve_cursor_agent(),
-        "grok" => resolve_grok(),
-        "opencode" => resolve_opencode(),
         "pi" => resolve_pi(),
         "omp" => resolve_omp(),
-        "fx" => resolve_fx(),
-        "hermes" => resolve_hermes(),
         "antigravity" => resolve_antigravity(),
-        "devin" => resolve_devin(),
         _ => None,
     }
 }
@@ -2102,15 +1668,9 @@ fn resolve_harness_binary_override(provider: &str, binary_path: &str) -> Result<
     let names: &[&str] = match provider {
         "claude" => &["claude"],
         "codex" => &["codex"],
-        "cursor" => &["cursor-agent", "agent"],
-        "grok" => &["grok"],
-        "opencode" => &["opencode"],
         "pi" => &["pi", "pi-coding-agent"],
         "omp" => &["omp"],
-        "fx" => &["fx"],
-        "hermes" => &["hermes"],
         "antigravity" => &["agy_acp_server.par"],
-        "devin" => &["devin"],
         _ => {
             return Err(format!(
                 "Unsupported configured harness provider: {provider}"
@@ -2182,8 +1742,6 @@ fn validate_harness_binary_version(provider: &str, path: &Path) -> Result<(), St
     let provider_marker = match provider {
         "claude" => lower.contains("claude"),
         "codex" => lower.contains("codex"),
-        "hermes" => lower.contains("hermes"),
-        "devin" => lower.contains("devin"),
         _ => true,
     };
     if has_version && provider_marker {
@@ -2231,11 +1789,8 @@ fn validate_configured_harness_binary_identity(
     binary_path: &str,
 ) -> Result<(), String> {
     let identity_valid = match provider {
-        "cursor" => is_cursor_agent(path),
         "pi" => is_pi_coding_agent(path),
         "omp" => is_omp_agent(path),
-        "fx" => is_fx_agent(path),
-        "grok" => is_grok_agent(path),
         _ => true,
     };
     if identity_valid {
@@ -2278,28 +1833,6 @@ fn resolve_codex() -> Option<PathBuf> {
     candidates.push(PathBuf::from(
         "/Applications/Codex.app/Contents/Resources/codex",
     ));
-
-    first_binary(candidates)
-}
-
-fn resolve_opencode() -> Option<PathBuf> {
-    let home = dirs_home().map(PathBuf::from);
-    let mut candidates: Vec<PathBuf> = Vec::new();
-
-    if let Some(home) = &home {
-        candidates.push(home.join(".opencode/bin/opencode"));
-        candidates.push(home.join(".local/bin/opencode"));
-        candidates.push(home.join(".npm-global/bin/opencode"));
-        candidates.push(home.join(".cargo/bin/opencode"));
-        candidates.push(home.join("n/bin/opencode"));
-    }
-    candidates.push(PathBuf::from("/opt/homebrew/bin/opencode"));
-    candidates.push(PathBuf::from("/usr/local/bin/opencode"));
-    candidates.push(PathBuf::from("/usr/bin/opencode"));
-    candidates.push(PathBuf::from("/snap/bin/opencode"));
-    if let Some(from_shell) = which_via_login_shell("opencode") {
-        candidates.push(from_shell);
-    }
 
     first_binary(candidates)
 }
@@ -2400,109 +1933,6 @@ fn is_omp_agent(path: &Path) -> bool {
     help_mentions_rpc_mode(path)
 }
 
-fn resolve_fx() -> Option<PathBuf> {
-    let home = dirs_home().map(PathBuf::from);
-    let mut candidates: Vec<PathBuf> = Vec::new();
-
-    // Installer default first so a Homebrew JSON-viewer `fx` does not win.
-    if let Some(home) = &home {
-        candidates.push(home.join(".local/bin/fx"));
-        candidates.push(home.join(".fx/bin/fx"));
-        candidates.push(home.join(".npm-global/bin/fx"));
-        candidates.push(home.join(".cargo/bin/fx"));
-        candidates.push(home.join("n/bin/fx"));
-    }
-    #[cfg(target_os = "macos")]
-    candidates.push(PathBuf::from("/opt/homebrew/bin/fx"));
-    candidates.push(PathBuf::from("/usr/local/bin/fx"));
-    candidates.push(PathBuf::from("/usr/bin/fx"));
-    candidates.push(PathBuf::from("/snap/bin/fx"));
-    if let Some(from_shell) = which_via_login_shell("fx") {
-        candidates.push(from_shell);
-    }
-
-    first_binary_matching(candidates, is_fx_agent)
-}
-
-fn resolve_grok() -> Option<PathBuf> {
-    let home = dirs_home().map(PathBuf::from);
-    let mut candidates: Vec<PathBuf> = Vec::new();
-
-    if let Some(home) = &home {
-        candidates.push(home.join(".grok/bin/grok"));
-        candidates.push(home.join(".local/bin/grok"));
-        candidates.push(home.join(".npm-global/bin/grok"));
-        candidates.push(home.join(".cargo/bin/grok"));
-        candidates.push(home.join("n/bin/grok"));
-    }
-    #[cfg(target_os = "macos")]
-    candidates.push(PathBuf::from("/opt/homebrew/bin/grok"));
-    candidates.push(PathBuf::from("/usr/local/bin/grok"));
-    candidates.push(PathBuf::from("/usr/bin/grok"));
-    candidates.push(PathBuf::from("/snap/bin/grok"));
-    if let Some(from_shell) = which_via_login_shell("grok") {
-        candidates.push(from_shell);
-    }
-
-    first_binary_matching(candidates, is_grok_agent)
-}
-
-fn resolve_hermes() -> Option<PathBuf> {
-    let home = dirs_home().map(PathBuf::from);
-    let mut candidates: Vec<PathBuf> = Vec::new();
-
-    if let Some(home) = &home {
-        // Official per-user installer, then its underlying virtualenv in case
-        // the launcher symlink has not been added to PATH yet.
-        candidates.push(home.join(".local/bin/hermes"));
-        candidates.push(home.join(".hermes/hermes-agent/venv/bin/hermes"));
-        candidates.push(home.join(".hermes/hermes-agent/.venv/bin/hermes"));
-        candidates.push(home.join(".npm-global/bin/hermes"));
-        candidates.push(home.join(".cargo/bin/hermes"));
-        candidates.push(home.join("n/bin/hermes"));
-    }
-    #[cfg(windows)]
-    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
-        // Native Windows installer launchers, then the underlying virtualenv.
-        candidates.push(local_app_data.join("hermes/bin/hermes"));
-        candidates.push(local_app_data.join("hermes/hermes-agent/venv/Scripts/hermes"));
-    }
-    #[cfg(target_os = "macos")]
-    candidates.push(PathBuf::from("/opt/homebrew/bin/hermes"));
-    candidates.push(PathBuf::from("/usr/local/bin/hermes"));
-    candidates.push(PathBuf::from("/usr/bin/hermes"));
-    candidates.push(PathBuf::from("/snap/bin/hermes"));
-    if let Some(from_shell) = which_via_login_shell("hermes") {
-        candidates.push(from_shell);
-    }
-
-    first_binary(candidates)
-}
-
-fn resolve_devin() -> Option<PathBuf> {
-    let home = dirs_home().map(PathBuf::from);
-    let mut candidates: Vec<PathBuf> = Vec::new();
-
-    if let Some(home) = &home {
-        // Official installer target on macOS and Linux.
-        candidates.push(home.join(".local/bin/devin"));
-    }
-    #[cfg(windows)]
-    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
-        // The Windows installer keeps its launcher beside versioned builds.
-        candidates.push(local_app_data.join("devin/cli/bin/devin"));
-    }
-    #[cfg(target_os = "macos")]
-    candidates.push(PathBuf::from("/opt/homebrew/bin/devin"));
-    candidates.push(PathBuf::from("/usr/local/bin/devin"));
-    candidates.push(PathBuf::from("/usr/bin/devin"));
-    if let Some(from_shell) = which_via_login_shell("devin") {
-        candidates.push(from_shell);
-    }
-
-    first_binary(candidates)
-}
-
 fn resolve_antigravity() -> Option<PathBuf> {
     // The .par wrapper is a POSIX self-extracting archive — Antigravity ships
     // no Windows ACP binary, so report the provider unavailable there instead
@@ -2583,187 +2013,6 @@ fn help_mentions_rpc_mode(path: &Path) -> bool {
             false
         }
     }
-}
-
-fn is_fx_agent(path: &Path) -> bool {
-    if !path.is_file() {
-        return false;
-    }
-    if !binary_name_eq(path, "fx") {
-        return false;
-    }
-    file_mentions_fx_agent(path) || fx_help_mentions_acp(path)
-}
-
-fn is_grok_agent(path: &Path) -> bool {
-    if !path.is_file() {
-        return false;
-    }
-    if !binary_name_eq(path, "grok") {
-        return false;
-    }
-    // Official installer: ~/.grok/bin/grok
-    if path_has_component(path, ".grok") {
-        return true;
-    }
-    file_mentions_grok_agent(path) || grok_help_mentions_agent(path)
-}
-
-/// The fx markers sit megabytes into the compiled binary, so a small head-read
-/// never matched and every resolve fell through to spawning `fx --help`. Scan
-/// the whole file in chunks instead, overlapping enough to catch a marker that
-/// straddles a boundary.
-fn file_mentions_fx_agent(path: &Path) -> bool {
-    const MARKERS: [&str; 4] = ["vercel-labs/fx", "FX_MODEL", "createFxAgent", "fx acp"];
-    const CHUNK: usize = 1024 * 1024;
-    const OVERLAP: usize = 64;
-
-    let Ok(file) = std::fs::File::open(path) else {
-        return false;
-    };
-    let mut reader = BufReader::new(file);
-    let mut buf = vec![0u8; CHUNK + OVERLAP];
-    let mut carry = 0usize;
-    loop {
-        let Ok(n) = reader.read(&mut buf[carry..]) else {
-            return false;
-        };
-        if n == 0 {
-            return false;
-        }
-        let filled = carry + n;
-        let text = String::from_utf8_lossy(&buf[..filled]);
-        if MARKERS.iter().any(|marker| text.contains(marker)) {
-            return true;
-        }
-        carry = filled.min(OVERLAP);
-        buf.copy_within(filled - carry..filled, 0);
-    }
-}
-
-fn fx_help_mentions_acp(path: &Path) -> bool {
-    let mut cmd = Command::new(path);
-    cmd.arg("--help")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    // npm-installed harnesses are `#!/usr/bin/env node` scripts, so this probe
-    // fails outright without a PATH that has node on it.
-    apply_gui_env(&mut cmd);
-    isolate_child(&mut cmd);
-    let Ok(child) = spawn_managed(&mut cmd) else {
-        return false;
-    };
-    let pid = child.id();
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let _ = tx.send(child.wait_with_output());
-    });
-    match rx.recv_timeout(Duration::from_secs(2)) {
-        Ok(Ok(output)) => {
-            let text = format!(
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .to_ascii_lowercase();
-            text.contains("acp") && (text.contains("ask") || text.contains("gateway"))
-        }
-        _ => {
-            terminate(pid);
-            false
-        }
-    }
-}
-
-fn file_mentions_grok_agent(path: &Path) -> bool {
-    const MARKERS: [&str; 4] = ["xai-grok", "Grok Build", "docs.x.ai/build", "grok agent"];
-    const CHUNK: usize = 1024 * 1024;
-    const OVERLAP: usize = 64;
-
-    let Ok(file) = std::fs::File::open(path) else {
-        return false;
-    };
-    let mut reader = BufReader::new(file);
-    let mut buf = vec![0u8; CHUNK + OVERLAP];
-    let mut carry = 0usize;
-    loop {
-        let Ok(n) = reader.read(&mut buf[carry..]) else {
-            return false;
-        };
-        if n == 0 {
-            return false;
-        }
-        let filled = carry + n;
-        let text = String::from_utf8_lossy(&buf[..filled]);
-        if MARKERS.iter().any(|marker| text.contains(marker)) {
-            return true;
-        }
-        carry = filled.min(OVERLAP);
-        buf.copy_within(filled - carry..filled, 0);
-    }
-}
-
-fn grok_help_mentions_agent(path: &Path) -> bool {
-    let mut cmd = Command::new(path);
-    cmd.arg("--help")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    apply_gui_env(&mut cmd);
-    isolate_child(&mut cmd);
-    let Ok(child) = spawn_managed(&mut cmd) else {
-        return false;
-    };
-    let pid = child.id();
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let _ = tx.send(child.wait_with_output());
-    });
-    match rx.recv_timeout(Duration::from_secs(2)) {
-        Ok(Ok(output)) => {
-            let text = format!(
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .to_ascii_lowercase();
-            text.contains("grok build") || (text.contains("agent") && text.contains("stdio"))
-        }
-        _ => {
-            terminate(pid);
-            false
-        }
-    }
-}
-
-fn is_cursor_agent(path: &Path) -> bool {
-    if !path.is_file() {
-        return false;
-    }
-    if path_has_component(path, ".grok") {
-        return false;
-    }
-    if binary_name_eq(path, "cursor-agent") {
-        return true;
-    }
-    if binary_name_eq(path, "agent") {
-        // One symlink hop. canonicalize() can walk into another .app
-        // and trip macOS "data from other apps" TCC.
-        if let Ok(target) = std::fs::read_link(path) {
-            let resolved = if target.is_absolute() {
-                target
-            } else {
-                path.parent().unwrap_or(path).join(target)
-            };
-            return path_has_component(&resolved, "cursor-agent")
-                || resolved
-                    .to_string_lossy()
-                    .to_ascii_lowercase()
-                    .contains("cursor-agent");
-        }
-    }
-    false
 }
 
 /// Look `name` up in the interactive login shell's PATH.
@@ -2852,15 +2101,6 @@ fn binary_name_eq(path: &Path, expected: &str) -> bool {
         })
 }
 
-fn path_has_component(path: &Path, needle: &str) -> bool {
-    path.components().any(|component| {
-        component
-            .as_os_str()
-            .to_str()
-            .is_some_and(|name| name == needle)
-    })
-}
-
 fn is_executable_file(path: &Path) -> bool {
     #[cfg(unix)]
     {
@@ -2917,8 +2157,7 @@ fn gui_search_path_from(
         parts.push(format!("{home}/.cargo/bin").into());
         parts.push(format!("{home}/.claude/local").into());
         parts.push(format!("{home}/.local/share/claude").into());
-        parts.push(format!("{home}/.opencode/bin").into());
-        parts.push(format!("{home}/.grok/bin").into());
+
         parts.push(format!("{home}/.npm-global/bin").into());
         parts.push(format!("{home}/.bun/bin").into());
         parts.push(format!("{home}/AppData/Roaming/npm").into());
@@ -2975,60 +2214,16 @@ pub(crate) fn apply_gui_env(cmd: &mut Command) {
     }
 }
 
-fn prepare_child(cmd: &mut Command, command: &str) {
+fn prepare_child(cmd: &mut Command, _command: &str) {
     apply_gui_env(cmd);
-    if command_basename(command) == "fx" {
-        apply_fx_env(cmd);
-    }
-    if command_basename(command) == "grok" {
-        apply_grok_env(cmd);
-    }
     isolate_child(cmd);
-}
-
-/// fx keeps its Gateway credential in the macOS Keychain and reads it by
-/// shelling out to `osascript`. From a bundled app that read can block on a
-/// SecurityAgent prompt nobody ever sees, and fx then rejects `initialize`
-/// outright. Forwarding an API key from the login shell skips the Keychain
-/// entirely for users who have one set.
-fn apply_fx_env(cmd: &mut Command) {
-    for key in [
-        "AI_GATEWAY_API_KEY",
-        "FX_AI_GATEWAY_API_KEY",
-        "VERCEL_OIDC_TOKEN",
-    ] {
-        if std::env::var_os(key).is_some() {
-            continue;
-        }
-        if let Some(value) = login_shell_env(key) {
-            cmd.env(key, value);
-        }
-    }
-}
-
-fn apply_grok_env(cmd: &mut Command) {
-    for key in ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY"] {
-        if std::env::var_os(key).is_some() {
-            continue;
-        }
-        if let Some(value) = login_shell_env(key) {
-            cmd.env(key, value);
-        }
-    }
 }
 
 static LOGIN_SHELL_ENV: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
 /// Keys worth keeping out of `printenv`. PATH is the important one: a
 /// Finder-launched app inherits only launchd's bare PATH.
-const LOGIN_SHELL_KEYS: [&str; 6] = [
-    "PATH",
-    "AI_GATEWAY_API_KEY",
-    "FX_AI_GATEWAY_API_KEY",
-    "VERCEL_OIDC_TOKEN",
-    "XAI_API_KEY",
-    "GROK_CODE_XAI_API_KEY",
-];
+const LOGIN_SHELL_KEYS: [&str; 1] = ["PATH"];
 
 fn login_shell_path() -> Option<String> {
     login_shell_env("PATH")
@@ -3106,13 +2301,6 @@ fn load_unix_login_shell_env() -> HashMap<String, String> {
         }
     }
     map
-}
-
-fn command_basename(command: &str) -> &str {
-    Path::new(command)
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .unwrap_or(command)
 }
 
 #[cfg(unix)]
@@ -3370,7 +2558,7 @@ mod tests {
             &[ProcessSnapshot {
                 pid,
                 ppid: 1,
-                args: "/Users/n/.local/bin/cursor-agent acp".into(),
+                args: "/Users/n/.local/bin/codex acp".into(),
                 harness_parent: Some(2_147_483_646),
             }],
             std::process::id(),
@@ -3438,8 +2626,8 @@ mod tests {
     #[test]
     fn runtime_binary_paths_stay_fixed_for_the_process() {
         let runtime = Mutex::new(None);
-        let old = HashMap::from([("cursor".to_string(), "/old".to_string())]);
-        let new = HashMap::from([("cursor".to_string(), "/new".to_string())]);
+        let old = HashMap::from([("claude".to_string(), "/old".to_string())]);
+        let new = HashMap::from([("claude".to_string(), "/new".to_string())]);
 
         assert_eq!(initialize_runtime_binary_paths(&runtime, old.clone()), old);
         assert_eq!(initialize_runtime_binary_paths(&runtime, new), old);
@@ -3455,12 +2643,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let host = HarnessHost::new();
         let mut paths = HashMap::new();
-        for (provider, filename) in [
-            ("claude", "claude"),
-            ("codex", "codex"),
-            ("cursor", "cursor-agent"),
-            ("opencode", "opencode"),
-        ] {
+        for (provider, filename) in [("claude", "claude"), ("codex", "codex")] {
             let binary = root.join(filename);
             std::fs::write(
                 &binary,
@@ -3531,10 +2714,6 @@ mod tests {
             )
             .unwrap();
         }
-        assert_eq!(
-            opencode_major_version(&cwd, paths.get("opencode").map(String::as_str)),
-            Ok(2)
-        );
         assert!(resolve_mcp_binary(
             "claude",
             Some(&root.join("missing/claude").to_string_lossy())
@@ -3558,7 +2737,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let codex = dir.join("codex");
         let opencode = dir.join("opencode");
-        let cursor_agent = dir.join("cursor-agent");
+        let cursor_agent = dir.join("codex");
         let decoy = dir.join("codex.sh");
         let antigravity = dir.join("agy_acp_server");
         let antigravity_wrapper = dir.join("agy_acp_server.par");
@@ -3621,11 +2800,11 @@ mod tests {
         assert!(version_log.exists());
         assert_eq!(
             resolve_harness_binary_override("opencode", &opencode.to_string_lossy()),
-            Ok(opencode.clone())
+            Err("Unsupported configured harness provider: opencode".into())
         );
         assert_eq!(
             resolve_harness_binary_override("cursor", &cursor_agent.to_string_lossy()),
-            Ok(cursor_agent.clone())
+            Err("Unsupported configured harness provider: cursor".into())
         );
         assert!(is_resolved_harness_binary(
             &codex_path,
@@ -3699,7 +2878,7 @@ mod tests {
         let parts: Vec<&str> = path.split(':').collect();
         let at = |dir: &str| parts.iter().position(|part| *part == dir).unwrap();
         assert_eq!(parts[0], "/custom/gh-dir");
-        assert!(parts.contains(&"/tmp/home/.grok/bin"));
+        assert!(!parts.contains(&"/tmp/home/.grok/bin"));
         assert!(parts.contains(&"/usr/local/bin"));
         assert!(at("/custom/gh-dir") < at("/inherited/bin"));
         assert!(at("/inherited/bin") < at("/tmp/home/.local/bin"));
@@ -3737,20 +2916,6 @@ mod tests {
         let path = gui_search_path_from(Some(dir.to_string_lossy().into_owned()), None, None);
         assert_eq!(which_in_path(&path, "gh"), Some(target));
 
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn cursor_agent_accepts_symlink_named_agent() {
-        let dir = std::env::temp_dir().join(format!("monocode-agent-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("cursor-agent-pack")).unwrap();
-        let target = dir.join("cursor-agent-pack/cursor-agent");
-        std::fs::write(&target, b"#!/bin/sh\n").unwrap();
-        let agent = dir.join("agent");
-        std::os::unix::fs::symlink(&target, &agent).unwrap();
-        assert!(is_cursor_agent(&agent));
-        assert!(!is_cursor_agent(&dir.join("missing")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3814,76 +2979,6 @@ mod tests {
     }
 
     #[test]
-    fn fx_accepts_vercel_agent_and_rejects_json_viewer() {
-        let dir = std::env::temp_dir().join(format!("monocode-fx-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-
-        let agent = dir.join("fx");
-        std::fs::write(&agent, b"#!/bin/sh\necho vercel-labs/fx\n# FX_MODEL\n").unwrap();
-        assert!(is_fx_agent(&agent));
-
-        let viewer = dir.join("fx-viewer");
-        std::fs::write(&viewer, b"#!/bin/sh\necho Terminal JSON viewer\n").unwrap();
-        assert!(!is_fx_agent(&viewer));
-
-        let other = dir.join("fx");
-        std::fs::write(&other, b"#!/bin/sh\necho json viewer\n").unwrap();
-        assert!(!file_mentions_fx_agent(&other));
-        assert!(!is_fx_agent(&other));
-
-        assert!(!is_fx_agent(&dir.join("missing")));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// The real fx binary carries its markers megabytes in. A head-only read
-    /// missed them and silently fell back to spawning `fx --help`.
-    #[test]
-    fn fx_marker_is_found_past_the_first_chunk() {
-        let dir = std::env::temp_dir().join(format!("monocode-fx-deep-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-
-        let agent = dir.join("fx");
-        let mut blob = vec![b'\0'; 6 * 1024 * 1024];
-        blob.extend_from_slice(b"https://github.com/vercel-labs/fx");
-        std::fs::write(&agent, &blob).unwrap();
-        assert!(file_mentions_fx_agent(&agent));
-
-        // A marker straddling a chunk boundary must still be caught.
-        let split = dir.join("fx-split");
-        let mut edge = vec![b'\0'; 1024 * 1024 - 4];
-        edge.extend_from_slice(b"vercel-labs/fx");
-        std::fs::write(&split, &edge).unwrap();
-        assert!(file_mentions_fx_agent(&split));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn grok_accepts_official_install_path_and_markers() {
-        let dir = std::env::temp_dir().join(format!("monocode-grok-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let home = dir.join(".grok/bin");
-        std::fs::create_dir_all(&home).unwrap();
-
-        let agent = home.join("grok");
-        std::fs::write(&agent, b"#!/bin/sh\necho other grok\n").unwrap();
-        assert!(is_grok_agent(&agent));
-
-        let marked = dir.join("grok");
-        std::fs::write(&marked, b"#!/bin/sh\n# Grok Build\n# xai-grok\n").unwrap();
-        assert!(is_grok_agent(&marked));
-
-        let other = dir.join("grok-cli");
-        std::fs::write(&other, b"#!/bin/sh\necho not grok\n").unwrap();
-        assert!(!is_grok_agent(&other));
-
-        assert!(!is_grok_agent(&dir.join("missing")));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
     #[cfg(unix)]
     fn antigravity_resolver_prefers_executable_wrapper_and_tracks_orphans() {
         use std::os::unix::fs::PermissionsExt;
@@ -3912,14 +3007,6 @@ mod tests {
         } else {
             assert!(antigravity_args().is_empty());
         }
-    }
-
-    #[test]
-    fn command_basename_strips_path() {
-        assert_eq!(command_basename("/Users/me/.local/bin/fx"), "fx");
-        assert_eq!(command_basename("fx"), "fx");
-        assert_eq!(command_basename("/Users/me/.grok/bin/grok"), "grok");
-        assert_eq!(command_basename("fx.exe"), "fx");
     }
 
     #[test]
@@ -3986,16 +3073,6 @@ mod output_batcher_tests {
         assert_eq!(batches.len(), 2);
         assert_eq!(batches[1], vec!["after".to_string()]);
     }
-
-    #[test]
-    fn sse_events_split_on_blank_lines() {
-        let stream = ": ping\ndata: one\n\ndata: two\ndata: lines\n\n";
-        let mut events = Vec::new();
-        read_sse(stream.as_bytes(), &AtomicBool::new(false), |data| {
-            events.push(data)
-        });
-        assert_eq!(events, vec!["one".to_string(), "two\nlines".to_string()]);
-    }
 }
 
 #[cfg(test)]
@@ -4017,41 +3094,6 @@ mod exec_allowlist_tests {
             assert!(exec_args_allowed(provider, &args(&["status", "--json"])));
             assert!(exec_args_allowed(provider, &args(&["agent", "list"])));
         }
-    }
-
-    #[test]
-    fn allows_service_args_only_for_opencode() {
-        for service in [
-            &["service", "status"][..],
-            &["service", "start"][..],
-            &["service", "get", "password"][..],
-        ] {
-            assert!(exec_args_allowed(Some("opencode"), &args(service)));
-            assert!(!exec_args_allowed(None, &args(service)));
-            assert!(!exec_args_allowed(Some("cursor"), &args(service)));
-        }
-    }
-
-    #[test]
-    fn allows_grok_cleanup_only_for_one_valid_session_id() {
-        let cleanup = args(&[
-            "--no-auto-update",
-            "sessions",
-            "delete",
-            "550e8400-e29b-41d4-a716-446655440000",
-        ]);
-        assert!(exec_args_allowed(Some("grok"), &cleanup));
-        for provider in [None, Some("cursor"), Some("opencode")] {
-            assert!(!exec_args_allowed(provider, &cleanup));
-        }
-        for id in ["", "--all", "../sessions", "invalid"] {
-            let mut rejected = cleanup.clone();
-            rejected[3] = id.to_string();
-            assert!(!exec_args_allowed(Some("grok"), &rejected));
-        }
-        let mut extra = cleanup;
-        extra.push("--all".to_string());
-        assert!(!exec_args_allowed(Some("grok"), &extra));
     }
 
     #[test]
@@ -4116,13 +3158,12 @@ mod reap_logic_tests {
 
     #[test]
     fn parse_ps_row_reads_pid_ppid_and_args() {
-        let parsed = parse_ps_row(
-            " 2436     1 /Users/n/.local/bin/cursor-agent --use-system-ca index.js acp",
-        )
-        .unwrap();
+        let parsed =
+            parse_ps_row(" 2436     1 /Users/n/.local/bin/codex --use-system-ca index.js acp")
+                .unwrap();
         assert_eq!(parsed.pid, 2436);
         assert_eq!(parsed.ppid, 1);
-        assert!(parsed.args.contains("cursor-agent"));
+        assert!(parsed.args.contains("codex"));
         assert!(parsed.args.ends_with(" acp") || parsed.args.ends_with("acp"));
         assert_eq!(parsed.harness_parent, None);
     }
@@ -4130,7 +3171,7 @@ mod reap_logic_tests {
     #[test]
     fn parse_ps_row_reads_harness_parent_from_env_tail() {
         let parsed = parse_ps_row(
-            " 27129 21504 /Users/n/cursor-agent acp PATH=/usr/bin MONOCODE_HARNESS_PARENT=21504 HOME=/tmp",
+            " 27129 21504 /Users/n/codex acp PATH=/usr/bin MONOCODE_HARNESS_PARENT=21504 HOME=/tmp",
         )
         .unwrap();
         assert_eq!(parsed.pid, 27129);
@@ -4140,10 +3181,7 @@ mod reap_logic_tests {
 
     #[test]
     fn parse_proc_ppid_skips_a_comm_holding_spaces_and_parens() {
-        assert_eq!(
-            parse_proc_ppid("2436 (cursor-agent) S 1 2436 2436 0 -1"),
-            Some(1)
-        );
+        assert_eq!(parse_proc_ppid("2436 (codex) S 1 2436 2436 0 -1"), Some(1));
         assert_eq!(
             parse_proc_ppid("2436 (Web Content (x)) S 21504 2436 0 -1"),
             Some(21504)
@@ -4164,7 +3202,7 @@ mod reap_logic_tests {
         let proc = row(
             10,
             1,
-            "/Users/n/.local/bin/cursor-agent --use-system-ca index.js acp",
+            "/Users/n/.local/bin/codex --use-system-ca index.js acp",
             Some(999),
         );
         assert!(should_reap_process(&proc, 42, |_| false));
@@ -4173,7 +3211,7 @@ mod reap_logic_tests {
 
     #[test]
     fn should_not_reap_our_own_marked_child() {
-        let proc = row(10, 42, "/Users/n/.local/bin/cursor-agent acp", Some(42));
+        let proc = row(10, 42, "/Users/n/.local/bin/codex acp", Some(42));
         assert!(!should_reap_process(&proc, 42, |_| true));
     }
 
@@ -4199,14 +3237,14 @@ mod reap_logic_tests {
     #[test]
     fn looks_like_harness_argv_accepts_agent_clis_only() {
         assert!(looks_like_harness_argv(
-            "/Users/n/.local/bin/cursor-agent --use-system-ca index.js acp"
+            "/Users/n/.local/bin/codex --use-system-ca index.js acp"
         ));
         assert!(looks_like_harness_argv(
-            "/opt/homebrew/bin/node /Users/n/.local/share/cursor-agent/versions/x/index.js worker-server"
+            "/opt/homebrew/bin/node /Users/n/.local/share/codex/versions/x/index.js worker-server"
         ));
         assert!(looks_like_harness_argv("/Users/n/.local/bin/claude --help"));
-        assert!(looks_like_harness_argv("/Users/n/.local/bin/hermes acp"));
-        assert!(looks_like_harness_argv("/Users/n/.local/bin/devin acp"));
+        assert!(!looks_like_harness_argv("/Users/n/.local/bin/hermes acp"));
+        assert!(!looks_like_harness_argv("/Users/n/.local/bin/devin acp"));
         assert!(!looks_like_harness_argv("tmux new -s work"));
         assert!(!looks_like_harness_argv("npm start"));
         assert!(!looks_like_harness_argv(
@@ -4217,20 +3255,38 @@ mod reap_logic_tests {
     #[test]
     fn parse_ps_pid_command_does_not_treat_the_binary_as_ppid() {
         let (pid, command) = parse_ps_pid_command(
-            " 27129 /Users/n/cursor-agent acp PATH=/usr/bin MONOCODE_HARNESS_PARENT=21504 HOME=/tmp",
+            " 27129 /Users/n/codex acp PATH=/usr/bin MONOCODE_HARNESS_PARENT=21504 HOME=/tmp",
         )
         .unwrap();
         assert_eq!(pid, 27129);
         assert_eq!(harness_parent_from_bytes(command.as_bytes()), Some(21504));
     }
+}
 
-    #[test]
-    fn should_reap_legacy_cursor_acp_orphaned_to_launchd() {
-        let args = "/Users/n/.local/bin/cursor-agent --use-system-ca /Users/n/index.js acp";
-        assert!(should_reap_process(&row(10, 1, args, None), 42, |_| false));
-        assert!(!should_reap_process(&row(10, 42, args, None), 42, |_| true));
-        assert!(!is_legacy_orphaned_cursor_acp(
-            "node /usr/local/bin/typescript-language-server --stdio"
-        ));
+/// Kill harness trees left behind by a previous MonoCode that exited
+/// before SIGKILL ran (crash, force-quit, or the detached escalate thread).
+/// Off-thread: the sweep shells out to `ps` and then waits on a SIGKILL, and
+/// launch would otherwise hold the first window for both. Nothing this run
+/// spawns can be caught by it — our own children carry our pid as the marker.
+pub(crate) fn reap_orphaned_harness_processes() {
+    #[cfg(unix)]
+    {
+        let our_pid = std::process::id();
+        thread::spawn(move || reap_snapshots(&snapshot_processes(), our_pid));
+    }
+}
+
+/// List processes by argv, then open environ only for agent CLIs. Linux
+/// orphans sit under `systemd --user`, not pid 1, so the marker (not ppid)
+/// is what identifies them.
+#[cfg(unix)]
+fn snapshot_processes() -> Vec<ProcessSnapshot> {
+    #[cfg(target_os = "linux")]
+    {
+        snapshot_from_proc()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        snapshot_from_ps()
     }
 }

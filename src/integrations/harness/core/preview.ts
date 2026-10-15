@@ -1,4 +1,8 @@
-import type { ToolPreview, ToolPreviewKind, ToolPreviewLine } from "../../../features/sessions/model/session";
+import type {
+  ToolPreview,
+  ToolPreviewKind,
+  ToolPreviewLine,
+} from "../../../features/sessions/model/session";
 import { displayPath } from "../../../shared/lib/paths";
 import {
   formatShellIntent,
@@ -215,9 +219,7 @@ export function isFileTool(
   title?: string,
   preview?: ToolPreview,
 ): boolean {
-  return (
-    isReadTool(kind, title, preview) || isEditTool(kind, title, preview)
-  );
+  return isReadTool(kind, title, preview) || isEditTool(kind, title, preview);
 }
 
 export function isExecuteTool(kind?: string, title?: string): boolean {
@@ -243,7 +245,13 @@ export function extractShellCommand(...values: unknown[]): string | undefined {
 /** The skill a Skill tool is invoking, if the harness sent it. */
 export function extractSkillName(...values: unknown[]): string | undefined {
   for (const raw of inputRecords(...values)) {
-    for (const key of ["skill", "skill_name", "skillName", "skill_id", "skillId"]) {
+    for (const key of [
+      "skill",
+      "skill_name",
+      "skillName",
+      "skill_id",
+      "skillId",
+    ]) {
       const found = skillNameField(raw[key]);
       if (found) return found;
     }
@@ -332,7 +340,7 @@ export function extractSearchQuery(value: unknown): string | undefined {
   return undefined;
 }
 
-/** Shared title builder used by Claude, Pi, and OpenCode tool mappers. */
+/** Shared title builder used by Claude and Pi tool mappers. */
 export function titleFromToolInput(
   name: string,
   kind: string,
@@ -448,10 +456,7 @@ export function composeToolTitle(opts: {
   return title;
 }
 
-export function stubFilePreview(
-  kind?: string,
-  title?: string,
-): ToolPreview {
+export function stubFilePreview(kind?: string, title?: string): ToolPreview {
   const inferred = previewKind(kind ?? "", title, false, false);
   return {
     kind: inferred === "write" ? "write" : "read",
@@ -507,10 +512,7 @@ export function mergeToolPreview(
   };
 }
 
-function pickStrong(
-  next?: string,
-  prev?: string,
-): string | undefined {
+function pickStrong(next?: string, prev?: string): string | undefined {
   if (next && !isWeakToolTitle(next)) return next;
   if (prev && !isWeakToolTitle(prev)) return prev;
   return next || prev;
@@ -558,15 +560,11 @@ function extractPath(
     contentPath(update.content ?? tool.content) ??
     findPathInUnknown(update, 0) ??
     findPathInUnknown(tool, 0) ??
-    pathFromTitle(
-      coerceString(update.title) ?? coerceString(tool.title),
-    )
+    pathFromTitle(coerceString(update.title) ?? coerceString(tool.title))
   );
 }
 
-function firstInputPath(
-  inputs: Record<string, unknown>[],
-): string | undefined {
+function firstInputPath(inputs: Record<string, unknown>[]): string | undefined {
   for (const raw of inputs) {
     const found = inputPath(raw);
     if (found) return found;
@@ -662,14 +660,16 @@ function contentPath(content: unknown): string | undefined {
   return undefined;
 }
 
-function extractDiff(content: unknown): {
-  path?: string;
-  oldText?: string;
-  newText?: string;
-  lines?: ToolPreviewLine[];
-  additions?: number;
-  deletions?: number;
-} | undefined {
+function extractDiff(content: unknown):
+  | {
+      path?: string;
+      oldText?: string;
+      newText?: string;
+      lines?: ToolPreviewLine[];
+      additions?: number;
+      deletions?: number;
+    }
+  | undefined {
   for (const block of contentBlocks(content)) {
     const type = (coerceString(block.type) ?? "").toLowerCase();
     if (type !== "diff") continue;

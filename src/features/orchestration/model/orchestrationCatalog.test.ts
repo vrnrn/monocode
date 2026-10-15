@@ -12,7 +12,10 @@ import {
   probeHarnessAvailability,
 } from "../../../integrations/harness/core/availability";
 import { refreshHarnessCatalogs } from "../../../integrations/harness/core/registry";
-import { resetHarnessModelOverlays, setHarnessModels } from "../../sessions/model/models";
+import {
+  resetHarnessModelOverlays,
+  setHarnessModels,
+} from "../../sessions/model/models";
 
 afterEach(() => {
   resetHarnessModelOverlays();
@@ -40,7 +43,7 @@ describe("automatic orchestration catalog", () => {
     expect(settings.choices.some((choice) => choice.harness === "claude")).toBe(
       true,
     );
-    expect(settings.choices.some((choice) => choice.harness === "cursor")).toBe(
+    expect(settings.choices.some((choice) => choice.harness === "pi")).toBe(
       false,
     );
     expect(settings.maxWorkers).toBe(2);

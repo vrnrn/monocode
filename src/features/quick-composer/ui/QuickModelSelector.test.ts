@@ -44,7 +44,7 @@ const claude: AgentModel = {
 const grok: AgentModel = {
   id: "test-grok",
   name: "Test Grok",
-  harness: "grok",
+  harness: "antigravity",
 };
 let container: HTMLDivElement;
 let root: Root;
@@ -57,7 +57,7 @@ beforeEach(() => {
   localStorage.clear();
   resetHarnessModelOverlays();
   setHarnessModels("claude", [claude]);
-  setHarnessModels("grok", [grok]);
+  setHarnessModels("antigravity", [grok]);
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -66,7 +66,7 @@ beforeEach(() => {
       createElement(QuickModelSelector, {
         model: claude,
         values: { effort: "low" },
-        availableHarnesses: ["claude", "grok"],
+        availableHarnesses: ["claude", "antigravity"],
         onChange,
         onSettingsChange,
         onClose,
@@ -92,7 +92,7 @@ it("browses one provider at a time and selects a model without closing settings"
   act(() =>
     container
       .querySelector<HTMLButtonElement>(
-        '[role="tab"][aria-label="Grok Build"]',
+        '[role="tab"][aria-label="Antigravity"]',
       )!
       .click(),
   );
@@ -172,7 +172,7 @@ it("resets reasoning and fast mode to saved user defaults", () => {
       createElement(QuickModelSelector, {
         model: claude,
         values: { effort: "low", fast: "true", context: "256k" },
-        availableHarnesses: ["claude", "grok"],
+        availableHarnesses: ["claude", "antigravity"],
         onChange,
         onSettingsChange,
         onClose,

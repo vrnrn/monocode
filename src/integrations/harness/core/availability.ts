@@ -4,17 +4,10 @@ import {
   resolveAntigravityBinary,
   resolveClaudeBinary,
   resolveCodexBinary,
-  resolveCursorBinary,
-  resolveDevinBinary,
-  resolveFxBinary,
-  resolveGrokBinary,
-  resolveHermesBinary,
   resolveOmpBinary,
-  resolveOpenCodeBinary,
   resolvePiBinary,
 } from "./child";
 import { isLiveHarness } from "./registry";
-import { IS_WIN } from "../../../platform/tauri/platform";
 import {
   emitHarnessAvailability,
   harnessAvailabilityProbedAt,
@@ -38,27 +31,9 @@ export {
 const CLI: Record<HarnessId, { name: string; install?: string }> = {
   claude: { name: "Claude Code CLI" },
   codex: { name: "Codex CLI" },
-  cursor: { name: "Cursor CLI" },
-  grok: {
-    name: "Grok Build CLI",
-    install: "curl -fsSL https://x.ai/cli/install.sh | bash",
-  },
-  opencode: { name: "OpenCode CLI" },
   pi: { name: "Pi CLI", install: "npm i -g @earendil-works/pi-coding-agent" },
   omp: { name: "omp CLI", install: "curl -fsSL https://omp.sh/install | sh" },
-  fx: { name: "fx CLI", install: "curl -fsSL https://fx.sh/setup.sh | bash" },
-  hermes: {
-    name: "Hermes Agent CLI",
-    install:
-      "Install from hermes-agent.nousresearch.com, then run hermes model",
-  },
   antigravity: { name: "Antigravity ACP server (agy_acp_server.par)" },
-  devin: {
-    name: "Devin CLI",
-    install: IS_WIN
-      ? "irm https://static.devin.ai/cli/setup.ps1 | iex"
-      : "curl -fsSL https://cli.devin.ai/install.sh | bash",
-  },
 };
 
 let inflight: Promise<void> | null = null;
@@ -77,9 +52,9 @@ export function harnessUnavailableHint(id: HarnessId): string {
   return `${name} not found${how}. Install it, or restart MonoCode if it is already installed.`;
 }
 
-export function probeHarnessAvailability(
-  options?: { force?: boolean },
-): Promise<void> {
+export function probeHarnessAvailability(options?: {
+  force?: boolean;
+}): Promise<void> {
   if (inflight) return inflight;
   const lastProbe = harnessAvailabilityProbedAt();
   if (!options?.force && lastProbe > 0 && Date.now() - lastProbe < PROBE_TTL_MS) {
@@ -88,14 +63,7 @@ export function probeHarnessAvailability(
   inflight = Promise.all(
     HARNESSES.map(async (id) => {
       if (!isLiveHarness(id)) return [id, false] as const;
-      if (id === "cursor") {
-        try {
-          await resolveCursorBinary();
-          return [id, true] as const;
-        } catch {
-          return [id, false] as const;
-        }
-      }
+
       if (id === "claude") {
         try {
           await resolveClaudeBinary();
@@ -112,14 +80,7 @@ export function probeHarnessAvailability(
           return [id, false] as const;
         }
       }
-      if (id === "opencode") {
-        try {
-          await resolveOpenCodeBinary();
-          return [id, true] as const;
-        } catch {
-          return [id, false] as const;
-        }
-      }
+
       if (id === "pi") {
         try {
           await resolvePiBinary();
@@ -136,30 +97,7 @@ export function probeHarnessAvailability(
           return [id, false] as const;
         }
       }
-      if (id === "fx") {
-        try {
-          await resolveFxBinary();
-          return [id, true] as const;
-        } catch {
-          return [id, false] as const;
-        }
-      }
-      if (id === "grok") {
-        try {
-          await resolveGrokBinary();
-          return [id, true] as const;
-        } catch {
-          return [id, false] as const;
-        }
-      }
-      if (id === "hermes") {
-        try {
-          await resolveHermesBinary();
-          return [id, true] as const;
-        } catch {
-          return [id, false] as const;
-        }
-      }
+
       if (id === "antigravity") {
         try {
           await resolveAntigravityBinary();
@@ -168,14 +106,7 @@ export function probeHarnessAvailability(
           return [id, false] as const;
         }
       }
-      if (id === "devin") {
-        try {
-          await resolveDevinBinary();
-          return [id, true] as const;
-        } catch {
-          return [id, false] as const;
-        }
-      }
+
       return [id, false] as const;
     }),
   )

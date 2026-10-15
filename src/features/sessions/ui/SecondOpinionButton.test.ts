@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { DEFAULT_AVAILABLE } = vi.hoisted(() => ({
-  DEFAULT_AVAILABLE: (harness: string) => harness === "grok",
+  DEFAULT_AVAILABLE: (harness: string) => harness === "omp",
 }));
 
 vi.mock("../../../integrations/harness/core/availability", () => ({
@@ -28,10 +28,10 @@ let root: Root;
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  setHarnessModels("grok", [
+  setHarnessModels("omp", [
     {
-      id: "grok:review",
-      harness: "grok",
+      id: "omp:review",
+      harness: "omp",
       name: "Review Model",
       settings: [
         {
@@ -48,8 +48,8 @@ beforeEach(() => {
       ],
     },
     {
-      id: "grok:quick",
-      harness: "grok",
+      id: "omp:quick",
+      harness: "omp",
       name: "Quick Model",
     },
   ]);
@@ -78,7 +78,7 @@ describe("secondary model target picker", () => {
     act(() =>
       root.render(
         createElement(SecondOpinionButton, {
-          from: "cursor",
+          from: "pi",
           onPick,
         }),
       ),
@@ -90,12 +90,12 @@ describe("secondary model target picker", () => {
         .click(),
     );
     const provider = [...document.querySelectorAll('[role="menuitem"]')].find(
-      (row) => row.textContent?.includes("Grok Build"),
+      (row) => row.textContent?.includes("omp"),
     )!;
     hover(provider);
 
     const modelMenu = document.querySelector(
-      '[role="menu"][aria-label="Grok Build models"]',
+      '[role="menu"][aria-label="omp models"]',
     )!;
     const model = [...modelMenu.querySelectorAll('[role="menuitem"]')].find(
       (row) => row.textContent?.includes("Review Model"),
@@ -115,8 +115,8 @@ describe("secondary model target picker", () => {
     act(() => extraHigh.click());
 
     expect(onPick).toHaveBeenCalledWith({
-      harness: "grok",
-      model: "grok:review",
+      harness: "omp",
+      model: "omp:review",
       modelSettings: { effort: "xhigh" },
     });
   });
@@ -126,7 +126,7 @@ describe("secondary model target picker", () => {
     act(() =>
       root.render(
         createElement(SecondOpinionButton, {
-          from: "cursor",
+          from: "pi",
           onPick,
         }),
       ),
@@ -138,19 +138,19 @@ describe("secondary model target picker", () => {
         .click(),
     );
     const provider = [...document.querySelectorAll('[role="menuitem"]')].find(
-      (row) => row.textContent?.includes("Grok Build"),
+      (row) => row.textContent?.includes("omp"),
     )!;
     hover(provider);
     const quick = [
       ...document.querySelectorAll<HTMLButtonElement>(
-        '[role="menu"][aria-label="Grok Build models"] [role="menuitem"]',
+        '[role="menu"][aria-label="omp models"] [role="menuitem"]',
       ),
     ].find((row) => row.textContent?.includes("Quick Model"))!;
     act(() => quick.click());
 
     expect(onPick).toHaveBeenCalledWith({
-      harness: "grok",
-      model: "grok:quick",
+      harness: "omp",
+      model: "omp:quick",
       modelSettings: {},
     });
   });
@@ -160,8 +160,8 @@ describe("secondary model target picker", () => {
     act(() =>
       root.render(
         createElement(SecondOpinionButton, {
-          from: "grok",
-          fromModel: "grok:review",
+          from: "omp",
+          fromModel: "omp:review",
           onPick,
           includeCurrent: true,
           excludeFromModel: true,
@@ -175,13 +175,13 @@ describe("secondary model target picker", () => {
         .click(),
     );
     const provider = [...document.querySelectorAll('[role="menuitem"]')].find(
-      (row) => row.textContent?.includes("Grok Build"),
+      (row) => row.textContent?.includes("omp"),
     )!;
     hover(provider);
 
     const modelLabels = [
       ...document.querySelectorAll(
-        '[role="menu"][aria-label="Grok Build models"] [role="menuitem"]',
+        '[role="menu"][aria-label="omp models"] [role="menuitem"]',
       ),
     ].map((row) => row.textContent);
     expect(modelLabels.some((text) => text?.includes("Review Model"))).toBe(
@@ -193,15 +193,15 @@ describe("secondary model target picker", () => {
   });
 
   it("disables the second-opinion button once the current model is the only one left", () => {
-    setHarnessModels("grok", [
-      { id: "grok:review", harness: "grok", name: "Review Model" },
+    setHarnessModels("omp", [
+      { id: "omp:review", harness: "omp", name: "Review Model" },
     ]);
     const onPick = vi.fn();
     act(() =>
       root.render(
         createElement(SecondOpinionButton, {
-          from: "grok",
-          fromModel: "grok:review",
+          from: "omp",
+          fromModel: "omp:review",
           onPick,
           includeCurrent: true,
           excludeFromModel: true,
@@ -229,8 +229,8 @@ describe("secondary model target picker", () => {
     act(() =>
       root.render(
         createElement(SecondOpinionButton, {
-          from: "cursor",
-          fromModel: "cursor:main",
+          from: "pi",
+          fromModel: "pi:main",
           onPick,
           includeCurrent: true,
           excludeFromModel: true,

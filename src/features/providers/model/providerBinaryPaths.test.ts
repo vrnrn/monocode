@@ -48,45 +48,65 @@ describe("provider binary paths", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("harness_runtime_binary_paths", {
       paths: { codex: "/opt/codex" },
     });
-    expect(providerPaths.runtimeProviderBinaryPath("cursor")).toBeNull();
+    expect(providerPaths.runtimeProviderBinaryPath("pi")).toBeNull();
     expect(providerPaths.runtimeProviderBinaryPath("codex")).toBe("/opt/codex");
   });
 
   it("keeps the active path unchanged across windows until restart", async () => {
-    let stored = JSON.stringify({ cursor: "/opt/cursor/old" });
+    let stored = JSON.stringify({ pi: "/opt/pi/old" });
     vi.mocked(localStorage.getItem).mockImplementation(() => stored);
     vi.mocked(localStorage.setItem).mockImplementation((_key, value) => {
       stored = value;
     });
-    mocks.invoke.mockResolvedValue({ cursor: "/opt/cursor/old" });
+    mocks.invoke.mockResolvedValue({ pi: "/opt/pi/old" });
 
     vi.resetModules();
     const firstWindow = await import("./providerBinaryPaths");
     await firstWindow.initializeProviderBinaryPaths();
-    expect(firstWindow.runtimeProviderBinaryPath("cursor")).toBe("/opt/cursor/old");
+    expect(firstWindow.runtimeProviderBinaryPath("pi")).toBe("/opt/pi/old");
 
-    firstWindow.saveProviderBinaryPath("cursor", "/opt/cursor/new");
-    expect(firstWindow.runtimeProviderBinaryPath("cursor")).toBe("/opt/cursor/old");
-    expect(firstWindow.providerBinaryPathChangePending("cursor")).toBe(true);
+    firstWindow.saveProviderBinaryPath("pi", "/opt/pi/new");
+    expect(firstWindow.runtimeProviderBinaryPath("pi")).toBe("/opt/pi/old");
+    expect(firstWindow.providerBinaryPathChangePending("pi")).toBe(true);
 
     vi.resetModules();
     const secondWindow = await import("./providerBinaryPaths");
     await secondWindow.initializeProviderBinaryPaths();
-    expect(secondWindow.runtimeProviderBinaryPath("cursor")).toBe("/opt/cursor/old");
-    expect(secondWindow.providerBinaryPathChangePending("cursor")).toBe(true);
+    expect(secondWindow.runtimeProviderBinaryPath("pi")).toBe("/opt/pi/old");
+    expect(secondWindow.providerBinaryPathChangePending("pi")).toBe(true);
 
-    mocks.invoke.mockResolvedValue({ cursor: "/opt/cursor/new" });
+    mocks.invoke.mockResolvedValue({ pi: "/opt/pi/new" });
     vi.resetModules();
     const restartedWindow = await import("./providerBinaryPaths");
     await restartedWindow.initializeProviderBinaryPaths();
-    expect(restartedWindow.runtimeProviderBinaryPath("cursor")).toBe("/opt/cursor/new");
-    expect(restartedWindow.providerBinaryPathChangePending("cursor")).toBe(false);
+    expect(restartedWindow.runtimeProviderBinaryPath("pi")).toBe("/opt/pi/new");
+    expect(restartedWindow.providerBinaryPathChangePending("pi")).toBe(false);
   });
 
   it("reports storage failures without claiming the path was saved", () => {
     vi.mocked(localStorage.setItem).mockImplementation(() => {
       throw new Error("storage full");
     });
-    expect(saveProviderBinaryPath("opencode", "/opt/opencode")).toBe(false);
+    expect(saveProviderBinaryPath("omp", "/opt/opencode")).toBe(false);
+  });
+  it("does not send removed providers' saved paths to the native runtime", async () => {
+    vi.mocked(localStorage.getItem).mockReturnValue(
+      JSON.stringify({
+        cursor: "/old/cursor-agent",
+        devin: "/old/devin",
+        pi: "/opt/pi",
+        antigravity: "/opt/agy_acp_server.par",
+      }),
+    );
+    mocks.invoke.mockResolvedValue({
+      pi: "/opt/pi",
+      antigravity: "/opt/agy_acp_server.par",
+    });
+    vi.resetModules();
+    const paths = await import("./providerBinaryPaths");
+    await paths.initializeProviderBinaryPaths();
+    expect(mocks.invoke).toHaveBeenCalledWith("harness_runtime_binary_paths", {
+      paths: { pi: "/opt/pi", antigravity: "/opt/agy_acp_server.par" },
+    });
   });
 });

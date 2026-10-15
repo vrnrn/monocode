@@ -1,14 +1,11 @@
 import * as codex from "../src/integrations/harness/providers/codex/codex";
 import * as claude from "../src/integrations/harness/providers/claude/claude";
-import * as cursor from "../src/integrations/harness/providers/cursor/cursor";
-import * as grok from "../src/integrations/harness/providers/grok/grok";
-import * as opencode from "../src/integrations/harness/providers/opencode/opencode";
+
 import * as pi from "../src/integrations/harness/providers/pi/pi";
 import * as omp from "../src/integrations/harness/providers/omp/omp";
-import * as fx from "../src/integrations/harness/providers/fx/fx";
-import * as hermes from "../src/integrations/harness/providers/hermes/hermes";
+
 import * as antigravity from "../src/integrations/harness/providers/antigravity/antigravity";
-import * as devin from "../src/integrations/harness/providers/devin/devin";
+
 import type {
   SendTurnInput,
   CompactContextInput,
@@ -21,9 +18,7 @@ import { generateCodexSessionTitle } from "../src/integrations/harness/providers
 import { generateClaudeSessionTitle } from "../src/integrations/harness/providers/claude/claudeTitle";
 import { generateCodexBranchName } from "../src/integrations/harness/providers/codex/codexGit";
 import { generateClaudeBranchName } from "../src/integrations/harness/providers/claude/claudeGit";
-import { generateCursorSessionTitle } from "../src/integrations/harness/providers/cursor/cursorTitle";
-import { generateGrokSessionTitle } from "../src/integrations/harness/providers/grok/grokTitle";
-import { generateOpenCodeSessionTitle } from "../src/integrations/harness/providers/opencode/opencodeTitle";
+
 import {
   generatePiSessionTitle,
   generateOmpSessionTitle,
@@ -73,35 +68,6 @@ export const hostProviders: Record<RemoteProvider, HostProvider> = {
     generateTitle: generateClaudeSessionTitle,
     generateBranchName: generateClaudeBranchName,
   },
-  cursor: {
-    send: cursor.sendCursorTurn,
-    cancel: cursor.cancelCursorTurn,
-    stop: cursor.forgetCursorSession,
-    bind: cursor.bindCursorSession,
-    approve: cursor.respondCursorApproval,
-    answer: cursor.respondCursorQuestion,
-    generateTitle: generateCursorSessionTitle,
-  },
-  grok: {
-    send: grok.sendGrokTurn,
-    compact: grok.compactGrokContext,
-    cancel: grok.cancelGrokTurn,
-    stop: grok.forgetGrokSession,
-    bind: grok.bindGrokSession,
-    approve: grok.respondGrokApproval,
-    answer: grok.respondGrokQuestion,
-    generateTitle: generateGrokSessionTitle,
-  },
-  opencode: {
-    send: opencode.sendOpenCodeTurn,
-    compact: opencode.compactOpenCodeContext,
-    cancel: opencode.cancelOpenCodeTurn,
-    stop: opencode.forgetOpenCodeSession,
-    bind: opencode.bindOpenCodeSession,
-    approve: opencode.respondOpenCodeApproval,
-    answer: opencode.respondOpenCodeQuestion,
-    generateTitle: generateOpenCodeSessionTitle,
-  },
   pi: {
     send: pi.sendPiTurn,
     compact: pi.compactPiContext,
@@ -124,22 +90,6 @@ export const hostProviders: Record<RemoteProvider, HostProvider> = {
       respondPiQuestion(OMP_FLAVOR, id, request, reply),
     generateTitle: generateOmpSessionTitle,
   },
-  fx: {
-    send: fx.sendFxTurn,
-    cancel: fx.cancelFxTurn,
-    stop: fx.forgetFxSession,
-    bind: fx.bindFxSession,
-    approve: fx.respondFxApproval,
-    answer: unsupportedQuestion,
-  },
-  hermes: {
-    send: hermes.sendHermesTurn,
-    cancel: hermes.cancelHermesTurn,
-    stop: hermes.forgetHermesSession,
-    bind: hermes.bindHermesSession,
-    approve: hermes.respondHermesApproval,
-    answer: unsupportedQuestion,
-  },
   antigravity: {
     send: antigravity.sendAntigravityTurn,
     cancel: antigravity.cancelAntigravityTurn,
@@ -147,19 +97,6 @@ export const hostProviders: Record<RemoteProvider, HostProvider> = {
     bind: antigravity.bindAntigravitySession,
     approve: antigravity.respondAntigravityApproval,
     answer: unsupportedQuestion,
-  },
-  devin: {
-    send: devin.sendDevinTurn,
-    compact: devin.compactDevinContext,
-    cancel: devin.cancelDevinTurn,
-    stop: devin.forgetDevinSession,
-    bind: devin.bindDevinSession,
-    approve: devin.respondDevinApproval,
-    answer: unsupportedQuestion,
-    generateTitle: ({ sessionId }) =>
-      devin
-        .waitForDevinSessionTitle(sessionId)
-        .then((title) => (title ? { title, workItem: null } : null)),
   },
 };
 

@@ -116,12 +116,12 @@ describe("secondOpinionTargets", () => {
   const all: HarnessId[] = [
     "claude",
     "codex",
-    "cursor",
-    "opencode",
     "pi",
     "omp",
-    "fx",
-    "grok",
+    "pi",
+    "omp",
+    "codex",
+    "antigravity",
   ];
   const installed = (id: HarnessId) => id === "claude" || id === "codex";
   const visible = (id: HarnessId) => all.includes(id);
@@ -150,10 +150,10 @@ describe("secondOpinionTargets", () => {
     expect(
       secondOpinionTargets("claude", {
         installed: () => false,
-        visible: (id) => id === "codex" || id === "cursor",
+        visible: (id) => id === "codex" || id === "pi",
         probed: false,
       }),
-    ).toEqual(["codex", "cursor"]);
+    ).toEqual(["codex", "pi"]);
   });
 
   it("can include the current provider for choosing another model", () => {
@@ -217,12 +217,12 @@ describe("buildSecondOpinionCard", () => {
   it("omits empty request and file fields", () => {
     expect(
       buildSecondOpinionCard({
-        from: "cursor",
+        from: "pi",
         to: "pi",
         userRequest: "   ",
         files: [],
       }),
-    ).toEqual({ from: "cursor", to: "pi" });
+    ).toEqual({ from: "pi", to: "pi" });
   });
 
   it("marks a split-pane continue as a handoff", () => {

@@ -17,8 +17,8 @@ beforeEach(() => {
 afterEach(() => resetHarnessModelOverlays());
 
 it("uses the configured Codex default instead of the last quick-composer model", () => {
-  localStorage.setItem("monocode.quickComposerHarness", "cursor");
-  localStorage.setItem("monocode.quickComposerModel", "cursor:composer-2.5");
+  localStorage.setItem("monocode.quickComposerHarness", "pi");
+  localStorage.setItem("monocode.quickComposerModel", "pi:composer-2.5");
   saveLastModelChoice("codex", "codex:gpt-5.6-luna");
   expect(initialQuickChoice()).toEqual({
     harness: "codex",
@@ -27,8 +27,8 @@ it("uses the configured Codex default instead of the last quick-composer model",
 });
 
 it("rereads the Providers default when opening another quick session", () => {
-  saveLastModelChoice("cursor", "cursor:composer-2.5");
-  expect(initialQuickChoice().harness).toBe("cursor");
+  saveLastModelChoice("pi", "pi:composer-2.5");
+  expect(initialQuickChoice().harness).toBe("pi");
   saveLastModelChoice("codex", "codex:gpt-5.6-luna");
   expect(initialQuickChoice()).toEqual({
     harness: "codex",

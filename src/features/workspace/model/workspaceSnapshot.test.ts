@@ -28,7 +28,7 @@ import {
 } from "./workspaceSnapshot";
 
 function chat(id: string, cwd: string): Session {
-  const session = newSession("cursor", cwd);
+  const session = newSession("pi", cwd);
   session.id = id;
   session.blocks = [{ id: "u1", role: "user", text: "hello" }];
   session.providerSessionId = "p1";
@@ -59,7 +59,9 @@ describe("project return snapshots", () => {
       path: "remote://env/repo/src/index.ts",
       cwd: project,
     });
-    expect(restored?.tabs[0].editorPanes[0].files[0].remoteFile).toBeUndefined();
+    expect(
+      restored?.tabs[0].editorPanes[0].files[0].remoteFile,
+    ).toBeUndefined();
     const malformed = JSON.parse(JSON.stringify(snapshot));
     malformed.tabs[0].editorPanes[0].files[0].remoteFile = { machineId: 42 };
     expect(parseWorkspaceSnapshot(malformed)).toBeNull();
@@ -479,7 +481,7 @@ describe("parseWorkspaceSnapshot", () => {
       sessions: [
         {
           id: "s1",
-          harness: "cursor",
+          harness: "pi",
           runtimeMode: "supervised",
           cwd: "/tmp/a",
         },

@@ -43,7 +43,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: vi.fn(async () => true) }));
 vi.mock("../../../integrations/harness/core/availability", () => ({
-  isHarnessAvailable: (id: string) => id === "claude" || id === "cursor",
+  isHarnessAvailable: (id: string) => id === "claude" || id === "pi",
   hasProbedHarnessAvailability: () => true,
   getHarnessAvailabilitySnapshot: () => 0,
   subscribeHarnessAvailability: () => () => {},
@@ -505,7 +505,7 @@ describe("settings pages", () => {
     expect(providerAccounts("codex")).toHaveLength(1);
   });
 
-  it("validates and stores Codex and OpenCode binary overrides", async () => {
+  it("validates and stores Codex and omp binary overrides", async () => {
     let failAutoCodex = false;
     vi.mocked(invoke).mockImplementation(async (command, args) => {
       const payload = args as { binaryPath?: string } | undefined;
@@ -518,15 +518,15 @@ describe("settings pages", () => {
         }
         return { path: payload?.binaryPath ?? "/auto/codex" };
       }
-      if (command === "harness_resolve_opencode") {
-        return { path: payload?.binaryPath ?? "/auto/opencode" };
+      if (command === "harness_resolve_omp") {
+        return { path: payload?.binaryPath ?? "/auto/omp" };
       }
       if (command === "harness_exec") {
         if (payload?.binaryPath === "/bad/codex") {
           throw new Error("Codex failed to start");
         }
-        return payload?.binaryPath?.includes("opencode")
-          ? "opencode 1.18.32"
+        return payload?.binaryPath?.includes("omp")
+          ? "omp 1.18.32"
           : "codex-cli 0.156.1";
       }
       return undefined;
@@ -548,7 +548,7 @@ describe("settings pages", () => {
       path: "/auto/codex",
     });
 
-    const save = async (provider: "Codex" | "OpenCode", path: string) => {
+    const save = async (provider: "Codex" | "omp", path: string) => {
       const id = `${provider.toLowerCase()}-binary-path`;
       if (!document.querySelector(`#${id}`)) {
         if (!document.querySelector(`[aria-label="Edit ${provider} CLI path"]`)) {
@@ -580,14 +580,14 @@ describe("settings pages", () => {
     };
 
     await save("Codex", "/opt/codex/bin/codex");
-    await save("OpenCode", "/opt/opencode/bin/opencode");
+    await save("omp", "/opt/omp/bin/omp");
     expect(
       JSON.parse(
         localStorage.getItem("monocode.providerBinaryPaths.v1") ?? "{}",
       ),
     ).toEqual({
       codex: "/opt/codex/bin/codex",
-      opencode: "/opt/opencode/bin/opencode",
+      omp: "/opt/omp/bin/omp",
     });
     await act(async () => details.click());
     expect(document.body.textContent).toContain("/opt/codex/bin/codex");
@@ -595,11 +595,11 @@ describe("settings pages", () => {
     expect(document.body.textContent).toContain("Restart required");
     await act(async () => details.click());
     const openCodeDetails = container.querySelector<HTMLButtonElement>(
-      '[aria-label^="Show OpenCode CLI details"]',
+      '[aria-label^="Show omp CLI details"]',
     )!;
     await act(async () => openCodeDetails.click());
-    expect(document.body.textContent).toContain("/opt/opencode/bin/opencode");
-    expect(document.body.textContent).toContain("opencode 1.18.32");
+    expect(document.body.textContent).toContain("/opt/omp/bin/omp");
+    expect(document.body.textContent).toContain("omp 1.18.32");
     await act(async () => openCodeDetails.click());
 
     await save("Codex", "/bad/codex");
@@ -1226,7 +1226,7 @@ describe("providers scope inheritance", () => {
     );
     localStorage.setItem(
       "monocode.hiddenPickerProviders",
-      JSON.stringify(["cursor"]),
+      JSON.stringify(["pi"]),
     );
     await render("providers");
 
@@ -1250,7 +1250,7 @@ describe("providers scope inheritance", () => {
         .getAttribute("aria-checked"),
     ).toBe("true");
     const cursorToggle = container.querySelector<HTMLButtonElement>(
-      '[aria-label="Show Cursor in the model picker"]',
+      '[aria-label="Show Pi in the model picker"]',
     )!;
     expect(cursorToggle.getAttribute("aria-checked")).toBe("false");
     // Global precedence: the project toggle cannot turn a globally hidden

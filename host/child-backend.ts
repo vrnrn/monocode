@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import {
   execFile,
   spawn,
@@ -5,14 +6,10 @@ import {
 } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { promisify } from "node:util";
-import { createHash } from "node:crypto";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
+import { readFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { ChildBackend } from "../src/integrations/harness/core/child";
-import { devinAskEditsConfig } from "../src/integrations/harness/providers/devin/devinProtocol";
+
 import {
   isRemoteProvider,
   type RemoteProvider,
@@ -29,80 +26,18 @@ const ALLOWED_EXEC_ARGS: readonly (readonly string[])[] = [
   ["status", "--json"],
   ["agent", "list"],
 ];
-// OpenCode 2.x runs as a background service; other providers' CLIs may give
-// these subcommands unrelated meanings, so they stay OpenCode-only.
-const OPENCODE_EXEC_ARGS: readonly (readonly string[])[] = [
-  ["service", "status"],
-  ["service", "start"],
-  ["service", "get", "password"],
-];
-// Devin reads its login location from `auth status`.
-const DEVIN_EXEC_ARGS: readonly (readonly string[])[] = [["auth", "status"]];
 
-function execArgsAllowed(provider: RemoteProvider, args: string[]): boolean {
+function execArgsAllowed(_provider: RemoteProvider, args: string[]): boolean {
   const matches = (allowed: readonly string[]) =>
     allowed.length === args.length &&
     allowed.every((arg, index) => arg === args[index]);
-  return (
-    ALLOWED_EXEC_ARGS.some(matches) ||
-    (provider === "opencode" && OPENCODE_EXEC_ARGS.some(matches)) ||
-    (provider === "devin" && DEVIN_EXEC_ARGS.some(matches)) ||
-    (provider === "grok" &&
-      args.length === 4 &&
-      args[0] === "--no-auto-update" &&
-      args[1] === "sessions" &&
-      args[2] === "delete" &&
-      /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(args[3]))
-  );
-}
-
-/** The user config file Devin itself reads. */
-function devinUserConfigPath(): string {
-  if (process.platform === "win32")
-    return join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "devin", "config.json");
-  return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "devin", "config.json");
-}
-
-/**
- * Supervised `devin acp` runs with a copy of the user's config plus an ask
- * rule for every write (see devin_config.rs). Named by content so a running
- * child's file is never rewritten.
- */
-async function devinAskEditsArgs(): Promise<string[]> {
-  let user: string | null = null;
-  try {
-    user = await readFile(devinUserConfigPath(), "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  const config = devinAskEditsConfig(user);
-  const dir = join(homedir(), ".monocode-host", "devin");
-  const hash = createHash("sha256").update(config).digest("hex").slice(0, 16);
-  const file = join(dir, `supervised-${hash}.json`);
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  await writeFile(file, config, { mode: 0o600, flag: "wx" }).catch((error) => {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-  });
-  return ["--config", file];
-}
-
-function loopbackUrl(value: unknown): string {
-  const url = new URL(String(value));
-  if (
-    url.protocol !== "http:" ||
-    !["127.0.0.1", "localhost"].includes(url.hostname) ||
-    url.username ||
-    url.password
-  )
-    throw new Error("OpenCode HTTP is limited to localhost");
-  return url.href;
+  return ALLOWED_EXEC_ARGS.some(matches);
 }
 
 /** Native process implementation for the headless execution proof. */
 export class HostChildBackend implements ChildBackend {
   private events = new EventEmitter();
   private children = new Map<string, ChildProcessWithoutNullStreams>();
-  private streams = new Map<string, AbortController>();
   private closing = false;
 
   constructor(
@@ -168,53 +103,6 @@ export class HostChildBackend implements ChildBackend {
         });
         return stdout as T;
       }
-      case "harness_free_port": {
-        const server = createServer();
-        try {
-          return await new Promise<T>((resolve, reject) => {
-            server.once("error", reject);
-            server.listen(0, "127.0.0.1", () => {
-              const address = server.address();
-              if (!address || typeof address === "string")
-                reject(new Error("Could not reserve a local port"));
-              else resolve(address.port as T);
-            });
-          });
-        } finally {
-          server.close();
-        }
-      }
-      case "harness_http": {
-        const url = loopbackUrl(args.url);
-        const response = await fetch(url, {
-          method: String(args.method),
-          headers: args.headers as Record<string, string> | undefined,
-          body: args.body as string | undefined,
-          redirect: "error",
-          signal: AbortSignal.timeout(
-            typeof args.timeoutMs === "number"
-              ? Math.max(1, args.timeoutMs)
-              : 30_000,
-          ),
-        });
-        return { status: response.status, body: await response.text() } as T;
-      }
-      case "harness_sse_open": {
-        const url = loopbackUrl(args.url);
-        this.stopStream(id);
-        const controller = new AbortController();
-        this.streams.set(id, controller);
-        void this.readStream(
-          id,
-          url,
-          args.headers as Record<string, string> | undefined,
-          controller,
-        );
-        return undefined as T;
-      }
-      case "harness_sse_close":
-        this.stopStream(id);
-        return undefined as T;
       case "harness_read_text_file": {
         const path = String(args.path ?? "");
         const info = await stat(path);
@@ -255,69 +143,6 @@ export class HostChildBackend implements ChildBackend {
     }
   }
 
-  private stopStream(id: string): void {
-    this.streams.get(id)?.abort();
-    this.streams.delete(id);
-  }
-
-  private async readStream(
-    id: string,
-    url: string,
-    headers: Record<string, string> | undefined,
-    controller: AbortController,
-  ): Promise<void> {
-    let error: string | undefined;
-    try {
-      const response = await fetch(url, {
-        headers: { Accept: "text/event-stream", ...headers },
-        redirect: "error",
-        signal: controller.signal,
-      });
-      if (!response.ok || !response.body)
-        throw new Error(
-          `OpenCode event stream returned HTTP ${response.status}`,
-        );
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let data: string[] = [];
-      let dataLength = 0;
-      while (!controller.signal.aborted) {
-        const next = await reader.read();
-        if (next.done) break;
-        buffer += decoder.decode(next.value, { stream: true });
-        if (buffer.length > 8 * 1024 * 1024)
-          throw new Error("OpenCode event stream frame is too large");
-        let index: number;
-        while ((index = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, index).replace(/\r$/, "");
-          buffer = buffer.slice(index + 1);
-          if (!line) {
-            if (data.length)
-              this.emit("harness-sse", {
-                sessionId: id,
-                data: data.join("\n"),
-              });
-            data = [];
-            dataLength = 0;
-          } else if (line.startsWith("data:")) {
-            const piece = line.slice(5).replace(/^ /, "");
-            dataLength += piece.length;
-            if (dataLength > 8 * 1024 * 1024)
-              throw new Error("OpenCode event stream frame is too large");
-            data.push(piece);
-          }
-        }
-      }
-    } catch (reason) {
-      if (!controller.signal.aborted)
-        error = reason instanceof Error ? reason.message : String(reason);
-    } finally {
-      if (this.streams.get(id) === controller) this.streams.delete(id);
-      this.emit("harness-sse-end", { sessionId: id, error });
-    }
-  }
-
   private async start(
     id: string,
     args: Record<string, unknown>,
@@ -330,17 +155,8 @@ export class HostChildBackend implements ChildBackend {
       throw new Error(
         "Named provider accounts are not supported by this host yet",
       );
-    let commandArgs = args.args as string[];
-    if (args.devinAskEdits) {
-      if (
-        args.binaryProvider !== "devin" ||
-        commandArgs.length !== 1 ||
-        commandArgs[0] !== "acp"
-      )
-        throw new Error("Edit approvals are only supported for `devin acp`");
-      // `--config` is a global option, so it precedes the subcommand.
-      commandArgs = [...(await devinAskEditsArgs()), ...commandArgs];
-    }
+    const commandArgs = args.args as string[];
+
     const launch = await providerLaunch(String(args.command), commandArgs);
     if (this.closing) throw new Error("Host is stopping");
     const child = spawn(
@@ -468,7 +284,6 @@ export class HostChildBackend implements ChildBackend {
 
   async close(): Promise<void> {
     this.closing = true;
-    for (const id of this.streams.keys()) this.stopStream(id);
     await Promise.all([...this.children.keys()].map((id) => this.kill(id)));
   }
 }

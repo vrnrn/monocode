@@ -41,10 +41,9 @@ describe("editLastTurn", () => {
       { id: "a2", role: "assistant", text: "done" },
     ];
     expect(lastUserTurnStartIndex(blocks)).toBe(2);
-    expect(truncateBeforeLastUserTurn(blocks).map((block) => block.id)).toEqual([
-      "u1",
-      "a1",
-    ]);
+    expect(truncateBeforeLastUserTurn(blocks).map((block) => block.id)).toEqual(
+      ["u1", "a1"],
+    );
   });
 
   it("ignores draft user blocks when selecting the editable turn", () => {
@@ -116,9 +115,19 @@ describe("editLastTurn", () => {
     const session = {
       ...newSession("codex", "/tmp"),
       blocks: [
-        { id: "u1", role: "user" as const, text: "first", providerTurnId: "t1" },
+        {
+          id: "u1",
+          role: "user" as const,
+          text: "first",
+          providerTurnId: "t1",
+        },
         { id: "a1", role: "assistant" as const, text: "done" },
-        { id: "u2", role: "user" as const, text: "second", providerTurnId: "t2" },
+        {
+          id: "u2",
+          role: "user" as const,
+          text: "second",
+          providerTurnId: "t2",
+        },
         { id: "a2", role: "assistant" as const, text: "working" },
         {
           id: "u3",
@@ -131,21 +140,16 @@ describe("editLastTurn", () => {
     };
 
     expect(lastEditableTurnStartIndex(session)).toBe(2);
-    expect(truncateBeforeLastEditableTurn(session).map((block) => block.id)).toEqual([
-      "u1",
-      "a1",
-    ]);
+    expect(
+      truncateBeforeLastEditableTurn(session).map((block) => block.id),
+    ).toEqual(["u1", "a1"]);
     expect(prepareEditedResend(session)).toMatchObject({
       providerTurnId: "t2",
-      blocks: [
-        { id: "u1" },
-        { id: "a1" },
-      ],
+      blocks: [{ id: "u1" }, { id: "a1" }],
     });
-    expect(replaceEditedResend(session).blocks.map((block) => block.id)).toEqual([
-      "u1",
-      "a1",
-    ]);
+    expect(
+      replaceEditedResend(session).blocks.map((block) => block.id),
+    ).toEqual(["u1", "a1"]);
   });
 
   it("restores edit mode when the provider never rewound", () => {
@@ -217,7 +221,7 @@ describe("editLastTurn", () => {
         { id: "u1", role: "user", text: "hello" },
         { id: "a1", role: "assistant", text: "hi" },
       ]),
-      harness: "opencode" as const,
+      harness: "omp" as const,
     };
     expect(canEditLastTurn(session)).toBe(true);
   });
@@ -231,9 +235,7 @@ describe("editLastTurn", () => {
     expect(
       canEditLastTurn({
         ...base,
-        queuedMessages: [
-          { id: "q1", text: "next", attachments: [] },
-        ],
+        queuedMessages: [{ id: "q1", text: "next", attachments: [] }],
       }),
     ).toBe(false);
     expect(canEditLastTurn({ ...chat([]), harness: "claude" })).toBe(false);

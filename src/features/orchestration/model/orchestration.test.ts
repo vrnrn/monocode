@@ -13,7 +13,6 @@ import {
 import { newSession } from "../../sessions/model/session";
 import type { OrchestrationProposal } from "./orchestrationPlan";
 import { normalizeOrchestrationRun } from "./orchestrationState";
-import { previewFromToolPart } from "../../../integrations/harness/providers/opencode/opencodeProtocol";
 
 function setup() {
   const saved = new Map<string, OrchestrationRun>();
@@ -798,55 +797,6 @@ describe("local orchestration", () => {
       "interrupted",
     ]);
     await f.manager.stopRun("lead");
-  });
-  it("allows OpenCode scratch writes only in that worker's private directory", async () => {
-    const f = setup();
-    await f.start();
-    await f.delegate(["brief.py"]);
-    await f.delegate(["commands.py"]);
-    await vi.waitFor(() => expect(f.host.submit).toHaveBeenCalledTimes(2));
-    const [worker, other] = f.tasks();
-    const write = (path: string) => ({
-      type: "tool.updated" as const,
-      callId: path,
-      title: "Write",
-      status: "running",
-      preview: previewFromToolPart({
-        id: path,
-        type: "tool",
-        tool: "write",
-        state: {
-          status: "running",
-          input: { filePath: path, content: "test" },
-        },
-      }),
-    });
-    expect(vi.mocked(f.host.submit).mock.calls[0][1]).toContain(
-      worker.scratchDir,
-    );
-    // macOS reports both /var and /private/var for the same file.
-    f.store.resolvePath.mockImplementation(async (path) =>
-      path.replace(/^\/var\//, "/private/var/"),
-    );
-    f.manager.observe(
-      worker.sessionId,
-      write(`${worker.scratchDir!.replace("/private", "")}/helper.py`),
-    );
-    f.manager.observe(worker.sessionId, write("brief.py"));
-    await vi.waitFor(() =>
-      expect(f.store.resolvePath).toHaveBeenCalledTimes(2),
-    );
-    expect(f.manager.run("lead")!.status).toBe("active");
-    expect(f.tasks().every((task) => task.status === "running")).toBe(true);
-    f.manager.observe(worker.sessionId, write(`${other.scratchDir}/helper.py`));
-    await vi.waitFor(() =>
-      expect(f.tasks().map((task) => task.status)).toEqual([
-        "blocked",
-        "running",
-      ]),
-    );
-    expect(f.tasks()[0].error).toContain("outside its assignment");
-    expect(f.manager.run("lead")!.status).toBe("active");
   });
 
   it("keeps a paused run inspectable and automatically continues interrupted work on Resume", async () => {

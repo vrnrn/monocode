@@ -346,8 +346,8 @@ fn validate_attachments(files: &[QuickAttachment], harness: &str) -> Result<(), 
     if files.len() > 20 {
         return Err("You can attach up to 20 files.".into());
     }
-    if !files.is_empty() && harness == "fx" {
-        return Err("This provider does not support attachments.".into());
+    if !crate::harness::is_supported_provider(harness) {
+        return Err("Choose a supported agent CLI.".into());
     }
     for file in files {
         if file.id.is_empty()

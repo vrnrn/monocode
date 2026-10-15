@@ -1,7 +1,6 @@
 import {
   clampUsedPercent,
   DAILY_WINDOW_MINUTES,
-  formatExtraUsageBalance,
   formatResetDuration,
   formatUsagePercent,
   formatWindowLabel,
@@ -88,8 +87,10 @@ export function meterWindows(
   return [
     limits?.session
       ? {
-          // Devin's short window is a day, not five hours.
-          title: limits.session.windowMinutes === DAILY_WINDOW_MINUTES ? "Daily" : "5h",
+          title:
+            limits.session.windowMinutes === DAILY_WINDOW_MINUTES
+              ? "Daily"
+              : "5h",
           window: limits.session,
         }
       : null,
@@ -136,14 +137,6 @@ export function AccountUsageMeters({
           now={now}
         />
       ))}
-      {limits?.extraUsageBalance != null ? (
-        <div className="w-16 text-[10px] leading-3" title="Extra usage balance">
-          <div className="truncate text-content/40">Extra</div>
-          <div className="mt-1 font-medium tabular-nums text-content/70">
-            {formatExtraUsageBalance(limits.extraUsageBalance)}
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

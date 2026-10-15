@@ -13,7 +13,9 @@ const child = vi.hoisted(() => ({
 }));
 
 vi.mock("./child", () => child);
-vi.mock("../../../platform/tauri/fs", () => ({ homeDir: vi.fn(async () => "/home/alice") }));
+vi.mock("../../../platform/tauri/fs", () => ({
+  homeDir: vi.fn(async () => "/home/alice"),
+}));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ label: "test-window" }),
 }));
@@ -36,10 +38,7 @@ describe("harness login", () => {
   it("advertises only deterministic account login commands", () => {
     expect(harnessLoginArgs("claude")).toEqual(["auth", "login"]);
     expect(harnessLoginArgs("codex")).toEqual(["login"]);
-    expect(harnessLoginArgs("cursor")).toEqual(["login"]);
-    expect(harnessLoginArgs("grok")).toEqual(["login", "--oauth"]);
-    expect(harnessLoginArgs("fx")).toEqual(["login", "vercel"]);
-    expect(supportsHarnessLogin("opencode")).toBe(false);
+    expect(supportsHarnessLogin("antigravity")).toBe(false);
     expect(supportsHarnessLogin("pi")).toBe(false);
     expect(supportsHarnessLogin("omp")).toBe(false);
   });
@@ -100,8 +99,7 @@ describe("harness login", () => {
     );
 
     const onExit = child.watchChild.mock.calls[0]?.[2] as
-      | ((code: number | null) => void)
-      | undefined;
+      ((code: number | null) => void) | undefined;
     onExit?.(0);
     await expect(login).resolves.toBeUndefined();
   });
@@ -120,7 +118,7 @@ describe("harness login", () => {
   });
 
   it("does not invent one login flow for multi-provider harnesses", async () => {
-    await expect(loginHarness("opencode")).rejects.toThrow(
+    await expect(loginHarness("pi")).rejects.toThrow(
       "does not offer a single browser sign-in flow",
     );
     expect(child.spawnChild).not.toHaveBeenCalled();

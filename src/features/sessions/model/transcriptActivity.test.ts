@@ -702,7 +702,7 @@ describe("groupTurns", () => {
         id: "h1",
         role: "handoff",
         text: "Goal: go",
-        handoff: { from: "cursor", to: "claude", status: "ready" },
+        handoff: { from: "pi", to: "claude", status: "ready" },
       },
       { id: "u2", role: "user", text: "continue" },
     ]);

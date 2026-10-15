@@ -154,13 +154,10 @@ describe("child bridge", () => {
           ? JSON.stringify({
               claude: "/opt/claude/bin/claude",
               codex: "/opt/codex/bin/codex",
-              cursor: "/opt/cursor/bin/cursor-agent",
-              grok: "/opt/grok/bin/grok",
-              opencode: "/opt/opencode/bin/opencode",
+
               pi: "/opt/pi/bin/pi",
               omp: "/opt/omp/bin/omp",
-              fx: "/opt/fx/bin/fx",
-              hermes: "/opt/hermes/bin/hermes",
+
               antigravity: "/opt/antigravity/bin/agy_acp_server.par",
             })
           : null,
@@ -176,12 +173,10 @@ describe("child bridge", () => {
 
     for (const [provider, binaryPath, resolve] of [
       ["claude", "/opt/claude/bin/claude", child.resolveClaudeBinary],
-      ["cursor", "/opt/cursor/bin/cursor-agent", child.resolveCursorBinary],
-      ["grok", "/opt/grok/bin/grok", child.resolveGrokBinary],
+
       ["pi", "/opt/pi/bin/pi", child.resolvePiBinary],
       ["omp", "/opt/omp/bin/omp", child.resolveOmpBinary],
-      ["fx", "/opt/fx/bin/fx", child.resolveFxBinary],
-      ["hermes", "/opt/hermes/bin/hermes", child.resolveHermesBinary],
+
       [
         "antigravity",
         "/opt/antigravity/bin/agy_acp_server.par",
@@ -198,13 +193,13 @@ describe("child bridge", () => {
       );
     }
 
-    await child.execChild("/resolved", ["--version"], undefined, "opencode");
+    await child.execChild("/resolved", ["--version"], undefined, "omp");
     expect(mocks.invoke).toHaveBeenCalledWith("harness_exec", {
       command: "/resolved",
       args: ["--version"],
       cwd: undefined,
-      binaryProvider: "opencode",
-      binaryPath: "/opt/opencode/bin/opencode",
+      binaryProvider: "omp",
+      binaryPath: "/opt/omp/bin/omp",
     });
 
     await child.execChild("/resolved", ["--version"], undefined, "codex", null);
@@ -260,15 +255,11 @@ describe("child bridge", () => {
     // Events are broadcast to every window; this one never spawned "other".
     for (let i = 0; i < 5; i += 1) {
       emit("harness-stdout", { sessionId: "other", line: `line ${i}` });
-      emit("harness-sse", { sessionId: "other", data: `event ${i}` });
     }
 
     const lines: string[] = [];
-    const events: string[] = [];
     child.watchChild("other", (line) => lines.push(line), vi.fn());
-    child.watchSse("other", (data) => events.push(data));
     expect(lines).toEqual([]);
-    expect(events).toEqual([]);
     release();
   });
 
@@ -282,19 +273,14 @@ describe("child bridge", () => {
 
     await child.spawnChild("mine", "agent", [], "/tmp");
     emit("harness-stdout", { sessionId: "mine", line: "early" });
-    await child.openHarnessSse("mine", "http://127.0.0.1:1/event");
-    emit("harness-sse", { sessionId: "mine", data: "early-event" });
 
     const lines: string[] = [];
-    const events: string[] = [];
     child.watchChild("mine", (line) => lines.push(line), vi.fn());
-    child.watchSse("mine", (data) => events.push(data));
     expect(lines).toEqual(["early"]);
-    expect(events).toEqual(["early-event"]);
     release();
   });
 
-  it("unpacks batched stdout and SSE in order, as if sent line by line", async () => {
+  it("unpacks batched stdout in order, as if sent line by line", async () => {
     installResolvedListeners();
     const child = await loadChild();
     const release = await child.acquireHarnessBridge();
@@ -303,7 +289,6 @@ describe("child bridge", () => {
     mocks.invoke.mockResolvedValue(42);
 
     await child.spawnChild("mine", "agent", [], "/tmp");
-    await child.openHarnessSse("mine", "http://127.0.0.1:1/event");
     emit("harness-stdout", { sessionId: "mine", lines: ["early1", "early2"] });
     const lines: string[] = [];
     child.watchChild(
@@ -319,10 +304,6 @@ describe("child bridge", () => {
     emit("harness-stdout", { sessionId: "mine", lines: ["a", "b", "c"] });
     expect(lines).toEqual(["early1", "early2", "a", "b"]);
 
-    const events: string[] = [];
-    child.watchSse("mine", (data) => events.push(data));
-    emit("harness-sse", { sessionId: "mine", events: ["e1", "e2"] });
-    expect(events).toEqual(["e1", "e2"]);
     release();
   });
 

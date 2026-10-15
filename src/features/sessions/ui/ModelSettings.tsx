@@ -1,4 +1,10 @@
-import { AiIdea, ChevronDown, Gauge, Maximize2, Zap } from "../../../shared/ui/icons";
+import {
+  AiIdea,
+  ChevronDown,
+  Gauge,
+  Maximize2,
+  Zap,
+} from "../../../shared/ui/icons";
 import {
   useEffect,
   useMemo,
@@ -35,9 +41,7 @@ export function ModelSettings({
   const catalog = useSyncCatalog();
   const settings = useMemo(() => {
     void catalog;
-    const list = (resolveModel(harness, model).settings ?? []).filter(
-      (setting) => !(harness === "opencode" && setting.id === "agent"),
-    );
+    const list = resolveModel(harness, model).settings ?? [];
     const order = [
       "variant",
       "agent",

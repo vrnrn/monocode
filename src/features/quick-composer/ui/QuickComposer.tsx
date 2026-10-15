@@ -668,7 +668,7 @@ export function QuickComposer({ onShown }: { onShown: () => void }) {
           <span className="truncate">{model.name}</span>
           <ChevronDown className="size-3 shrink-0 opacity-60" />
         </button>
-        {model.harness !== "fx" ? (
+        {
           <button
             type="button"
             onMouseDown={(event) => event.preventDefault()}
@@ -684,7 +684,7 @@ export function QuickComposer({ onShown }: { onShown: () => void }) {
             <span className="truncate">{RUNTIME_MODE_LABEL[runtimeMode]}</span>
             <ChevronDown className="size-3 shrink-0 opacity-60" />
           </button>
-        ) : null}
+        }
         <span className="ml-auto flex shrink-0 items-center gap-3 text-[11px] text-content/45">
           {attachments.loading ? (
             <span role="status">Adding attachment…</span>

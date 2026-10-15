@@ -6,7 +6,7 @@ import {
 } from "./sessionCache";
 
 function chat(id: string): ReturnType<typeof newSession> {
-  const session = newSession("cursor", "/tmp/project");
+  const session = newSession("pi", "/tmp/project");
   session.id = id;
   return session;
 }

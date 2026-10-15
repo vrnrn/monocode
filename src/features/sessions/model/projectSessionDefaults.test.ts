@@ -49,11 +49,11 @@ describe("newSessionForProject", () => {
   });
 
   it("uses the project default provider even when the seed one is allowed", () => {
-    setProjectDefaultProvider("/repo/a", "cursor", "cursor:composer-2.5");
+    setProjectDefaultProvider("/repo/a", "pi", "pi:default");
     const seed = newSession("claude", "/repo/a", "claude:opus-5");
     const session = newSessionForProject(seed, "/repo/a");
-    expect(session.harness).toBe("cursor");
-    expect(session.model).toBe("cursor:composer-2.5");
+    expect(session.harness).toBe("pi");
+    expect(session.model).toBe("pi:default");
   });
 
   it("applies a project model override to the carried provider", () => {
@@ -81,13 +81,13 @@ describe("retargetSessionToProject", () => {
   });
 
   it("adopts the project defaults while keeping the session identity", () => {
-    setProjectDefaultProvider("/repo/a", "cursor", "cursor:composer-2.5");
+    setProjectDefaultProvider("/repo/a", "pi", "pi:default");
     const blank = newSession("claude", "~", "claude:opus-5");
     const retargeted = retargetSessionToProject(blank, "/repo/a");
     expect(retargeted.id).toBe(blank.id);
     expect(retargeted.cwd).toBe("/repo/a");
-    expect(retargeted.harness).toBe("cursor");
-    expect(retargeted.model).toBe("cursor:composer-2.5");
+    expect(retargeted.harness).toBe("pi");
+    expect(retargeted.model).toBe("pi:default");
   });
 
   it("keeps the session's provider when the project has no defaults", () => {
@@ -98,14 +98,14 @@ describe("retargetSessionToProject", () => {
   });
 
   it("drops provider-bound fields when retargeting changes the harness", () => {
-    setProjectDefaultProvider("/repo/a", "cursor", "cursor:composer-2.5");
+    setProjectDefaultProvider("/repo/a", "pi", "pi:default");
     const blank: Session = {
       ...newSession("claude", "~", "claude:opus-5"),
       providerSessionId: "claude-session",
       providerAccountId: "claude-account",
     };
     const retargeted = retargetSessionToProject(blank, "/repo/a");
-    expect(retargeted.harness).toBe("cursor");
+    expect(retargeted.harness).toBe("pi");
     expect(retargeted.providerSessionId).toBeUndefined();
     expect(retargeted.providerAccountId).toBeUndefined();
   });

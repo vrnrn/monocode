@@ -1,13 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { leafIds, newFileTab, newTab, type WorkspaceTab } from "../../workspace/model/layout";
+import {
+  leafIds,
+  newFileTab,
+  newTab,
+  type WorkspaceTab,
+} from "../../workspace/model/layout";
 import type { Session } from "./session";
 import { applyAddToChatRequest } from "./addChatToWorkspace";
 
-function session(id: string, cwd: string, overrides: Partial<Session> = {}): Session {
+function session(
+  id: string,
+  cwd: string,
+  overrides: Partial<Session> = {},
+): Session {
   return {
     id,
     cwd,
-    harness: "cursor",
+    harness: "pi",
     title: "",
     blocks: [],
     busy: false,
@@ -25,7 +34,9 @@ function fileOnlyTab(id: string, cwd: string): WorkspaceTab {
   };
 }
 
-function newChat(result: NonNullable<ReturnType<typeof applyAddToChatRequest>>): Session {
+function newChat(
+  result: NonNullable<ReturnType<typeof applyAddToChatRequest>>,
+): Session {
   return result.sessions.find((s) => s.id === result.sessionId)!;
 }
 

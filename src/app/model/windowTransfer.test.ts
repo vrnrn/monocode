@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { leaf, newTab, newTerminalFile, type WorkspaceTab } from "../../features/workspace/model/layout";
+import {
+  leaf,
+  newTab,
+  newTerminalFile,
+  type WorkspaceTab,
+} from "../../features/workspace/model/layout";
 import { createProjectTerminal } from "../../features/projects/model/projectTerminal";
 import type { Session } from "../../features/sessions/model/session";
 import { collectWindowTransfer } from "./windowTransfer";
@@ -8,7 +13,7 @@ function session(id: string, cwd: string): Session {
   return {
     id,
     cwd,
-    harness: "cursor",
+    harness: "pi",
     title: "",
     blocks: [],
     busy: false,
@@ -40,7 +45,10 @@ describe("collectWindowTransfer", () => {
       projectCwd: "/Users/me/agent-terminal",
     });
     expect(payload?.tabs.map((tab) => tab.id)).toEqual(["t1", "t2"]);
-    expect(payload?.sessions.map((session) => session.id)).toEqual(["s1", "s2"]);
+    expect(payload?.sessions.map((session) => session.id)).toEqual([
+      "s1",
+      "s2",
+    ]);
     expect(payload?.projectTerminals).toBeUndefined();
   });
 

@@ -16,10 +16,10 @@ function summary(id: string, cwd: string, updatedAt = 1): SessionSummary {
   return {
     id,
     cwd,
-    harness: "cursor",
+    harness: "pi",
     model: "gpt-5",
     runtimeMode: "supervised",
-    title: `cursor · ${id}`,
+    title: `pi · ${id}`,
     createdAt: updatedAt,
     updatedAt,
     additions: 0,
@@ -140,9 +140,9 @@ describe("historyWithLiveSessions", () => {
       url: "https://github.com/acme/app/pull/42",
     };
     const session = {
-      ...newSession("cursor", cwd),
+      ...newSession("pi", cwd),
       id: "live",
-      title: "cursor · Fix tab title refresh",
+      title: "pi · Fix tab title refresh",
       linkedWorkItem,
       blocks: [{ id: "u", role: "user" as const, text: "Fix PR #42" }],
       busy: true,
@@ -153,7 +153,7 @@ describe("historyWithLiveSessions", () => {
       cwd,
     );
     expect(rows[0]).toMatchObject({
-      title: "cursor · Fix tab title refresh",
+      title: "pi · Fix tab title refresh",
       linkedWorkItem,
     });
   });
@@ -178,7 +178,7 @@ describe("historyWithLiveSessions", () => {
   });
 
   it("does not inject live sessions from other projects", () => {
-    const session = newSession("cursor", "/tmp/project-b");
+    const session = newSession("pi", "/tmp/project-b");
     session.blocks = [{ id: "u1", role: "user", text: "hello" }];
     session.busy = true;
 
@@ -187,7 +187,7 @@ describe("historyWithLiveSessions", () => {
   });
 
   it("includes live sessions for the active project", () => {
-    const session = newSession("cursor", "/tmp/project-a");
+    const session = newSession("pi", "/tmp/project-a");
     session.blocks = [{ id: "u1", role: "user", text: "hello" }];
     session.busy = true;
 
@@ -197,7 +197,7 @@ describe("historyWithLiveSessions", () => {
   });
 
   it("marks drafts appended to started threads and clears stale draft status when sent", () => {
-    const session = newSession("cursor", "/tmp/project-a");
+    const session = newSession("pi", "/tmp/project-a");
     session.id = "draft-session";
     session.blocks = [
       { id: "sent", role: "user", text: "Start here" },
@@ -223,7 +223,7 @@ describe("historyWithLiveSessions", () => {
   });
 
   it("overlays an automation origin onto an already-saved session", () => {
-    const session = newSession("cursor", "/tmp/project-a");
+    const session = newSession("pi", "/tmp/project-a");
     session.id = "auto-session";
     session.blocks = [{ id: "u1", role: "user", text: "review PRs" }];
     session.automationId = "automation-1";
@@ -238,7 +238,7 @@ describe("historyWithLiveSessions", () => {
   });
 
   it("stamps composer git onto a live session that is not persisted yet", () => {
-    const session = newSession("cursor", "/tmp/monocode");
+    const session = newSession("pi", "/tmp/monocode");
     session.blocks = [{ id: "u1", role: "user", text: "hello" }];
     session.busy = true;
 
@@ -261,7 +261,7 @@ describe("historyWithLiveSessions", () => {
         branch: "main",
       },
     ];
-    const session = newSession("cursor", "/tmp/agent-terminal");
+    const session = newSession("pi", "/tmp/agent-terminal");
     session.blocks = [{ id: "u1", role: "user", text: "hello" }];
     session.busy = true;
 
@@ -279,7 +279,7 @@ describe("historyWithLiveSessions", () => {
   });
 
   it("keeps a session's own branch instead of the project overlay", () => {
-    const session = newSession("cursor", "/tmp/agent-terminal");
+    const session = newSession("pi", "/tmp/agent-terminal");
     session.blocks = [{ id: "u1", role: "user", text: "hello" }];
     session.busy = true;
     session.branch = "feat/picker";
@@ -341,11 +341,11 @@ describe("filterSessionsByQuery", () => {
     const rows = [
       {
         ...summary("a1", "/tmp/project-a"),
-        title: "cursor · Fix sidebar search",
+        title: "pi · Fix sidebar search",
       },
       {
         ...summary("a2", "/tmp/project-a"),
-        title: "cursor · Archive sessions",
+        title: "pi · Archive sessions",
       },
     ];
     expect(filterSessionsByQuery(rows, "sidebar").map((row) => row.id)).toEqual(

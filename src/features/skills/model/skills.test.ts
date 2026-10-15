@@ -84,7 +84,7 @@ const native: Skill = {
   invocation: "cursor-only",
   path: "/tmp/.cursor/skills/cursor-only/SKILL.md",
   scope: "project",
-  source: "cursor",
+  source: "pi",
 };
 
 const piNative: Skill = {
@@ -272,7 +272,7 @@ describe("mergeCatalog", () => {
         description: "native",
         path: "/p/.cursor/skills/cursor-only/SKILL.md",
         scope: "project",
-        source: "cursor",
+        source: "pi",
       },
     ]);
     expect(catalog.find((s) => s.name === "review-pr")?.description).toBe(
@@ -281,9 +281,7 @@ describe("mergeCatalog", () => {
     expect(catalog.find((s) => s.name === "create-skill")).toEqual(
       BUILTIN_CREATE_SKILL,
     );
-    expect(catalog.find((s) => s.name === "cursor-only")?.source).toBe(
-      "cursor",
-    );
+    expect(catalog.find((s) => s.name === "cursor-only")?.source).toBe("pi");
   });
 });
 

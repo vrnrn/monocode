@@ -48,7 +48,7 @@ describe("ProviderSignInDialog", () => {
     act(() =>
       root.render(
         createElement(ProviderSignInDialog, {
-          harness: "grok",
+          harness: "codex",
           onClose: close,
         }),
       ),
@@ -56,12 +56,12 @@ describe("ProviderSignInDialog", () => {
 
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog?.textContent).toContain("Authentication required");
-    expect(dialog?.textContent).toContain("Sign in to Grok Build");
+    expect(dialog?.textContent).toContain("Sign in to Codex");
     expect(dialog?.querySelector(".size-9")).not.toBeNull();
 
-    await act(async () => button("Sign in to Grok Build").click());
-    expect(auth.loginHarness).toHaveBeenCalledWith("grok");
-    expect(dialog?.textContent).toContain("Signed in to Grok Build");
+    await act(async () => button("Sign in to Codex").click());
+    expect(auth.loginHarness).toHaveBeenCalledWith("codex");
+    expect(dialog?.textContent).toContain("Signed in to Codex");
 
     act(() => button("Continue").click());
     expect(close).toHaveBeenCalledOnce();

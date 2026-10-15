@@ -203,11 +203,9 @@ function pickerSettings(model: AgentModel): ModelSetting[] {
   });
 }
 
-/** Settings without the OpenCode agent row, which never shows in the menu. */
+/** Settings available in the model menu. */
 function menuVisibleSettings(model: AgentModel): ModelSetting[] {
-  return (model.settings ?? []).filter(
-    (setting) => !(model.harness === "opencode" && setting.id === "agent"),
-  );
+  return model.settings ?? [];
 }
 
 /** Standalone toolbar pills, reasoning level first. */
@@ -261,7 +259,9 @@ function groupsByProvider(tab: ModelPickerTab, models: AgentModel[]): boolean {
 
 /** Use the upstream provider when present, otherwise the model's harness. */
 function modelProvider(item: AgentModel): { id: string; name: string } {
-  return item.provider ?? { id: item.harness, name: HARNESS_TITLE[item.harness] };
+  return (
+    item.provider ?? { id: item.harness, name: HARNESS_TITLE[item.harness] }
+  );
 }
 
 /**
@@ -1680,7 +1680,7 @@ function ModelFlyout({
                   const favorited = favorites.includes(item.id);
                   const disabled = !source.available(item.harness);
                   // Favorites mix harnesses, so every row names its source.
-                  // Provider first (OpenCode Go vs OpenCode), else harness.
+                  // Upstream provider first, then harness.
                   const provenance =
                     item.provider?.name ?? HARNESS_TITLE[item.harness];
                   return (

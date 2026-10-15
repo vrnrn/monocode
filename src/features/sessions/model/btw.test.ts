@@ -45,13 +45,11 @@ describe("supportsBtwHarness", () => {
   it("allows harnesses with an isolated text runner", () => {
     expect(supportsBtwHarness("claude")).toBe(true);
     expect(supportsBtwHarness("codex")).toBe(true);
-    expect(supportsBtwHarness("opencode")).toBe(true);
+    expect(supportsBtwHarness("omp")).toBe(true);
     expect(supportsBtwHarness("pi")).toBe(true);
   });
 
   it("rejects unsupported and missing harnesses", () => {
-    expect(supportsBtwHarness("fx")).toBe(false);
-    expect(supportsBtwHarness("hermes")).toBe(false);
     expect(supportsBtwHarness("antigravity")).toBe(false);
     expect(supportsBtwHarness(undefined)).toBe(false);
   });
@@ -127,7 +125,11 @@ describe("btwOpenTargetTurnId", () => {
         id: "h",
         role: "handoff" as const,
         text: "",
-        handoff: { from: "claude", to: "fx", status: "ready" as const },
+        handoff: {
+          from: "claude",
+          to: "antigravity",
+          status: "ready" as const,
+        },
       },
       { id: "u2", role: "user" as const, text: "second", durationMs: 900 },
       { id: "a2", role: "assistant" as const, text: "done" },
@@ -136,7 +138,7 @@ describe("btwOpenTargetTurnId", () => {
       [blocks[0], blocks[1]],
       [blocks[3], blocks[4]],
     ];
-    expect(btwOpenTargetTurnId(turns, blocks, "fx")).toBe("u1");
+    expect(btwOpenTargetTurnId(turns, blocks, "antigravity")).toBe("u1");
   });
 });
 
@@ -152,11 +154,15 @@ describe("btwTurnHarness", () => {
         id: "h",
         role: "handoff" as const,
         text: "",
-        handoff: { from: "claude", to: "fx", status: "ready" as const },
+        handoff: {
+          from: "claude",
+          to: "antigravity",
+          status: "ready" as const,
+        },
       },
       { id: "u2", role: "user" as const, text: "second", durationMs: 900 },
     ];
-    expect(btwTurnHarness(blocks, first, "fx")).toBe("claude");
+    expect(btwTurnHarness(blocks, first, "codex")).toBe("claude");
   });
 });
 
@@ -169,20 +175,24 @@ describe("sessionHasBtwEligibleTurn", () => {
         id: "h",
         role: "handoff" as const,
         text: "",
-        handoff: { from: "claude", to: "fx", status: "ready" as const },
+        handoff: {
+          from: "claude",
+          to: "antigravity",
+          status: "ready" as const,
+        },
       },
       { id: "u2", role: "user" as const, text: "second", durationMs: 900 },
       { id: "a2", role: "assistant" as const, text: "done" },
     ];
-    expect(sessionHasBtwEligibleTurn(blocks, "fx")).toBe(true);
+    expect(sessionHasBtwEligibleTurn(blocks, "codex")).toBe(true);
   });
 });
 
 describe("resolveBtwHarness", () => {
   it("falls back to a stored thread harness after a handoff", () => {
-    expect(resolveBtwHarness("fx", [thread({ harness: "claude" })])).toBe(
-      "claude",
-    );
+    expect(
+      resolveBtwHarness("antigravity", [thread({ harness: "claude" })]),
+    ).toBe("claude");
   });
 });
 

@@ -7,7 +7,10 @@ import {
   sessionChildHarnesses,
 } from "./handoff";
 import { flushSessionCheckpoint } from "./checkpoint";
-import { isFilesystemTab, type WorkspaceTab } from "../../workspace/model/layout";
+import {
+  isFilesystemTab,
+  type WorkspaceTab,
+} from "../../workspace/model/layout";
 import { orchestrator } from "../../orchestration/model/orchestration";
 import {
   newSession,
@@ -81,7 +84,7 @@ export function createSessionRemover(options: SessionRemovalOptions): {
   const createReplacement = (latest: Session | undefined): Session => {
     const seed = latest ?? options.replacement;
     return newSession(
-      seed.harness ?? "cursor",
+      seed.harness ?? "claude",
       seed.cwd,
       seed.model,
       seed.runtimeMode,
@@ -140,7 +143,7 @@ async function removeSession(
   }
   const harnesses: HarnessId[] = stopped
     ? sessionChildHarnesses(stopped)
-    : [options.replacement.harness ?? "cursor"];
+    : [options.replacement.harness ?? "claude"];
   if (options.mode === "delete") {
     // Release native processes before deleting the record, so a following
     // worktree removal cannot race fire-and-forget cleanup.

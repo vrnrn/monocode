@@ -206,7 +206,7 @@ function customAllowed(
   if (typeof rec.custom === "boolean") return rec.custom;
   if (typeof rec.allowCustom === "boolean") return rec.allowCustom;
   if (options.some(isOtherOption)) return true;
-  // Cursor-style options carry stable ids; Claude/OpenCode/Grok add Other in the UI.
+  // Provider options may carry stable IDs; free text adds Other in the UI.
   if (stringField(rec, "prompt") && !stringField(rec, "question")) return false;
   return true;
 }

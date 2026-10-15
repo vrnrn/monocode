@@ -246,6 +246,9 @@ pub(crate) fn ensure_tables(conn: &Connection) -> rusqlite::Result<()> {
 
 fn validate_upsert(input: &AutomationUpsert, now: i64) -> Result<(), String> {
     validate_id(&input.id, "automation")?;
+    if !crate::harness::is_supported_provider(&input.harness) {
+        return Err("Choose a supported automation provider.".into());
+    }
     if input.name.trim().is_empty() || input.name.len() > MAX_NAME {
         return Err("Automation name is required and must be under 200 characters.".into());
     }
@@ -343,6 +346,9 @@ fn validate_trigger(trigger: &AutomationTrigger) -> Result<(), String> {
 }
 
 fn hydrate_triggers(automation: &mut Automation) {
+    if !crate::harness::is_supported_provider(&automation.harness) {
+        automation.enabled = false;
+    }
     if automation.triggers.is_none() {
         automation.triggers = Some(vec![legacy_trigger(automation)]);
     }
@@ -1380,5 +1386,22 @@ mod tests {
 
         assert_eq!(claim(), 1);
         assert_eq!(claim(), 0);
+    }
+    #[test]
+    fn removed_cli_automations_stay_paused_and_cannot_be_saved_enabled() {
+        for provider in ["cursor", "grok", "opencode", "fx", "hermes", "devin"] {
+            let mut saved = saved_connector_automation("time");
+            saved["harness"] = provider.into();
+            let automation = parse_automation(saved.to_string()).unwrap();
+            assert_eq!(automation.harness, provider);
+            assert!(!automation.enabled);
+            let input: AutomationUpsert = serde_json::from_value(saved).unwrap();
+            assert!(validate_upsert(&input, 1).is_err());
+        }
+        for provider in ["claude", "codex", "pi", "omp", "antigravity"] {
+            let mut saved = saved_connector_automation("time");
+            saved["harness"] = provider.into();
+            assert!(parse_automation(saved.to_string()).unwrap().enabled);
+        }
     }
 }

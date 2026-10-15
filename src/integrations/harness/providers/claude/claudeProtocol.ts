@@ -436,7 +436,7 @@ export function sessionIdFromMessage(
 
 /**
  * Claude Code pings `system/status` for every request lifecycle step
- * ("requesting", "responding", …). Codex and opencode only emit status text for
+ * ("requesting", "responding", …). Codex only emit status text for
  * notable events — retries, warnings, compaction — so drop the lifecycle chatter
  * here and keep the transcript comparable across harnesses.
  */
@@ -807,7 +807,9 @@ export function assistantTextBlocks(rec: Record<string, unknown>): string[] {
 }
 
 /** Reasoning a message carries, used to mirror a subagent's thinking. */
-export function assistantThinkingBlocks(rec: Record<string, unknown>): string[] {
+export function assistantThinkingBlocks(
+  rec: Record<string, unknown>,
+): string[] {
   const message = asRecord(rec.message);
   const content = message?.content;
   if (!Array.isArray(content)) return [];

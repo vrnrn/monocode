@@ -106,8 +106,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     label: "MCP",
     description:
       "Find MCP servers across providers and manage their connections.",
-    keywords:
-      "tools servers connections oauth authenticate login claude codex cursor opencode",
+    keywords: "tools servers connections oauth authenticate login claude codex",
   },
   {
     id: "skills",
@@ -410,8 +409,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     id: "agent-clis",
     section: "providers",
     label: "Agent CLIs",
-    keywords:
-      "codex opencode cursor grok pi omp fx hermes antigravity devin binary path",
+    keywords: "claude codex pi omp antigravity binary path",
   },
   {
     id: "provider-accounts",

@@ -257,7 +257,7 @@ describe("BTW conversation", () => {
     const onSubmit = vi.fn();
     await render({
       blocks: session([thread("t1", "Saved question", 1)]),
-      harness: "fx",
+      harness: "antigravity",
       onSubmit,
     });
 

@@ -139,9 +139,14 @@ export function timeFilterStart(time: SessionTimeFilter, now: number): number {
 }
 
 function isHarnessId(value: unknown): value is HarnessId {
-  return typeof value === "string" && (HARNESSES as string[]).includes(value);
+  return (
+    typeof value === "string" &&
+    (HARNESSES as readonly string[]).includes(value)
+  );
 }
 
 function isTimeFilter(value: unknown): value is SessionTimeFilter {
-  return value === "all" || value === "today" || value === "7d" || value === "30d";
+  return (
+    value === "all" || value === "today" || value === "7d" || value === "30d"
+  );
 }

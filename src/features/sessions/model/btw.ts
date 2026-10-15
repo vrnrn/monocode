@@ -16,17 +16,13 @@ import { resolveModel } from "./models";
 
 /**
  * Harnesses with an isolated text runner suitable for read-only side
- * conversations. fx, Hermes, and Antigravity do not expose one yet.
+ * conversations. Antigravity does not expose one yet.
  */
 export const BTW_HARNESSES: readonly HarnessId[] = [
   "claude",
   "codex",
-  "cursor",
-  "grok",
-  "opencode",
   "pi",
   "omp",
-  "devin",
 ];
 
 export function supportsBtwHarness(

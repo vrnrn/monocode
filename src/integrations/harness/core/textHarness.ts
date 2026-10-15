@@ -7,13 +7,7 @@ import {
   warmupHarnessText,
 } from "./registry";
 
-const TEXT_HARNESSES: HarnessId[] = [
-  "claude",
-  "cursor",
-  "codex",
-  "grok",
-  "opencode",
-];
+const TEXT_HARNESSES: HarnessId[] = ["claude", "codex"];
 
 /** Pick the harness used for titles, commit messages, and PR text. */
 export function pickTextHarness(preferred?: HarnessId): HarnessId {
@@ -24,7 +18,7 @@ export function pickTextHarness(preferred?: HarnessId): HarnessId {
   for (const id of ordered) {
     if (isHarnessAvailable(id)) return id;
   }
-  return preferred && TEXT_HARNESSES.includes(preferred) ? preferred : "cursor";
+  return preferred && TEXT_HARNESSES.includes(preferred) ? preferred : "claude";
 }
 
 export function warmupText(cwd: string, preferred?: HarnessId): Promise<void> {
@@ -37,7 +31,12 @@ export function generateCommitMessage(
   signal?: AbortSignal,
   paths?: readonly string[],
 ): Promise<string> {
-  return generateHarnessCommitMessage(pickTextHarness(preferred), cwd, signal, paths);
+  return generateHarnessCommitMessage(
+    pickTextHarness(preferred),
+    cwd,
+    signal,
+    paths,
+  );
 }
 
 export function generatePrContent(

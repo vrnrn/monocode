@@ -8,9 +8,6 @@ mod checkpoint;
 mod codex_mono_store;
 mod control;
 pub mod control_cli;
-mod cursor_store;
-mod devin_config;
-mod devin_usage;
 mod external_editor;
 mod fs;
 mod gitlab;
@@ -18,7 +15,6 @@ mod harness;
 mod harness_updates;
 mod inbox_media;
 mod jira;
-mod jsonc;
 mod link_preview;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -139,7 +135,7 @@ mod background_command_tests {
 }
 
 /// Finder-launched .app bundles often omit HOME/USER/SHELL. Fall back to the
-/// passwd database so harness CLIs still find `~/.fx` and the login keychain.
+/// passwd database so harness CLIs still find their home directory and the login keychain.
 pub(crate) fn passwd_identity() -> Option<PasswdIdentity> {
     #[cfg(unix)]
     {
@@ -441,11 +437,7 @@ pub fn run() {
             skills::list_skills,
             search::search_project,
             search::cancel_project_search,
-            cursor_store::cursor_tool_calls,
-            cursor_store::cursor_subagent_runs,
-            harness::harness_resolve_cursor,
             harness::harness_resolve_codex,
-            harness::harness_resolve_opencode,
             harness::harness_resolve_configured,
             harness::harness_runtime_binary_paths,
             harness::harness_resolve_claude,
@@ -457,12 +449,7 @@ pub fn run() {
             harness::mcp_provider_login,
             harness::harness_resolve_omp,
             harness::harness_resolve_pi,
-            harness::harness_resolve_fx,
-            harness::harness_resolve_grok,
-            harness::harness_resolve_hermes,
-            harness::harness_resolve_devin,
             harness::harness_resolve_antigravity,
-            harness::harness_free_port,
             harness::harness_spawn,
             codex_mono_store::codex_mono_store_prepare,
             codex_mono_store::codex_mono_store_copy,
@@ -470,9 +457,6 @@ pub fn run() {
             harness::harness_write,
             harness::harness_kill,
             harness::harness_kill_all,
-            harness::harness_http,
-            harness::harness_sse_open,
-            harness::harness_sse_close,
             harness::harness_exec,
             harness_updates::harness_latest_version,
             harness_updates::harness_update_check_claim,
@@ -481,8 +465,6 @@ pub fn run() {
             account_identity::provider_account_identity,
             pi_usage::fetch_pi_usage,
             rate_limits::fetch_claude_usage,
-            rate_limits::fetch_opencode_go_usage,
-            devin_usage::fetch_devin_usage,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

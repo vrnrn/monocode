@@ -226,21 +226,6 @@ describe("Composer image drops", () => {
     expect(attachmentCount()).toBe(1);
   });
 
-  it("uses current attachment capabilities without replacing the listener", async () => {
-    const session = await render();
-    await render({ harness: "fx" });
-    act(() => domDrag(session, "dragover"));
-    await nativeDrop(["/project/image.png"]);
-
-    expect(listen).toHaveBeenCalledTimes(1);
-    expect(container.textContent).not.toContain("Drop files to attach");
-    expect(attachmentCount()).toBe(0);
-
-    await render({ harness: "codex" });
-    await nativeDrop(["/project/image.png"]);
-    expect(attachmentCount()).toBe(1);
-  });
-
   it("ignores a native listener whose registration finishes after disabling", async () => {
     let finishRegistration: (() => void) | undefined;
     listen.mockImplementation((handler) => {

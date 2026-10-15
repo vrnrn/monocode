@@ -11,7 +11,7 @@ import {
   hydrateWorkspaceSnapshot,
 } from "../../workspace/model/workspaceSnapshot";
 
-function chat(id: string, cwd: string, harness: HarnessId = "cursor"): Session {
+function chat(id: string, cwd: string, harness: HarnessId = "pi"): Session {
   return {
     ...newSession(harness, cwd),
     id,
@@ -20,7 +20,7 @@ function chat(id: string, cwd: string, harness: HarnessId = "cursor"): Session {
 }
 
 function blank(id: string, cwd: string): Session {
-  return { ...newSession("cursor", cwd), id };
+  return { ...newSession("pi", cwd), id };
 }
 
 /** Two projects open, `/beta` active; `/alpha` is the first in the list. */
@@ -115,8 +115,8 @@ describe("planning a run of folders", () => {
     });
 
     expect(creates(steps).map((step) => step.session.harness)).toEqual([
-      "cursor",
-      "cursor",
+      "pi",
+      "pi",
     ]);
   });
 

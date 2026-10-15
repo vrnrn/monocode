@@ -187,8 +187,8 @@ describe("model settings memory", () => {
 
   it("treats OpenCode variant as the effort setting", () => {
     const model: AgentModel = {
-      id: "opencode:some-cloud/spark-1",
-      harness: "opencode",
+      id: "omp:some-cloud/spark-1",
+      harness: "omp",
       name: "Spark 1",
       nativeId: "some-cloud/spark-1",
       settings: [
@@ -224,28 +224,28 @@ describe("provider defaults", () => {
   });
 
   it("remembers a model per provider without changing the default provider", () => {
-    saveLastModelChoice("cursor", "cursor:grok-4.6");
+    saveLastModelChoice("pi", "pi:grok-4.6");
     saveDefaultModel("claude", "claude:opus-5");
-    saveDefaultModel("opencode", "opencode:glm-5");
+    saveDefaultModel("omp", "omp:glm-5");
     expect(loadLastModelChoice()).toEqual({
-      harness: "cursor",
-      model: "cursor:grok-4.6",
+      harness: "pi",
+      model: "pi:grok-4.6",
     });
     expect(loadDefaultModels()).toEqual({
-      cursor: "cursor:grok-4.6",
+      pi: "pi:grok-4.6",
       claude: "claude:opus-5",
-      opencode: "opencode:glm-5",
+      omp: "omp:glm-5",
     });
     expect(preferredModelId("claude")).toBe("claude:opus-5");
-    expect(preferredModelId("cursor")).toBe("cursor:grok-4.6");
+    expect(preferredModelId("pi")).toBe("pi:grok-4.6");
   });
 
   it("falls back to lastModel for the default provider when no map exists", () => {
     localStorage.setItem(
       "monocode.lastModel",
-      JSON.stringify({ harness: "cursor", model: "cursor:grok-4.6" }),
+      JSON.stringify({ harness: "pi", model: "pi:grok-4.6" }),
     );
-    expect(preferredModelId("cursor")).toBe("cursor:grok-4.6");
+    expect(preferredModelId("pi")).toBe("pi:grok-4.6");
     expect(preferredModelId("claude")).toBe(defaultModelId("claude"));
   });
 
@@ -259,8 +259,8 @@ describe("provider defaults", () => {
 
   it("keeps catalog defaults when nothing is saved", () => {
     expect(defaultSessionChoice()).toEqual({
-      harness: "cursor",
-      model: defaultModelId("cursor"),
+      harness: "claude",
+      model: defaultModelId("claude"),
     });
   });
 
@@ -279,10 +279,10 @@ describe("provider defaults", () => {
 
   it("uses a project's own provider and model when set", () => {
     saveLastModelChoice("claude", "claude:opus-5");
-    setProjectDefaultProvider("/repo/a", "cursor", "cursor:composer-2.5");
+    setProjectDefaultProvider("/repo/a", "pi", "pi:composer-2.5");
     expect(defaultSessionChoice("/repo/a")).toEqual({
-      harness: "cursor",
-      model: "cursor:composer-2.5",
+      harness: "pi",
+      model: "pi:composer-2.5",
     });
     expect(defaultSessionChoice("/repo/b")).toEqual({
       harness: "claude",
@@ -291,59 +291,59 @@ describe("provider defaults", () => {
   });
 
   it("keeps a provider the project still allows", () => {
-    setProjectProviderHidden("/repo/a", "cursor", true);
+    setProjectProviderHidden("/repo/a", "pi", true);
     expect(firstEnabledHarness("/repo/a", "claude")).toBe("claude");
-    expect(firstEnabledHarness("/repo/a", "cursor")).toBe("claude");
+    expect(firstEnabledHarness("/repo/a", "pi")).toBe("claude");
   });
 
   it("keeps the six most recently used unique models", () => {
     saveRecentModelChoice("claude", "claude:opus-5");
-    saveRecentModelChoice("cursor", "cursor:composer-2.5");
-    saveRecentModelChoice("grok", "grok:grok-4.6");
-    saveRecentModelChoice("opencode", "opencode:glm-5");
+    saveRecentModelChoice("pi", "pi:composer-2.5");
+    saveRecentModelChoice("antigravity", "antigravity:grok-4.6");
+    saveRecentModelChoice("omp", "omp:glm-5");
     saveRecentModelChoice("pi", "pi:default");
     saveRecentModelChoice("omp", "omp:default");
-    saveRecentModelChoice("fx", "fx:zai/glm-5.2-fast");
-    saveRecentModelChoice("cursor", "cursor:composer-2.5");
+    saveRecentModelChoice("codex", "codex:zai/glm-5.2-fast");
+    saveRecentModelChoice("pi", "pi:composer-2.5");
 
     expect(loadRecentModelChoices()).toEqual([
-      { harness: "cursor", model: "cursor:composer-2.5" },
-      { harness: "fx", model: "fx:zai/glm-5.2-fast" },
+      { harness: "pi", model: "pi:composer-2.5" },
+      { harness: "codex", model: "codex:zai/glm-5.2-fast" },
       { harness: "omp", model: "omp:default" },
       { harness: "pi", model: "pi:default" },
-      { harness: "opencode", model: "opencode:glm-5" },
-      { harness: "grok", model: "grok:grok-4.6" },
+      { harness: "omp", model: "omp:glm-5" },
+      { harness: "antigravity", model: "antigravity:grok-4.6" },
     ]);
   });
 });
 
 describe("model picker tabs", () => {
   const available = (id: HarnessId) =>
-    id === "claude" || id === "fx" || id === "cursor";
+    id === "claude" || id === "codex" || id === "pi";
 
   it("starts with favorites then installed providers", () => {
     expect(modelPickerTabs(available)).toEqual([
       "favorites",
       "claude",
-      "cursor",
-      "fx",
+      "codex",
+      "pi",
     ]);
   });
 
   it("wraps left and right across favorites and providers", () => {
     expect(stepModelPickerTab("favorites", 1, available)).toBe("claude");
-    expect(stepModelPickerTab("claude", 1, available)).toBe("cursor");
-    expect(stepModelPickerTab("fx", 1, available)).toBe("favorites");
-    expect(stepModelPickerTab("favorites", -1, available)).toBe("fx");
+    expect(stepModelPickerTab("claude", 1, available)).toBe("codex");
+    expect(stepModelPickerTab("pi", 1, available)).toBe("favorites");
+    expect(stepModelPickerTab("favorites", -1, available)).toBe("pi");
   });
 
   it("treats an unavailable current tab as the start of the list", () => {
-    expect(stepModelPickerTab("pi", 1, available)).toBe("claude");
+    expect(stepModelPickerTab("omp", 1, available)).toBe("claude");
   });
 
   it("falls back to favorites when the current tab is hidden", () => {
-    expect(coerceModelPickerTab("pi", available)).toBe("favorites");
-    expect(coerceModelPickerTab("cursor", available)).toBe("cursor");
+    expect(coerceModelPickerTab("omp", available)).toBe("favorites");
+    expect(coerceModelPickerTab("pi", available)).toBe("pi");
     expect(coerceModelPickerTab("favorites", available)).toBe("favorites");
   });
 });
@@ -367,8 +367,8 @@ describe("picker provider visibility", () => {
   });
 
   it("omits hidden providers even before an install probe", () => {
-    savePickerProviderVisible("fx", false);
-    expect(showProviderInModelPicker("fx", true, false)).toBe(false);
+    savePickerProviderVisible("codex", false);
+    expect(showProviderInModelPicker("codex", true, false)).toBe(false);
     expect(showProviderInModelPicker("claude", true, false)).toBe(true);
   });
 

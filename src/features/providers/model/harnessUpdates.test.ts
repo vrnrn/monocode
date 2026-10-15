@@ -32,14 +32,14 @@ vi.mock("@tauri-apps/api/event", () => events);
 const INSTALLED: Partial<Record<HarnessId, string>> = {
   claude: "2.1.284 (Claude Code)",
   codex: "codex-cli 0.159.2",
-  opencode: "1.18.31",
-  cursor: "2026.09.01-abc",
+  pi: "1.18.31",
+  antigravity: "2026.09.01-abc",
 };
 
 const LATEST: Partial<Record<HarnessId, string>> = {
   claude: "2.1.285",
   codex: "0.159.2",
-  opencode: "1.18.33",
+  pi: "1.18.33",
 };
 
 function find(harnesses: HarnessId[]) {
@@ -56,14 +56,14 @@ function find(harnesses: HarnessId[]) {
 
 describe("harness update check", () => {
   it("reports only harnesses behind the published release", async () => {
-    expect(await find(["claude", "codex", "opencode"])).toEqual([
+    expect(await find(["claude", "codex", "pi"])).toEqual([
       {
         harness: "claude",
         installed: "2.1.284",
         latest: "2.1.285",
       },
       {
-        harness: "opencode",
+        harness: "pi",
         installed: "1.18.31",
         latest: "1.18.33",
       },
@@ -71,7 +71,7 @@ describe("harness update check", () => {
   });
 
   it("skips harnesses without a version feed or whose lookup fails", async () => {
-    expect(await find(["cursor", "pi"])).toEqual([]);
+    expect(await find(["antigravity", "omp"])).toEqual([]);
   });
 
   it("offers a harness still behind again, at the newest release", async () => {
@@ -106,7 +106,7 @@ it("delivers updates to other windows while skipping the sender and respecting c
     expect(remoteRefresh).toHaveBeenCalledTimes(1);
 
     stopLocal();
-    await otherWindow.announceHarnessUpdated("opencode");
+    await otherWindow.announceHarnessUpdated("pi");
     expect(localRefresh).toHaveBeenCalledTimes(1);
     expect(remoteRefresh).toHaveBeenCalledTimes(1);
   } finally {

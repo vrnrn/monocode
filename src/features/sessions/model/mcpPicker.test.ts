@@ -10,7 +10,7 @@ import type { McpConnection } from "../../settings/model/mcp";
 
 const servers: McpConnection[] = [
   {
-    provider: "cursor",
+    provider: "codex",
     name: "other",
     scope: "user",
     configPath: "/cursor",
@@ -45,7 +45,7 @@ it("prioritizes usable servers while retaining authentication and other provider
     ["other", "unavailable"],
   ]);
   expect(
-    mcpPickerServers(servers, "claude", new Map(), "cursor").map(
+    mcpPickerServers(servers, "claude", new Map(), "codex").map(
       (server) => server.name,
     ),
   ).toEqual(["other"]);
@@ -59,7 +59,7 @@ it("adds only selected server names to outgoing context", () => {
 });
 
 it("makes disabled provider entries unselectable even when health says Connected", () => {
-  for (const provider of ["claude", "codex", "opencode"] as const) {
+  for (const provider of ["claude", "codex", "omp"] as const) {
     const [server] = mcpPickerServers(
       [{ ...servers[2], provider, enabled: false }],
       provider,
@@ -73,9 +73,9 @@ it("makes disabled provider entries unselectable even when health says Connected
 
 it("keeps MCP references inline and only uses tags still in the draft", () => {
   const docs = newMcpTag(servers[2], []);
-  const anotherDocs = newMcpTag({ ...servers[2], provider: "cursor" }, [docs]);
+  const anotherDocs = newMcpTag({ ...servers[2], provider: "codex" }, [docs]);
   expect(docs.token).toBe("@mcp/docs");
-  expect(anotherDocs.token).toBe("@mcp/cursor/docs");
+  expect(anotherDocs.token).toBe("@mcp/codex/docs");
   const text = `Ask ${docs.token} about this, then ${anotherDocs.token}.`;
   expect(
     mcpTagParts(text, [docs, anotherDocs]).filter((part) => part.tag),
