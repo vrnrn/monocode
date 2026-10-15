@@ -281,22 +281,7 @@ import {
   gitlabConnected,
   saveGitlabConfig,
 } from "../../inbox/model/gitlab";
-import {
-  azureDevOpsConnected,
-  disconnectAzureDevOps,
-  saveAzureDevOpsConfig,
-} from "../../inbox/model/azureDevOps";
-import {
-  disconnectLinear,
-  LINEAR_CHANGE_EVENT,
-  linearConnected,
-  listLinearTeams,
-  loadHiddenLinearTeamIds,
-  notifyLinearChange,
-  saveHiddenLinearTeamIds,
-  saveLinearToken,
-  type LinearTeam,
-} from "../../inbox/model/linear";
+
 import {
   loadTabGroupColors,
   loadTabGroupCustomColors,
@@ -1245,27 +1230,11 @@ function InboxPage({
       </InboxConnectorGroup>
 
       <InboxConnectorGroup
-        source="azuredevops"
-        enabled={connectors.azuredevops}
-        description="Pull requests and Boards work items from your ADO organization."
-      >
-        <AzureDevOpsSettings />
-      </InboxConnectorGroup>
-
-      <InboxConnectorGroup
         source="jira"
         enabled={connectors.jira}
         description="Jira Cloud issues filtered by project or a JQL query."
       >
         <JiraSettings onFilterModeChange={setJiraFilterMode} />
-      </InboxConnectorGroup>
-
-      <InboxConnectorGroup
-        source="linear"
-        enabled={connectors.linear}
-        description="Issues assigned to you, from the teams you pick."
-      >
-        <LinearSettings />
       </InboxConnectorGroup>
     </>
   );
@@ -1302,7 +1271,9 @@ function InboxConnectorGroup({
         />
       }
     >
-      {enabled ? children : (
+      {enabled ? (
+        children
+      ) : (
         <Row
           label="Disabled in Inbox"
           description="Saved connection details are kept."
@@ -1498,291 +1469,6 @@ function GitlabSettings() {
         <p className="border-b border-content/5 px-4 pb-3 text-[12px] text-red-400/90 last:border-b-0">
           {error}
         </p>
-      ) : null}
-    </>
-  );
-}
-
-function AzureDevOpsSettings() {
-  const [url, setUrl] = useState("https://dev.azure.com/myorg");
-  const [token, setToken] = useState("");
-  const [connected, setConnected] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void azureDevOpsConnected()
-      .then((status) => {
-        if (cancelled) return;
-        setConnected(status.connected);
-        if (status.url) setUrl(status.url);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : String(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const onSave = async () => {
-    if (!token.trim() || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const status = await saveAzureDevOpsConfig(url, token);
-      setUrl(status.url);
-      setToken("");
-      setConnected(status.connected);
-      clearInboxCache();
-    } catch (err: unknown) {
-      setConnected(false);
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onDisconnect = async () => {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const status = await disconnectAzureDevOps(url);
-      setConnected(false);
-      setUrl(status.url || url);
-      clearInboxCache();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <>
-      <Row
-        label="Connection"
-        description="Connect your ADO organization with a personal access token (Boards + Repos read & write for comments). The token is stored locally and Disconnect deletes it."
-      >
-        {connected ? (
-          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
-            <span className="max-w-56 truncate text-[12px] text-content/50">
-              {url}
-            </span>
-            <SecondaryButton
-              onClick={() => void onDisconnect()}
-              disabled={busy}
-            >
-              Disconnect
-            </SecondaryButton>
-          </div>
-        ) : (
-          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
-            <label className="flex h-7 w-52 max-w-full shrink-0 items-center rounded-md border border-content/10 px-2 focus-within:border-content/20">
-              <input
-                type="url"
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                placeholder="https://dev.azure.com/myorg"
-                aria-label="Azure DevOps organization URL"
-                autoComplete="url"
-                spellCheck={false}
-                className="min-w-0 flex-1 bg-transparent text-[12px] text-content outline-none placeholder:text-content/35"
-              />
-            </label>
-            <label className="flex h-7 w-52 max-w-full shrink-0 items-center rounded-md border border-content/10 px-2 focus-within:border-content/20">
-              <input
-                type="password"
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void onSave();
-                }}
-                placeholder="PAT…"
-                aria-label="Azure DevOps personal access token"
-                autoComplete="off"
-                spellCheck={false}
-                className="min-w-0 flex-1 bg-transparent text-[12px] text-content outline-none placeholder:text-content/35"
-              />
-            </label>
-            <SecondaryButton
-              onClick={() => void onSave()}
-              disabled={busy || !token.trim()}
-            >
-              {busy ? "Saving" : "Connect"}
-            </SecondaryButton>
-          </div>
-        )}
-      </Row>
-      {error ? (
-        <p className="border-b border-content/5 px-4 pb-3 text-[12px] text-red-400/90 last:border-b-0">
-          {error}
-        </p>
-      ) : null}
-    </>
-  );
-}
-
-function LinearSettings() {
-  const [token, setToken] = useState("");
-  const [connected, setConnected] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [teams, setTeams] = useState<LinearTeam[]>([]);
-  const [hiddenTeamIds, setHiddenTeamIds] = useState(loadHiddenLinearTeamIds);
-
-  const loadTeams = useCallback(async () => {
-    try {
-      const next = await listLinearTeams();
-      setTeams(next);
-    } catch {
-      setTeams([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    void linearConnected()
-      .then((status) => {
-        if (cancelled) return;
-        setConnected(status.connected);
-        if (status.connected) void loadTeams();
-      })
-      .catch(() => {
-        if (!cancelled) setConnected(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [loadTeams]);
-
-  // The inbox filter menu writes the same list, so follow it while both are mounted.
-  useEffect(() => {
-    const onChange = () => setHiddenTeamIds(loadHiddenLinearTeamIds());
-    window.addEventListener(LINEAR_CHANGE_EVENT, onChange);
-    return () => window.removeEventListener(LINEAR_CHANGE_EVENT, onChange);
-  }, []);
-
-  const onSave = async () => {
-    if (!token.trim() || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await saveLinearToken(token);
-      setToken("");
-      setConnected(true);
-      clearInboxCache();
-      notifyLinearChange();
-      await loadTeams();
-    } catch (err: unknown) {
-      setConnected(false);
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onDisconnect = async () => {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await disconnectLinear();
-      setConnected(false);
-      setTeams([]);
-      clearInboxCache();
-      notifyLinearChange();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const toggleTeam = (id: string) => {
-    const next = new Set(hiddenTeamIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    const ids = [...next];
-    setHiddenTeamIds(ids);
-    saveHiddenLinearTeamIds(ids);
-    clearInboxCache();
-  };
-
-  return (
-    <>
-      <Row
-        label="API key"
-        description="Create a personal API key in Linear → Settings → Security & Access. Disconnect deletes it."
-      >
-        {connected ? (
-          <SecondaryButton onClick={() => void onDisconnect()} disabled={busy}>
-            Disconnect
-          </SecondaryButton>
-        ) : (
-          <div className="flex max-w-full flex-wrap items-center gap-2">
-            <label className="flex h-7 w-52 max-w-full shrink-0 items-center rounded-md border border-content/10 px-2 focus-within:border-content/20">
-              <input
-                type="password"
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void onSave();
-                }}
-                placeholder="lin_api_…"
-                aria-label="Linear API key"
-                autoComplete="off"
-                spellCheck={false}
-                className="min-w-0 flex-1 bg-transparent text-[12px] text-content outline-none placeholder:text-content/35"
-              />
-            </label>
-            <SecondaryButton
-              onClick={() => void onSave()}
-              disabled={busy || !token.trim()}
-            >
-              {busy ? "Saving" : "Connect"}
-            </SecondaryButton>
-          </div>
-        )}
-      </Row>
-      {error ? (
-        <p className="border-b border-content/5 px-4 pb-3 text-[12px] text-red-400/90 last:border-b-0">
-          {error}
-        </p>
-      ) : null}
-      {connected && teams.length > 0 ? (
-        <div className="border-b border-content/5 px-4 py-3.5 last:border-b-0">
-          <div className="text-[13px] font-medium text-content">Teams</div>
-          <p className="mt-1 text-[12px] leading-relaxed text-content/45">
-            Unchecked teams stay out of the inbox.
-          </p>
-          <div className="-mx-2 mt-2 flex flex-col gap-0.5">
-            {teams.map((team) => {
-              const checked = !hiddenTeamIds.includes(team.id);
-              return (
-                <button
-                  key={team.id}
-                  type="button"
-                  onClick={() => toggleTeam(team.id)}
-                  className="flex h-7 items-center gap-2 rounded-md px-2 text-left text-[13px] text-content hover:bg-content/5"
-                >
-                  <span className="min-w-0 flex-1 truncate">
-                    {team.name}
-                    {team.key ? (
-                      <span className="ml-1.5 text-content/40">{team.key}</span>
-                    ) : null}
-                  </span>
-                  {checked ? (
-                    <Check className="size-3.5 shrink-0" strokeWidth={2.25} />
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        </div>
       ) : null}
     </>
   );

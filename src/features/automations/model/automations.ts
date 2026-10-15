@@ -7,8 +7,7 @@ const LOCAL_CHANGED = "monocode:automations-local-changed";
 
 export type AutomationWorkspaceMode = "current" | "worktree" | "existing";
 export type AutomationScheduleKind = "hourly" | "daily" | "weekdays" | "weekly";
-export type AutomationTriggerKind =
-  "time" | "github" | "linear" | "jira" | "gitlab" | "azuredevops";
+export type AutomationTriggerKind = "time" | "github" | "gitlab" | "jira";
 
 export type AutomationTrigger = {
   id: string;
@@ -510,7 +509,9 @@ export async function claimDueAutomations(
   const due = automations.filter(
     (automation) =>
       automation.enabled &&
-      automationTriggers(automation).some((trigger) => trigger.kind === "time") &&
+      automationTriggers(automation).some(
+        (trigger) => trigger.kind === "time",
+      ) &&
       automation.nextRunAt <= now,
   );
   const claimed: DueAutomationRun[] = [];

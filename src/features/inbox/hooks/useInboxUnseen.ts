@@ -40,8 +40,11 @@ import {
   linkedSessionSeenAt,
   subscribeLinkedSessionSeen,
 } from "../model/linkedSessionSeen";
-import { loadInboxConnectors, useInboxConnectors } from "../model/inboxConnectors";
-import { loadHiddenLinearTeamIds } from "../model/linear";
+import {
+  loadInboxConnectors,
+  useInboxConnectors,
+} from "../model/inboxConnectors";
+
 import {
   JIRA_CHANGE_EVENT,
   loadHiddenJiraProjectIds,
@@ -201,7 +204,6 @@ export function useInboxActivity(
         assignedToMe: filters.assignedToMe,
         state: inboxFetchState(filters),
         search: "",
-        linearHiddenTeamIds: loadHiddenLinearTeamIds(),
         jiraHiddenProjectIds: loadHiddenJiraProjectIds(),
         jiraFilter: loadJiraInboxFilter(),
       };
@@ -210,7 +212,9 @@ export function useInboxActivity(
         if (cancelled || enabledConnectors !== loadInboxConnectors()) return;
         const listed = {
           ...result,
-          items: result.items.filter((item) => enabledConnectors[item.provider]),
+          items: result.items.filter(
+            (item) => enabledConnectors[item.provider],
+          ),
         };
         const visible = applyInboxFilters(listed.items, filters, "");
         rememberNotificationProjects(

@@ -87,22 +87,14 @@ describe("githubAvatarUrl", () => {
 describe("inboxPersonAvatarUrl", () => {
   it("prefers an explicit avatar", () => {
     expect(
-      inboxPersonAvatarUrl(
-        "linear",
-        "Ada",
-        "https://uploads.linear.app/ada.png",
-      ),
-    ).toBe("https://uploads.linear.app/ada.png");
+      inboxPersonAvatarUrl("jira", "Ada", "https://example.com/ada.png"),
+    ).toBe("https://example.com/ada.png");
   });
 
   it("falls back to GitHub avatars for GitHub people", () => {
     expect(inboxPersonAvatarUrl("github", "maya")).toBe(
       "https://avatars.githubusercontent.com/maya?s=64",
     );
-  });
-
-  it("does not invent a GitHub avatar for Linear names", () => {
-    expect(inboxPersonAvatarUrl("linear", "Ada")).toBe("");
   });
 
   it("uses GitLab's explicit avatar URL", () => {
@@ -178,20 +170,6 @@ describe("sortInboxItems", () => {
       }),
     ]);
     expect(sorted.map((row) => row.number)).toEqual([2, 1]);
-  });
-});
-
-describe("inboxListCacheKey", () => {
-  it("includes hidden Linear team ids", () => {
-    const projects = [{ path: "/tmp/web" }];
-    const base = {
-      assignedToMe: false,
-      state: "open" as const,
-      search: "",
-    };
-    expect(inboxListCacheKey(projects, base)).not.toBe(
-      inboxListCacheKey(projects, { ...base, linearHiddenTeamIds: ["t2"] }),
-    );
   });
 });
 
@@ -276,7 +254,8 @@ describe("dedupeInboxItems", () => {
         repo: "acme/web",
       }),
       item({
-        provider: "azuredevops",
+        provider: "jira",
+        id: "issue-9",
         kind: "issue",
         number: 9,
         updatedAt: "2026-08-27T10:00:00Z",
@@ -286,9 +265,9 @@ describe("dedupeInboxItems", () => {
     const deduped = dedupeInboxItems(rows);
     expect(deduped).toHaveLength(3);
     expect(deduped.map((entry) => entry.provider).sort()).toEqual([
-      "azuredevops",
       "github",
       "gitlab",
+      "jira",
     ]);
   });
 });
@@ -429,24 +408,6 @@ describe("inboxStartDraft", () => {
     ).toContain("Work on this GitHub pull request:");
   });
 
-  it("seeds Linear issues with the identifier", () => {
-    expect(
-      inboxStartDraft(
-        item({
-          number: 9,
-          kind: "linear",
-          provider: "linear",
-          identifier: "ENG-9",
-          title: "Fix auth",
-          url: "https://linear.app/acme/issue/ENG-9",
-          updatedAt: "2026-08-27T10:00:00Z",
-        }),
-      ),
-    ).toBe(
-      "Work on this Linear issue:\n\nENG-9 Fix auth\nhttps://linear.app/acme/issue/ENG-9\n",
-    );
-  });
-
   it("uses GitLab merge request wording", () => {
     expect(
       inboxStartDraft(
@@ -463,40 +424,9 @@ describe("inboxStartDraft", () => {
       "Work on this GitLab merge request:\n\n#12 Fix checkout\nhttps://gitlab.example.com/acme/web/-/merge_requests/12\n",
     );
   });
-
-  it("includes a Linear description when provided", () => {
-    expect(
-      inboxStartDraft(
-        item({
-          number: 9,
-          kind: "linear",
-          provider: "linear",
-          identifier: "ENG-9",
-          title: "Fix auth",
-          url: "https://linear.app/acme/issue/ENG-9",
-          updatedAt: "2026-08-27T10:00:00Z",
-        }),
-        "Steps to reproduce the login failure.",
-      ),
-    ).toContain("Steps to reproduce the login failure.");
-  });
 });
 
 describe("inboxItemKey", () => {
-  it("keys Linear issues by identifier", () => {
-    expect(
-      inboxItemKey(
-        item({
-          number: 9,
-          kind: "linear",
-          provider: "linear",
-          identifier: "ENG-9",
-          updatedAt: "2026-08-27T10:00:00Z",
-        }),
-      ),
-    ).toBe("linear:eng-9");
-  });
-
   it("keeps GitLab identities separate from GitHub", () => {
     const gitlab = item({
       number: 9,
@@ -513,32 +443,6 @@ describe("inboxItemKey", () => {
 });
 
 describe("inboxComposerCard", () => {
-  it("builds a Linear chip without putting the draft in the title", () => {
-    const card = inboxComposerCard(
-      item({
-        number: 9,
-        kind: "linear",
-        provider: "linear",
-        identifier: "ENG-9",
-        title: "Fix auth",
-        url: "https://linear.app/acme/issue/ENG-9",
-        teamName: "Engineering",
-        updatedAt: "2026-08-27T10:00:00Z",
-      }),
-      "Reset the session cookie.",
-    );
-    expect(card).toMatchObject({
-      provider: "linear",
-      kind: "linear",
-      identifier: "ENG-9",
-      title: "Fix auth",
-      source: "Engineering",
-      url: "https://linear.app/acme/issue/ENG-9",
-    });
-    expect(card.prompt).toContain("Work on this Linear issue:");
-    expect(card.prompt).toContain("Reset the session cookie.");
-  });
-
   it("builds a GitHub chip from the repo and issue number", () => {
     const card = inboxComposerCard(
       item({

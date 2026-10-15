@@ -132,9 +132,7 @@ it("honors category choices before and after a project mute while another projec
   click(projectRow("one"), "Notification categories for acme/one");
   act(() =>
     projectRow("one")
-      .querySelector<HTMLInputElement>(
-        '[aria-label="Issues and Linear tasks for acme/one"]',
-      )!
+      .querySelector<HTMLInputElement>('[aria-label="Issues for acme/one"]')!
       .click(),
   );
   await pollUpdated(2);

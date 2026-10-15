@@ -354,7 +354,7 @@ describe("Inbox activity polling", () => {
 
 describe("disabled Inbox connector activity", () => {
   function disableAll() {
-    for (const provider of ["github", "linear", "jira", "gitlab", "azuredevops"] as const)
+    for (const provider of ["github", "jira", "gitlab"] as const)
       setInboxConnectorEnabled(provider, false);
   }
 
@@ -388,7 +388,11 @@ describe("disabled Inbox connector activity", () => {
 
   it("ignores a poll that finishes after a connector was disabled", async () => {
     let finish!: (value: { items: InboxItem[]; errors: {} }) => void;
-    listInboxItems.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    listInboxItems.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
     await mount();
     await act(async () => disableAll());
     await act(async () => finish({ items: [remote], errors: {} }));

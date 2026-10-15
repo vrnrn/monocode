@@ -278,7 +278,7 @@ fn validate_upsert(input: &AutomationUpsert, now: i64) -> Result<(), String> {
     }
     if !matches!(
         input.trigger_kind.as_str(),
-        "time" | "github" | "linear" | "jira" | "gitlab" | "azuredevops"
+        "time" | "github" | "gitlab" | "jira"
     ) {
         return Err("Invalid automation trigger.".into());
     }
@@ -315,10 +315,7 @@ fn validate_upsert(input: &AutomationUpsert, now: i64) -> Result<(), String> {
 }
 
 fn validate_trigger(trigger: &AutomationTrigger) -> Result<(), String> {
-    if !matches!(
-        trigger.kind.as_str(),
-        "time" | "github" | "linear" | "jira" | "gitlab" | "azuredevops"
-    ) {
+    if !matches!(trigger.kind.as_str(), "time" | "github" | "gitlab" | "jira") {
         return Err("Invalid automation trigger.".into());
     }
     if trigger.event.len() > 200
@@ -346,10 +343,34 @@ fn validate_trigger(trigger: &AutomationTrigger) -> Result<(), String> {
 }
 
 fn hydrate_triggers(automation: &mut Automation) {
-    if automation.triggers.is_some() {
+    if automation.triggers.is_none() {
+        automation.triggers = Some(vec![legacy_trigger(automation)]);
+    }
+    let triggers = automation.triggers.as_mut().expect("triggers hydrated");
+    let previous_len = triggers.len();
+    triggers
+        .retain(|trigger| matches!(trigger.kind.as_str(), "time" | "github" | "gitlab" | "jira"));
+    if triggers.len() == previous_len {
         return;
     }
-    automation.triggers = Some(vec![legacy_trigger(automation)]);
+    // Keep saved definitions and history usable after removing a connector.
+    // An event-only definition with no supported triggers stays paused.
+    if let Some(primary) = triggers
+        .iter()
+        .find(|trigger| trigger.kind == "time")
+        .or(triggers.first())
+    {
+        automation.trigger_kind.clone_from(&primary.kind);
+        automation.trigger_event.clone_from(&primary.event);
+        automation.schedule_kind.clone_from(&primary.schedule_kind);
+        automation.minute = primary.minute;
+        automation.time.clone_from(&primary.time);
+        automation.day_of_week = primary.day_of_week;
+    } else {
+        automation.enabled = false;
+        automation.trigger_kind = default_trigger_kind();
+        automation.trigger_event.clear();
+    }
 }
 
 fn legacy_trigger(automation: &Automation) -> AutomationTrigger {
@@ -906,10 +927,7 @@ pub fn automations_claim_event(
 ) -> Result<Option<DueAutomationRun>, String> {
     validate_id(&automation_id, "automation")?;
     validate_event_key(&claim.event_key)?;
-    if !matches!(
-        claim.event_kind.as_str(),
-        "github" | "linear" | "jira" | "gitlab" | "azuredevops"
-    ) {
+    if !matches!(claim.event_kind.as_str(), "github" | "gitlab" | "jira") {
         return Err("Invalid automation trigger.".into());
     }
     if claim.event.is_empty() || claim.event.len() > 200 {
@@ -1024,6 +1042,70 @@ pub fn automation_run_update(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn saved_connector_automation(kind: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": "saved-triage", "name": "Saved triage", "prompt": "Triage the issue",
+            "harness": "codex", "model": "model", "cwd": "/tmp", "workspaceMode": "current",
+            "reuseSession": false, "runtimeMode": "supervised", "triggerKind": kind,
+            "triggerEvent": "issue_created", "scheduleKind": "weekdays", "minute": 0,
+            "time": "09:00", "dayOfWeek": 1, "missedRunGraceMinutes": 720,
+            "enabled": true, "nextRunAt": 1, "createdAt": 1, "updatedAt": 1
+        })
+    }
+
+    #[test]
+    fn saved_removed_connector_automations_are_paused_without_a_time_trigger() {
+        for kind in ["linear", "azuredevops"] {
+            let automation =
+                parse_automation(saved_connector_automation(kind).to_string()).unwrap();
+            assert_eq!(automation.id, "saved-triage");
+            assert_eq!(automation.name, "Saved triage");
+            assert!(!automation.enabled);
+            assert!(!has_time_trigger(&automation));
+            assert!(automation.triggers.unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn saved_mixed_automations_keep_supported_triggers() {
+        let mut saved = saved_connector_automation("linear");
+        saved["triggers"] = serde_json::to_value(vec![
+            trigger_from_fields(
+                "retired",
+                "linear",
+                "issue_created",
+                "weekdays",
+                0,
+                "09:00",
+                1,
+            ),
+            trigger_from_fields(
+                "github",
+                "github",
+                "issue_opened",
+                "weekdays",
+                0,
+                "09:00",
+                1,
+            ),
+            trigger_from_fields("jira", "jira", "issue_created", "weekdays", 0, "09:00", 1),
+        ])
+        .unwrap();
+        let automation = parse_automation(saved.to_string()).unwrap();
+        assert!(automation.enabled);
+        assert_eq!(automation.trigger_kind, "github");
+        assert_eq!(automation.trigger_event, "issue_opened");
+        assert_eq!(
+            automation
+                .triggers
+                .unwrap()
+                .iter()
+                .map(|trigger| trigger.kind.as_str())
+                .collect::<Vec<_>>(),
+            ["github", "jira"]
+        );
+    }
 
     #[test]
     fn validates_time_fields() {
@@ -1242,9 +1324,7 @@ mod tests {
     #[test]
     fn accepts_inbox_event_keys() {
         assert!(validate_event_key("github:pr:acme/web:12").is_ok());
-        assert!(validate_event_key("linear:issue:eng-12").is_ok());
         assert!(validate_event_key("jira:issue:10042").is_ok());
-        assert!(validate_event_key("azuredevops:pr:acme/web:12").is_ok());
         assert!(validate_event_key("").is_err());
         assert!(validate_event_key("github:pr:acme web:12").is_err());
     }
@@ -1264,17 +1344,19 @@ mod tests {
     }
 
     #[test]
-    fn accepts_azure_devops_triggers() {
-        let trigger = trigger_from_fields(
-            "trigger-id",
-            "azuredevops",
-            "pull_request_appeared",
-            "weekdays",
-            0,
-            "09:00",
-            1,
-        );
-        assert!(validate_trigger(&trigger).is_ok());
+    fn rejects_removed_connector_triggers() {
+        for kind in ["linear", "azuredevops"] {
+            let trigger = trigger_from_fields(
+                "trigger-id",
+                kind,
+                "issue_created",
+                "weekdays",
+                0,
+                "09:00",
+                1,
+            );
+            assert!(validate_trigger(&trigger).is_err());
+        }
     }
 
     #[test]

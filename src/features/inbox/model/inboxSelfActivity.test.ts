@@ -44,24 +44,6 @@ describe("self-authored Inbox activity", () => {
     expect(consumeInboxSelfActivity(githubPr)).toBe(false);
   });
 
-  it("matches Linear mutations by id", () => {
-    recordInboxSelfActivity({
-      provider: "linear",
-      kind: "linear",
-      id: "lin-7",
-    });
-    expect(
-      consumeInboxSelfActivity({
-        provider: "linear",
-        kind: "linear",
-        id: "lin-7",
-        repo: "ENG",
-        number: 7,
-        projectPath: "linear:team",
-      }),
-    ).toBe(true);
-  });
-
   it("expires a mutation instead of hiding unrelated later activity", () => {
     recordInboxSelfActivity(githubPr, 1_000);
     expect(consumeInboxSelfActivity(githubPr, 1_000 + 10 * 60_000 + 1)).toBe(

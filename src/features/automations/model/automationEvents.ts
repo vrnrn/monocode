@@ -12,6 +12,7 @@ import { inboxStartDraft, type InboxItem } from "../../inbox/model/githubTasks";
 import { sameProjectPath } from "../../projects/model/recents";
 import type { LinkedWorkItem } from "../../sessions/model/session";
 import { linkedWorkItemFromInboxItem } from "../../sessions/model/sessionWorkItem";
+import { isInboxProvider } from "../../inbox/model/inboxProviders";
 
 export type InboxAutomationMatch = {
   automation: Automation;
@@ -34,9 +35,7 @@ let retryItems: Map<string, InboxItem> | undefined;
 export const SUPPORTED_INBOX_TRIGGER_EVENTS = {
   github: ["draft_opened", "pull_request_opened", "issue_opened"],
   gitlab: ["merge_request_opened", "issue_opened"],
-  linear: ["issue_created"],
   jira: ["issue_created"],
-  azuredevops: ["pull_request_appeared", "work_item_appeared"],
 } as const;
 
 export function inboxAppearedEvent(
@@ -57,21 +56,16 @@ export function inboxAppearedEvent(
   if (item.provider === "gitlab" && item.kind === "issue") {
     return { kind: "gitlab", event: "issue_opened" };
   }
-  if (item.provider === "linear" || item.provider === "jira") {
+  if (item.provider === "jira") {
     return { kind: item.provider, event: "issue_created" };
   }
-  if (item.provider === "azuredevops" && item.kind === "pr") {
-    return { kind: "azuredevops", event: "pull_request_appeared" };
-  }
-  if (item.provider === "azuredevops" && item.kind === "issue") {
-    return { kind: "azuredevops", event: "work_item_appeared" };
-  }
+
   return null;
 }
 
 export function automationEventKey(item: InboxItem): string {
   const identity =
-    item.provider === "linear" || item.provider === "jira"
+    item.provider === "jira"
       ? `${item.provider}:issue:${item.id || item.identifier || item.number}`
       : `${item.provider}:${item.kind}:${item.repo}:${item.number}`;
   return identity
@@ -85,9 +79,12 @@ function pendingRetryItems(): Map<string, InboxItem> {
   if (retryItems) return retryItems;
   retryItems = new Map();
   try {
-    const saved = JSON.parse(window.localStorage.getItem(RETRY_STORAGE_KEY) ?? "[]");
+    const saved = JSON.parse(
+      window.localStorage.getItem(RETRY_STORAGE_KEY) ?? "[]",
+    );
     if (Array.isArray(saved)) {
       for (const item of saved as InboxItem[]) {
+        if (!isInboxProvider(item?.provider)) continue;
         const key = automationEventKey(item);
         if (key) retryItems.set(key, item);
       }
@@ -220,12 +217,9 @@ function triggerMatchesInboxItem(
 }
 
 function matchesInboxProject(item: InboxItem, cwd: string): boolean {
-  // Linear and Jira issues have no git path. The automation's own
+  // Jira issues have no git path. The automation's own
   // project is the workspace the agent should run in.
-  if (
-    (item.provider === "linear" || item.provider === "jira") &&
-    !item.projectPath.trim()
-  ) return true;
+  if (item.provider === "jira" && !item.projectPath.trim()) return true;
   return sameProjectPath(item.projectPath, cwd);
 }
 

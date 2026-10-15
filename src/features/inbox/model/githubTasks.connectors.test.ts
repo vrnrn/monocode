@@ -18,13 +18,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 const projects = [{ path: "/tmp/web" }];
 const query = { assignedToMe: false, state: "open", search: "" } as const;
-const providers: InboxProvider[] = [
-  "github",
-  "linear",
-  "jira",
-  "gitlab",
-  "azuredevops",
-];
+const providers: InboxProvider[] = ["github", "jira", "gitlab"];
 const item: GithubWorkItem = {
   kind: "issue",
   number: 1,
@@ -64,10 +58,9 @@ afterEach(() => {
 describe("Inbox connector fetching", () => {
   it.each([
     ["github", "git_github_"],
-    ["linear", "linear_"],
+
     ["jira", "jira_"],
     ["gitlab", "gitlab_"],
-    ["azuredevops", "azure_devops_"],
   ] as const)(
     "skips %s connection checks, repository discovery and lists when disabled",
     async (provider, prefix) => {

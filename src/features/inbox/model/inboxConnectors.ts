@@ -1,5 +1,9 @@
 import { useSyncExternalStore } from "react";
-import type { InboxProvider } from "./githubTasks";
+import {
+  INBOX_PROVIDERS,
+  isInboxProvider,
+  type InboxProvider,
+} from "./inboxProviders";
 
 export type InboxConnectors = Record<InboxProvider, boolean>;
 
@@ -8,11 +12,9 @@ const CHANGE = "monocode:inbox-connectors-change";
 const DEFAULTS: InboxConnectors = Object.freeze({
   github: true,
   gitlab: true,
-  azuredevops: true,
   jira: true,
-  linear: true,
 });
-const PROVIDERS = Object.keys(DEFAULTS) as InboxProvider[];
+const PROVIDERS = INBOX_PROVIDERS;
 
 let snapshot = DEFAULTS;
 let lastStorageValue: string | null | undefined;
@@ -66,6 +68,7 @@ export function setInboxConnectorEnabled(
   provider: InboxProvider,
   enabled: boolean,
 ): void {
+  if (!isInboxProvider(provider)) return;
   const previous = loadInboxConnectors();
   if (previous[provider] === enabled) return;
   const value = updateSnapshot({ ...previous, [provider]: enabled });
