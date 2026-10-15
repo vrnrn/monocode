@@ -117,6 +117,7 @@ export const DEFAULT_MODEL_ID: Record<HarnessId, string> = {
 const FAVORITES_KEY = "monocode.favoriteModels";
 const MODEL_PICKER_TAB_KEY = "monocode.modelPickerTab";
 const HIDDEN_PICKER_PROVIDERS_KEY = "monocode.hiddenPickerProviders";
+const HIDDEN_PICKER_MODELS_KEY = "monocode.hiddenPickerModels";
 const LAST_MODEL_KEY = "monocode.lastModel";
 const LAST_MODEL_SETTINGS_KEY = "monocode.lastModelSettings";
 const DEFAULT_MODELS_KEY = "monocode.defaultModels";
@@ -586,12 +587,28 @@ function emitPickerVisibility() {
   for (const listener of pickerVisibilityListeners) listener();
 }
 
+function onPickerStorage(event: StorageEvent) {
+  if (
+    event.key == null ||
+    event.key === HIDDEN_PICKER_PROVIDERS_KEY ||
+    event.key === HIDDEN_PICKER_MODELS_KEY
+  ) {
+    emitPickerVisibility();
+  }
+}
+
 export function subscribePickerVisibility(
   onStoreChange: () => void,
 ): () => void {
   pickerVisibilityListeners.add(onStoreChange);
+  if (pickerVisibilityListeners.size === 1 && typeof window !== "undefined") {
+    window.addEventListener("storage", onPickerStorage);
+  }
   return () => {
     pickerVisibilityListeners.delete(onStoreChange);
+    if (!pickerVisibilityListeners.size && typeof window !== "undefined") {
+      window.removeEventListener("storage", onPickerStorage);
+    }
   };
 }
 
@@ -630,6 +647,79 @@ export function savePickerProviderVisible(id: HarnessId, visible: boolean) {
     // private mode / quota
   }
   emitPickerVisibility();
+}
+
+export function loadHiddenPickerModels(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(
+      localStorage.getItem(HIDDEN_PICKER_MODELS_KEY) ?? "[]",
+    );
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (id): id is string => typeof id === "string" && id.length > 0,
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function isPickerModelVisible(id: string, project?: string): boolean {
+  return (
+    !loadHiddenPickerModels().includes(id) &&
+    !(loadProjectProviderSettings(project).hiddenModels ?? []).includes(id)
+  );
+}
+
+export function savePickerModelsVisible(
+  ids: readonly string[],
+  visible: boolean,
+): void {
+  const hidden = new Set(loadHiddenPickerModels());
+  for (const id of ids) {
+    if (visible) hidden.delete(id);
+    else hidden.add(id);
+  }
+  try {
+    localStorage.setItem(HIDDEN_PICKER_MODELS_KEY, JSON.stringify([...hidden]));
+  } catch {
+    // private mode / quota
+  }
+  emitPickerVisibility();
+}
+
+/** Keep catalog resolution intact for existing chats; filter only new choices. */
+export function pickerModelsFor(
+  harness: HarnessId,
+  project?: string,
+): AgentModel[] {
+  return filterPickerModels(modelsFor(harness), project);
+}
+
+export function filterPickerModels(
+  models: AgentModel[],
+  project?: string,
+): AgentModel[] {
+  const hidden = new Set([
+    ...loadHiddenPickerModels(),
+    ...(loadProjectProviderSettings(project).hiddenModels ?? []),
+  ]);
+  return models.filter((model) => !hidden.has(model.id));
+}
+
+export function visibleModelId(
+  harness: HarnessId,
+  preferred: string,
+  project?: string,
+): string {
+  const choices = pickerModelsFor(harness, project);
+  const resolved = resolveModel(harness, preferred);
+  if (
+    isPickerModelVisible(preferred, project) &&
+    isPickerModelVisible(resolved.id, project)
+  )
+    return preferred;
+  return choices[0]?.id ?? preferred;
 }
 
 /**
@@ -704,10 +794,10 @@ export function saveDefaultModel(harness: HarnessId, model: string) {
 /** User-picked model for a provider, else the catalog default. */
 export function preferredModelId(harness: HarnessId): string {
   const saved = loadDefaultModels()[harness];
-  if (saved) return saved;
+  if (saved) return visibleModelId(harness, saved);
   const last = loadLastModelChoice();
-  if (last?.harness === harness) return last.model;
-  return defaultModelId(harness);
+  if (last?.harness === harness) return visibleModelId(harness, last.model);
+  return visibleModelId(harness, defaultModelId(harness));
 }
 
 /**
@@ -722,6 +812,7 @@ export function firstEnabledHarness(
   const hidden = new Set(loadProjectProviderSettings(cwd).hidden ?? []);
   const enabled = (id: HarnessId) =>
     !hidden.has(id) &&
+    (modelsFor(id).length === 0 || pickerModelsFor(id, cwd).length > 0) &&
     showProviderInModelPicker(
       id,
       isHarnessAvailable(id),
@@ -743,7 +834,7 @@ export function defaultSessionChoice(cwd?: string): LastModelChoice {
     project.models?.[harness] ??
     (project.defaultHarness === harness ? project.defaultModel : undefined) ??
     preferredModelId(harness);
-  return { harness, model };
+  return { harness, model: visibleModelId(harness, model, cwd) };
 }
 
 export function loadLastModelChoice(): LastModelChoice | null {

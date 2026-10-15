@@ -22,11 +22,13 @@ vi.mock("../../../integrations/harness/core/registry", () => ({
 import { SecondOpinionButton } from "./SecondOpinionButton";
 import { isHarnessAvailable } from "../../../integrations/harness/core/availability";
 import { resetHarnessModelOverlays, setHarnessModels } from "../model/models";
+import { setProjectModelsHidden } from "../model/projectProviders";
 
 let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  localStorage.clear();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   setHarnessModels("omp", [
     {
@@ -244,4 +246,45 @@ describe("secondary model target picker", () => {
     expect(button).toBeTruthy();
     expect(button?.disabled).toBe(false);
   });
+});
+
+it("keeps project-hidden models out of secondary choices and updates an open picker", () => {
+  const onPick = vi.fn();
+  act(() =>
+    root.render(
+      createElement(SecondOpinionButton, {
+        from: "pi",
+        project: "/repo",
+        onPick,
+      }),
+    ),
+  );
+  act(() =>
+    container
+      .querySelector<HTMLButtonElement>('[aria-label="Second opinion"]')!
+      .click(),
+  );
+  const provider = [...document.querySelectorAll('[role="menuitem"]')].find(
+    (row) => row.textContent?.includes("omp"),
+  )!;
+  hover(provider);
+  act(() => setProjectModelsHidden("/repo", ["omp:review"], true));
+  const menu = document.querySelector(
+    '[role="menu"][aria-label="omp models"]',
+  )!;
+  expect(menu.textContent).not.toContain("Review Model");
+  expect(menu.textContent).toContain("Quick Model");
+  act(() =>
+    root.render(
+      createElement(SecondOpinionButton, {
+        from: "pi",
+        project: "/other",
+        onPick,
+      }),
+    ),
+  );
+  expect(
+    document.querySelector('[role="menu"][aria-label="omp models"]')
+      ?.textContent,
+  ).toContain("Review Model");
 });

@@ -36,9 +36,16 @@ registerBuiltinHarnesses();
 const { setHarnessModels } =
   await import("../../src/features/sessions/model/models");
 for (const harness of providers)
-  setHarnessModels(harness, [
-    { id: `${harness}:demo`, harness, name: "Demo model" },
-  ]);
+  setHarnessModels(
+    harness,
+    harness === "codex"
+      ? [
+          { id: "codex:gpt-6.1-sol", harness, name: "GPT-6.1 Sol" },
+          { id: "codex:gpt-5.6-luna", harness, name: "GPT-5.6 Luna" },
+          { id: "codex:gpt-6-astra", harness, name: "GPT-6 Astra" },
+        ]
+      : [{ id: `${harness}:demo`, harness, name: "Demo model" }],
+  );
 const { setHarnessAvailability, markHarnessAvailabilityProbed } =
   await import("../../src/integrations/harness/core/availabilityState");
 setHarnessAvailability({
@@ -49,20 +56,46 @@ setHarnessAvailability({
   antigravity: true,
 });
 markHarnessAvailabilityProbed();
+const { useState } = await import("react");
+const { ModelPicker } =
+  await import("../../src/features/sessions/ui/ModelPicker");
+function PickerPreview() {
+  const [model, setModel] = useState("codex:gpt-5.6-luna");
+  return (
+    <div className="flex h-screen items-center justify-center bg-background-base text-content">
+      <ModelPicker
+        harness="codex"
+        model={model}
+        values={{}}
+        hideSettings
+        project={
+          new URLSearchParams(location.search).get("project") ?? undefined
+        }
+        side="bottom"
+        onChange={(_, model) => setModel(model)}
+        onSettingsChange={() => {}}
+      />
+    </div>
+  );
+}
 const { SettingsView } =
   await import("../../src/features/settings/ui/SettingsView");
 createRoot(document.getElementById("root")!).render(
-  <div className="h-screen">
-    <SettingsView
-      section="providers"
-      cwd=""
-      sessions={[]}
-      onClose={() => {}}
-      onSelectSection={() => {}}
-      onOpenSession={() => {}}
-      onArchiveSession={() => {}}
-      onDeleteSession={() => {}}
-      onOpenWhatsNew={() => {}}
-    />
-  </div>,
+  new URLSearchParams(location.search).get("view") === "picker" ? (
+    <PickerPreview />
+  ) : (
+    <div className="h-screen">
+      <SettingsView
+        section="providers"
+        cwd="/repo"
+        sessions={[]}
+        onClose={() => {}}
+        onSelectSection={() => {}}
+        onOpenSession={() => {}}
+        onArchiveSession={() => {}}
+        onDeleteSession={() => {}}
+        onOpenWhatsNew={() => {}}
+      />
+    </div>
+  ),
 );
