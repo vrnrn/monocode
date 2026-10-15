@@ -45,8 +45,14 @@ vi.mock("../../sessions/ui/AgentTranscript", () => ({
     createElement(
       "ol",
       { "aria-label": "Transcript", "data-busy": busy },
-      createElement("button", { "aria-label": "Open transcript file", onClick: () => onOpenFile?.("src/app.ts") }),
-      createElement("button", { "aria-label": "Open transcript diff", onClick: () => onOpenDiff?.("src/app.ts") }),
+      createElement("button", {
+        "aria-label": "Open transcript file",
+        onClick: () => onOpenFile?.("src/app.ts"),
+      }),
+      createElement("button", {
+        "aria-label": "Open transcript diff",
+        onClick: () => onOpenDiff?.("src/app.ts"),
+      }),
       blocks.map((block) =>
         createElement(
           "li",
@@ -101,8 +107,8 @@ const gpt: AgentModel = {
   settings: [effort("reasoningEffort", "medium")],
 };
 const cursor: AgentModel = {
-  id: "cursor:composer-test",
-  harness: "cursor",
+  id: "pi:composer-test",
+  harness: "pi",
   name: "Composer Test",
   nativeId: "composer-test",
   settings: [],
@@ -148,18 +154,30 @@ beforeEach(() => {
   vi.mocked(invoke).mockReset();
   vi.mocked(invoke).mockImplementation(async (command, input) => {
     if (command === "home_dir") return "/tmp/demo";
-    if (command === "jira_status") return { connected: true, site: "https://demo.atlassian.net" };
-    if (command === "jira_issue_details") return { body: "Latest dummy ticket description", author: "Alex" };
-    if (command === "jira_issue_thread") return { comments: [{ body: "Newest dummy comment", author: "Robin", createdAt: "" }], truncated: false };
+    if (command === "jira_status")
+      return { connected: true, site: "https://demo.atlassian.net" };
+    if (command === "jira_issue_details")
+      return { body: "Latest dummy ticket description", author: "Alex" };
+    if (command === "jira_issue_thread")
+      return {
+        comments: [
+          { body: "Newest dummy comment", author: "Robin", createdAt: "" },
+        ],
+        truncated: false,
+      };
     if (command === "remote_machines") return [machine];
     if (command !== "remote_request") return undefined;
     const { method, params } = input as {
       method: string;
       params: HostCommand & { sessionId?: string };
     };
-    const workspace = method === "workspace.run"
-      ? params as unknown as { command: string; args: Record<string, unknown> }
-      : undefined;
+    const workspace =
+      method === "workspace.run"
+        ? (params as unknown as {
+            command: string;
+            args: Record<string, unknown>;
+          })
+        : undefined;
     const operation = workspace?.command ?? method;
     const commandParams = workspace?.args ?? params;
     if (method === "environment.describe")
@@ -176,12 +194,20 @@ beforeEach(() => {
     }
     if (operation === "git.branches" || operation === "git_branches") {
       if (branchFailure) throw new Error(branchFailure);
-      if (workspace) return {
-        current: currentBranch,
-        detached: false,
-        branches: ["main", "dev", ...(createdBranch ? [createdBranch] : [])]
-          .map((name) => ({ name, current: name === currentBranch, remote: null })),
-      };
+      if (workspace)
+        return {
+          current: currentBranch,
+          detached: false,
+          branches: [
+            "main",
+            "dev",
+            ...(createdBranch ? [createdBranch] : []),
+          ].map((name) => ({
+            name,
+            current: name === currentBranch,
+            remote: null,
+          })),
+        };
       return {
         current: currentBranch,
         branches: ["main", "dev", ...(createdBranch ? [createdBranch] : [])],
@@ -232,8 +258,11 @@ beforeEach(() => {
     if (operation === "git.switch" || operation === "git.createBranch" ||
         operation === "git_checkout" || operation === "git_create_branch") {
       if (branchActionFailure) throw new Error(branchActionFailure);
-      currentBranch = String(operation.startsWith("git_") ? commandParams.name : params.branch);
-      if (operation === "git.createBranch" || operation === "git_create_branch") createdBranch = currentBranch;
+      currentBranch = String(
+        operation.startsWith("git_") ? commandParams.name : params.branch,
+      );
+      if (operation === "git.createBranch" || operation === "git_create_branch")
+        createdBranch = currentBranch;
       if (workspace) return currentBranch;
       return {
         current: params.branch,
@@ -450,8 +479,12 @@ it("opens transcript files and diffs through the shared remote tabs", async () =
   await send("Inspect files");
   await act(async () => byLabel("Open transcript file")!.click());
   await act(async () => byLabel("Open transcript diff")!.click());
-  expect(onOpenFile).toHaveBeenCalledWith("remote://env/home/me/repo/src/app.ts");
-  expect(onOpenDiff).toHaveBeenCalledWith("remote://env/home/me/repo/src/app.ts");
+  expect(onOpenFile).toHaveBeenCalledWith(
+    "remote://env/home/me/repo/src/app.ts",
+  );
+  expect(onOpenDiff).toHaveBeenCalledWith(
+    "remote://env/home/me/repo/src/app.ts",
+  );
 });
 
 it("opens a host conversation in an already mounted empty tab", async () => {
@@ -588,21 +621,21 @@ it("creates the host session with the chosen settings on the first message", asy
 });
 
 it("keeps a new session on its selected remote provider", async () => {
-  providers = ["codex", "cursor"];
+  providers = ["codex", "pi"];
   catalog = {
     models: { codex: [gpt], cursor: [cursor] },
     errors: {},
   };
   await render({
     ...shell(),
-    harness: "cursor",
+    harness: "pi",
     model: cursor.id,
     modelSettings: {},
   });
   await send("Use Cursor remotely");
   expect(commands[0]).toMatchObject({
     type: "create",
-    harness: "cursor",
+    harness: "pi",
     model: cursor.id,
   });
 });
@@ -615,7 +648,10 @@ it("drops settings from the tab that the host's model does not offer", async () 
     modelSettings: { reasoningEffort: "high", serviceTier: "fast" },
   });
   await send("Fix the tests");
-  expect(commands[0]).toMatchObject({ type: "create", model: "codex:gpt-test" });
+  expect(commands[0]).toMatchObject({
+    type: "create",
+    model: "codex:gpt-test",
+  });
   expect(commands[0]).toHaveProperty("modelSettings", {
     reasoningEffort: "high",
   });
@@ -681,7 +717,11 @@ it("keeps a new draft on screen while the host confirms it", async () => {
   expect(commands.map((command) => command.type)).toEqual(["create", "draft"]);
   expect(transcriptItems("Review this later")).toHaveLength(1);
   expect(container.textContent).not.toContain("What should we work on");
-  expect(container.querySelector('[aria-label="Transcript"]')?.getAttribute("data-busy")).toBe("false");
+  expect(
+    container
+      .querySelector('[aria-label="Transcript"]')
+      ?.getAttribute("data-busy"),
+  ).toBe("false");
   expect(byLabel("Send remote draft")).not.toBeNull();
   expect(byLabel("Remove remote draft")).not.toBeNull();
   await act(async () => {
@@ -757,7 +797,9 @@ it("does not flash a status banner while an ordinary message is in flight", asyn
   await type("Second");
   await act(async () => byLabel("Send")!.click());
   expect(container.textContent).toContain("Second");
-  expect(container.textContent).not.toContain("Waiting for the host to confirm");
+  expect(container.textContent).not.toContain(
+    "Waiting for the host to confirm",
+  );
 
   await act(async () => {
     releaseDispatch();
@@ -798,7 +840,9 @@ it("starts a remote session in the worktree chosen before its first message", as
   await settle();
   const worktree = [
     ...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
-  ].find((button) => button.title === "remote://env/home/me/repo-worktrees/dev");
+  ].find(
+    (button) => button.title === "remote://env/home/me/repo-worktrees/dev",
+  );
   expect(worktree).toBeDefined();
   await act(async () => worktree!.click());
   await send("Work in dev");
@@ -807,8 +851,9 @@ it("starts a remote session in the worktree chosen before its first message", as
     worktreeCwd: "/home/me/repo-worktrees/dev",
   });
   expect(host?.session.cwd).toBe("/home/me/repo-worktrees/dev");
-  expect(container.querySelector('[aria-label="Workspace Worktree"]')?.tagName)
-    .toBe("DIV");
+  expect(
+    container.querySelector('[aria-label="Workspace Worktree"]')?.tagName,
+  ).toBe("DIV");
   expect(byLabel("Workspace Worktree")).toBeNull();
 });
 
@@ -935,8 +980,10 @@ it("locks a started remote session to its worktree like a local session", async 
   };
   rememberRemoteSession("shell", "host-session");
   await render();
-  expect(container.querySelector('[aria-label="Workspace Current checkout"]')?.tagName)
-    .toBe("DIV");
+  expect(
+    container.querySelector('[aria-label="Workspace Current checkout"]')
+      ?.tagName,
+  ).toBe("DIV");
   expect(byLabel("Workspace Current checkout")).toBeNull();
   expect(byLabel("Branch main")).not.toBeNull();
   expect(commands).toHaveLength(0);
@@ -1034,38 +1081,50 @@ it("holds a settings change during a running turn and applies it afterwards", as
   );
 });
 
-it.each([false, true])("retries a lost create response without duplicating the first turn (remount: %s)", async (remount) => {
-  const original = vi.mocked(invoke).getMockImplementation()!;
-  let accepted: ReturnType<typeof dispatch> | undefined;
-  const attempts: HostCommand[] = [];
-  vi.mocked(invoke).mockImplementation(async (command, input) => {
-    const request = input as { method?: string; params?: HostCommand } | undefined;
-    if (request?.method === "commands.dispatch" && request.params?.type === "create") {
-      attempts.push(request.params);
-      if (accepted) return accepted;
-      accepted = dispatch(request.params);
-      throw new Error("Response lost after host accepted the request");
-    }
-    return original(command, input);
-  });
-  await render();
-  await send("Keep this first message");
-  expect(commands.map((command) => command.type)).toEqual(["create"]);
-  if (remount) {
-    await act(async () => root.unmount());
-    root = createRoot(container);
+it.each([false, true])(
+  "retries a lost create response without duplicating the first turn (remount: %s)",
+  async (remount) => {
+    const original = vi.mocked(invoke).getMockImplementation()!;
+    let accepted: ReturnType<typeof dispatch> | undefined;
+    const attempts: HostCommand[] = [];
+    vi.mocked(invoke).mockImplementation(async (command, input) => {
+      const request = input as
+        { method?: string; params?: HostCommand } | undefined;
+      if (
+        request?.method === "commands.dispatch" &&
+        request.params?.type === "create"
+      ) {
+        attempts.push(request.params);
+        if (accepted) return accepted;
+        accepted = dispatch(request.params);
+        throw new Error("Response lost after host accepted the request");
+      }
+      return original(command, input);
+    });
     await render();
-  }
-  const retry = [...container.querySelectorAll("button")].find((button) => button.textContent === "Retry")!;
-  expect(retry).toBeTruthy();
-  await act(async () => retry.click());
-  await settle();
-  expect(attempts).toHaveLength(2);
-  expect(attempts[1]).toEqual(attempts[0]);
-  expect(commands.map((command) => command.type)).toEqual(["create", "send"]);
-  expect(commands[1]).toMatchObject({ text: "Keep this first message", sessionId: "host-session" });
-  expect(transcriptItems("Keep this first message")).toHaveLength(1);
-});
+    await send("Keep this first message");
+    expect(commands.map((command) => command.type)).toEqual(["create"]);
+    if (remount) {
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      await render();
+    }
+    const retry = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Retry",
+    )!;
+    expect(retry).toBeTruthy();
+    await act(async () => retry.click());
+    await settle();
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]).toEqual(attempts[0]);
+    expect(commands.map((command) => command.type)).toEqual(["create", "send"]);
+    expect(commands[1]).toMatchObject({
+      text: "Keep this first message",
+      sessionId: "host-session",
+    });
+    expect(transcriptItems("Keep this first message")).toHaveLength(1);
+  },
+);
 
 it("ignores a late create response after its tab has switched conversations", async () => {
   await render();
@@ -1082,8 +1141,17 @@ it("ignores a late create response after its tab has switched conversations", as
 
 it("resolves ticket links before creating and sending to a remote project", async () => {
   await render();
-  await send(ticketContextLink({ provider: "jira", url: "https://demo.atlassian.net/browse/DEMO-42" }));
+  await send(
+    ticketContextLink({
+      provider: "jira",
+      url: "https://demo.atlassian.net/browse/DEMO-42",
+    }),
+  );
   const sent = commands.find((command) => command.type === "send");
-  expect(sent).toMatchObject({ text: expect.stringContaining("Latest dummy ticket description") });
-  expect(sent).toMatchObject({ text: expect.stringContaining("Newest dummy comment") });
+  expect(sent).toMatchObject({
+    text: expect.stringContaining("Latest dummy ticket description"),
+  });
+  expect(sent).toMatchObject({
+    text: expect.stringContaining("Newest dummy comment"),
+  });
 });

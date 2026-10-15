@@ -24,7 +24,7 @@ function deferred() {
 
 function fixture(mode: "archive" | "delete", preserveOpenFiles = false) {
   const closing: Session = {
-    ...newSession("cursor", "/tmp/project"),
+    ...newSession("pi", "/tmp/project"),
     busy: true,
     blocks: [
       { id: "user", role: "user", text: "hello" },
@@ -33,7 +33,7 @@ function fixture(mode: "archive" | "delete", preserveOpenFiles = false) {
     queuedMessages: [{ id: "queued", text: "next", attachments: [] }],
     queueStatus: "active",
   };
-  const other = newSession("cursor", "/tmp/project");
+  const other = newSession("pi", "/tmp/project");
   let state = {
     tabs: [newTab(closing.id), newTab(other.id)],
     sessions: [closing, other],
@@ -65,7 +65,7 @@ function fixture(mode: "archive" | "delete", preserveOpenFiles = false) {
       const remover = createSessionRemover({
         mode,
         preserveOpenFiles,
-        replacement: { cwd: "/tmp/project", harness: "cursor" },
+        replacement: { cwd: "/tmp/project", harness: "pi" },
         workspace: {
           snapshot: () => state,
           apply: (change) => {
@@ -136,7 +136,7 @@ describe.each(["archive", "delete"] as const)("%s lifecycle", (mode) => {
     expect(f.read().sessions).toHaveLength(1);
     expect(f.read().sessions[0]).toMatchObject({
       cwd: "/tmp/project",
-      harness: "cursor",
+      harness: "pi",
       blocks: [],
     });
     expect(f.read().sessions[0].id).not.toBe(f.closing.id);
@@ -166,7 +166,7 @@ describe.each(["archive", "delete"] as const)("%s lifecycle", (mode) => {
     f.write({ ...f.read(), sessions: [f.closing, updated] });
     confirm.resolve();
     await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalled());
-    const added = newSession("cursor", "/tmp/project");
+    const added = newSession("pi", "/tmp/project");
     const addedTab = newTab(added.id);
     f.write({
       ...f.read(),

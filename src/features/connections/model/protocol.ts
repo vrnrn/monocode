@@ -4,19 +4,8 @@ import type { AgentModel } from "../../sessions/model/models";
 import type { LinkedWorkItem } from "../../sessions/model/session";
 
 export const HOST_PROTOCOL_VERSION = 1;
-export const REMOTE_PROVIDERS = [
-  "codex",
-  "claude",
-  "cursor",
-  "grok",
-  "opencode",
-  "pi",
-  "omp",
-  "fx",
-  "hermes",
-  "antigravity",
-  "devin",
-] as const;
+import { HARNESSES } from "../../sessions/model/harnessIds";
+export const REMOTE_PROVIDERS = HARNESSES;
 export type RemoteProvider = (typeof REMOTE_PROVIDERS)[number];
 export type HostDescriptor = {
   protocolVersion: number;

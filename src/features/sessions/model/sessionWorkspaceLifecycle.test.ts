@@ -15,7 +15,7 @@ import {
 } from "./sessionWorkspaceLifecycle";
 
 function session(id: string, cwd = "/projects/monocode"): Session {
-  return { ...newSession("cursor", cwd), id };
+  return { ...newSession("pi", cwd), id };
 }
 
 function tab(id: string, sessionId: string): WorkspaceTab {

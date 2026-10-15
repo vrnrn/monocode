@@ -95,14 +95,9 @@ export function UsageFooter({
   ) => void;
   onManageAccounts?: (provider: ProviderAccountProvider) => void;
 }) {
-  const opencode = useCachedRateLimits("opencode");
-  const showUsage =
-    providers.some((provider) => provider !== "opencode") ||
-    (providers.includes("opencode") && opencode.status !== "unavailable");
+  const showUsage = providers.length > 0;
   const showTerminals = terminals.length > 0;
-  const showTerminalButton = Boolean(
-    onNewTerminal || onToggleProjectTerminal,
-  );
+  const showTerminalButton = Boolean(onNewTerminal || onToggleProjectTerminal);
   const terminalLabel = projectTerminalActive
     ? "Terminal"
     : `New Terminal (${MOD}\`)`;
@@ -200,8 +195,6 @@ export function UsageChips({
 }) {
   const wantClaude = providers.includes("claude");
   const wantCodex = providers.includes("codex");
-  const wantOpencode = providers.includes("opencode");
-  const wantDevin = providers.includes("devin");
   const [now, setNow] = useState(() => Date.now());
   const [refreshing, setRefreshing] = useState(false);
   const [, setAccountsVersion] = useState(0);
@@ -223,8 +216,6 @@ export function UsageChips({
   const codexAccountAvailable = providerAccountExists("codex", codexAccountId);
   const cachedClaude = useCachedRateLimits("claude", claudeAccountId);
   const cachedCodex = useCachedRateLimits("codex", codexAccountId);
-  const opencode = useCachedRateLimits("opencode");
-  const devin = useCachedRateLimits("devin");
   const claude = claudeAccountAvailable
     ? cachedClaude
     : unavailableRateLimits(
@@ -251,8 +242,6 @@ export function UsageChips({
       void loadRateLimits("claude", claudeAccountId);
     if (wantCodex && codexAccountAvailable)
       void loadRateLimits("codex", codexAccountId);
-    if (wantOpencode) void loadRateLimits("opencode");
-    if (wantDevin) void loadRateLimits("devin");
   }, [
     claudeAccountAvailable,
     claudeAccountId,
@@ -260,8 +249,6 @@ export function UsageChips({
     codexAccountId,
     wantClaude,
     wantCodex,
-    wantOpencode,
-    wantDevin,
   ]);
 
   const refresh = useCallback(() => {
@@ -272,8 +259,7 @@ export function UsageChips({
       jobs.push(loadRateLimits("claude", claudeAccountId, true));
     if (wantCodex && codexAccountAvailable)
       jobs.push(loadRateLimits("codex", codexAccountId, true));
-    if (wantOpencode) jobs.push(loadRateLimits("opencode", "default", true));
-    if (wantDevin) jobs.push(loadRateLimits("devin", "default", true));
+
     const run = Promise.allSettled(jobs)
       .then(() => undefined)
       .finally(() => {
@@ -289,8 +275,6 @@ export function UsageChips({
     codexAccountId,
     wantClaude,
     wantCodex,
-    wantOpencode,
-    wantDevin,
   ]);
 
   useEffect(() => {
@@ -391,11 +375,6 @@ export function UsageChips({
     [codexAccountId, reconnectProvider],
   );
 
-  const reconnectDevin = useCallback(
-    () => reconnectProvider("devin", "default"),
-    [reconnectProvider],
-  );
-
   const selectAccount = useCallback(
     (provider: ProviderAccountProvider, accountId: string) => {
       selectProviderAccount(provider, project, accountId);
@@ -414,9 +393,7 @@ export function UsageChips({
     },
     [selectAccount],
   );
-
-  const showOpencodeChip = wantOpencode && opencode.status !== "unavailable";
-  const showUsage = wantClaude || wantCodex || showOpencodeChip || wantDevin;
+  const showUsage = wantClaude || wantCodex;
   const claudeAccountProps = accountPicker
     ? {
         accounts: claudeAccounts,
@@ -475,24 +452,7 @@ export function UsageChips({
           onReconnect={reconnectCodex}
         />
       ) : null}
-      {showOpencodeChip ? (
-        <UsageProviderChip
-          limits={opencode}
-          now={now}
-          project={project}
-          variant={variant}
-        />
-      ) : null}
-      {wantDevin ? (
-        // Devin has one login per machine, so there is no account picker.
-        <UsageProviderChip
-          limits={devin}
-          now={now}
-          project={project}
-          variant={variant}
-          onReconnect={reconnectDevin}
-        />
-      ) : null}
+
       <button
         type="button"
         className={USAGE_REFRESH_CLASSES[variant]}

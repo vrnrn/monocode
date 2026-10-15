@@ -21,29 +21,15 @@ vi.mock("../providers/claude/claudeText", () => ({
 vi.mock("../providers/codex/codexText", () => ({
   runCodexTextPrompt: runPrompt,
 }));
-vi.mock("../providers/cursor/cursorText", () => ({
-  runCursorTextPrompt: runPrompt,
-  stopCursorTextPrompt: vi.fn(),
-}));
-vi.mock("../providers/grok/grokText", () => ({ runGrokTextPrompt: runPrompt }));
-vi.mock("../providers/opencode/opencodeText", () => ({
-  runOpenCodeTextPrompt: runPrompt,
-}));
 
 import { generateCommitMessage } from "./textHarness";
 import { registerHarness, type HarnessAdapter } from "./registry";
 import { generateClaudeCommitMessage } from "../providers/claude/claudeGit";
 import { generateCodexCommitMessage } from "../providers/codex/codexGit";
-import { generateCursorCommitMessage } from "../providers/cursor/cursorGit";
-import { generateGrokCommitMessage } from "../providers/grok/grokGit";
-import { generateOpenCodeCommitMessage } from "../providers/opencode/opencodeGit";
 
 const providers = [
   ["claude", generateClaudeCommitMessage],
   ["codex", generateCodexCommitMessage],
-  ["cursor", generateCursorCommitMessage],
-  ["grok", generateGrokCommitMessage],
-  ["opencode", generateOpenCodeCommitMessage],
 ] as const;
 
 beforeEach(() => {

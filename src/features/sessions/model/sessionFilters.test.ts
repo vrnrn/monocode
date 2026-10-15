@@ -16,10 +16,10 @@ function summary(
   return {
     id,
     cwd: "/tmp/project",
-    harness: "cursor",
+    harness: "pi",
     model: "gpt-5",
     runtimeMode: "supervised",
-    title: `cursor · ${id}`,
+    title: `pi · ${id}`,
     createdAt: 1,
     updatedAt: 1,
     additions: 0,
@@ -31,12 +31,12 @@ function summary(
 describe("filterSessionsByHarness", () => {
   it("hides selected providers", () => {
     const rows = [
-      summary("a1", { harness: "cursor" }),
+      summary("a1", { harness: "pi" }),
       summary("a2", { harness: "claude" }),
     ];
-    expect(
-      filterSessionsByHarness(rows, ["cursor"]).map((row) => row.id),
-    ).toEqual(["a2"]);
+    expect(filterSessionsByHarness(rows, ["pi"]).map((row) => row.id)).toEqual([
+      "a2",
+    ]);
   });
 });
 
@@ -48,9 +48,9 @@ describe("filterSessionsByTime", () => {
       summary("a1", { updatedAt: now - 60_000 }),
       summary("a2", { updatedAt: now - 8 * 24 * 60 * 60 * 1000 }),
     ];
-    expect(filterSessionsByTime(rows, "today", now).map((row) => row.id)).toEqual(
-      ["a1"],
-    );
+    expect(
+      filterSessionsByTime(rows, "today", now).map((row) => row.id),
+    ).toEqual(["a1"]);
   });
 
   it("keeps sessions from the last 7 days", () => {
@@ -92,7 +92,9 @@ describe("filterSessionsByStatus", () => {
 
 describe("hasActiveSessionFilters", () => {
   it("is false for defaults", () => {
-    expect(hasActiveSessionFilters(DEFAULT_SESSION_SIDEBAR_FILTERS)).toBe(false);
+    expect(hasActiveSessionFilters(DEFAULT_SESSION_SIDEBAR_FILTERS)).toBe(
+      false,
+    );
   });
 
   it("is true when any filter is set", () => {

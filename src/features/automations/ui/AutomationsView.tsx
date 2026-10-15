@@ -1348,14 +1348,14 @@ function AutomationEditor({
                           }
                         />
                       ) : null}
-                      {draft.harness !== "fx" ? (
+                      {
                         <AccessPicker
                           value={draft.runtimeMode}
                           onChange={(runtimeMode) =>
                             update("runtimeMode", runtimeMode)
                           }
                         />
-                      ) : null}
+                      }
                     </div>
                   </div>
                 </div>

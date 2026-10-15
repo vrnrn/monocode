@@ -1,7 +1,10 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { homeDir } from "../../../platform/tauri/fs";
 import { supportsAccountProfiles } from "../../../features/providers/model/providerAccounts";
-import { HARNESS_TITLE, type HarnessId } from "../../../features/sessions/model/session";
+import {
+  HARNESS_TITLE,
+  type HarnessId,
+} from "../../../features/sessions/model/session";
 import * as child from "./child";
 import { harnessLoginArgs } from "./authSupport";
 
@@ -37,10 +40,6 @@ const LOGIN_RESOLVERS: Partial<
   // require every other CLI resolver to exist in that mock.
   claude: () => child.resolveClaudeBinary(),
   codex: () => child.resolveCodexBinary(),
-  cursor: () => child.resolveCursorBinary(),
-  grok: () => child.resolveGrokBinary(),
-  fx: () => child.resolveFxBinary(),
-  devin: () => child.resolveDevinBinary(),
 };
 
 const inflight = new Map<string, Promise<void>>();

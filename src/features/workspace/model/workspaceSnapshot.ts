@@ -25,7 +25,10 @@ import {
 } from "../../projects/model/projectTerminal";
 import { normalizeProjectPath } from "../../projects/model/recents";
 import { pathKey } from "../../../shared/lib/paths";
-import { parseRemotePath, remotePath } from "../../connections/model/remoteProjects";
+import {
+  parseRemotePath,
+  remotePath,
+} from "../../connections/model/remoteProjects";
 import {
   reconcileProjectReturn,
   type ProjectReturnMemory,
@@ -305,7 +308,7 @@ export function hydrateWorkspaceSnapshot(
         sessionFromStub({
           id,
           cwd: parsed.projectCwd,
-          harness: "cursor",
+          harness: "claude",
           model: "",
           modelSettings: {},
           runtimeMode: "supervised",
@@ -638,7 +641,9 @@ function sanitizeFile(raw: unknown): FilePaneTab | null {
   };
 }
 
-function sanitizeRemoteFile(raw: unknown): { machineId: string; projectId: string; relativePath: string } | null {
+function sanitizeRemoteFile(
+  raw: unknown,
+): { machineId: string; projectId: string; relativePath: string } | null {
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Record<string, unknown>;
   if (
@@ -726,7 +731,8 @@ function sanitizePlan(raw: unknown): PlanTabSource | undefined {
 }
 
 function asHarness(value: unknown): HarnessId | null {
-  return typeof value === "string" && (HARNESSES as string[]).includes(value)
+  return typeof value === "string" &&
+    (HARNESSES as readonly string[]).includes(value)
     ? (value as HarnessId)
     : null;
 }

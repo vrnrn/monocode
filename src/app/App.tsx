@@ -2012,12 +2012,7 @@ function Workspace({
   }, [activeHarness]);
 
   const usageProviders = useMemo(() => {
-    if (
-      active?.harness === "claude" ||
-      active?.harness === "codex" ||
-      active?.harness === "opencode" ||
-      active?.harness === "devin"
-    ) {
+    if (active?.harness === "claude" || active?.harness === "codex") {
       return [active.harness];
     }
     return [];
@@ -5373,7 +5368,7 @@ function Workspace({
           preserveOpenFiles: origin === "cli",
           scope: tabCloseScope,
           replacement: {
-            harness: seed?.harness ?? "cursor",
+            harness: seed?.harness ?? "claude",
             cwd: seed?.cwd ?? sidebarCwd,
             model: seed?.model,
             runtimeMode: seed?.runtimeMode,
@@ -7204,7 +7199,7 @@ function Workspace({
           return true;
         }
         if (!steerable) {
-          // Harnesses that cannot steer (fx) used to drop the message on the
+          // Harnesses that cannot steer used to drop the message on the
           // floor here, so a follow-up sent mid-turn just vanished. Say so.
           enqueueHarnessEvent(sessionId, {
             type: "status",

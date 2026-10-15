@@ -121,14 +121,7 @@ export class AcpSubagents {
     let parent: string | undefined;
     for (const source of sources) {
       const meta = record(source?._meta);
-      for (const entry of [
-        source,
-        meta,
-        record(meta?.cursor),
-        record(meta?.grok),
-        record(meta?.["x.ai"]),
-        record(meta?.fx),
-      ]) {
+      for (const entry of [source, meta, record(meta?.["x.ai"])]) {
         parent = text(entry?.parentToolCallId ?? entry?.parent_tool_call_id);
         if (parent) break;
       }

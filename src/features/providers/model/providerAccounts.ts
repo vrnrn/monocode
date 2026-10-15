@@ -23,7 +23,6 @@ export function sameProviderAccountId(
 export const PROVIDER_ACCOUNT_PROVIDERS = [
   "claude",
   "codex",
-  "devin",
 ] as const satisfies readonly HarnessId[];
 
 export type ProviderAccountProvider =
@@ -36,8 +35,7 @@ export function supportsProviderAccounts(
 }
 
 /**
- * Providers whose CLIs can keep isolated, locally named profiles. Devin has
- * no config-dir override on Windows, so it offers only its default login.
+ * Providers whose CLIs can keep isolated, locally named profiles.
  */
 const PROFILE_PROVIDERS = [
   "claude",

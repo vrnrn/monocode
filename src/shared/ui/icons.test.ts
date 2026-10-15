@@ -51,15 +51,4 @@ describe("hugeicons imports", () => {
       expect(html, Icon.displayName).toMatch(/stroke="currentColor"/);
     }
   });
-
-  it("optically insets the detailed Hermes artwork at UI icon sizes", () => {
-    const html = renderToStaticMarkup(
-      createElement(HarnessIcon, {
-        harness: "hermes",
-        className: "size-4 shrink-0",
-      }),
-    );
-    expect(html).toContain("items-center justify-center");
-    expect(html).toContain("size-[72%]");
-  });
 });

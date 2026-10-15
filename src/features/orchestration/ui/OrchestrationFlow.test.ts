@@ -23,11 +23,16 @@ vi.mock("../../../integrations/harness/core/availability", () => ({
   probeHarnessAvailability: async () => {},
   subscribeHarnessAvailability: () => () => {},
 }));
-vi.mock("../../../integrations/harness/core/registry", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../integrations/harness/core/registry")>()),
-  refreshHarnessCatalogs: async () => {},
-  isLiveHarness: () => true,
-}));
+vi.mock(
+  "../../../integrations/harness/core/registry",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../../../integrations/harness/core/registry")
+    >()),
+    refreshHarnessCatalogs: async () => {},
+    isLiveHarness: () => true,
+  }),
+);
 vi.mock("../../sessions/ui/ModelPicker", () => ({ ModelPicker: () => null }));
 vi.mock("../../sessions/ui/SessionReview", () => ({
   SessionReview: ({ undoLocked }: { undoLocked: boolean }) =>
@@ -488,7 +493,7 @@ describe("orchestration composer and card", () => {
       leadId: "lead",
       cwd: "/repo",
       status: "stopped",
-      allowedHarnesses: ["codex", "cursor"],
+      allowedHarnesses: ["codex", "pi"],
       proposalId: "card",
       maxWorkers: 2,
       cli: "monocode",
@@ -499,8 +504,8 @@ describe("orchestration composer and card", () => {
           id: "ui",
           sessionId: "worker-b",
           title: "Audit UI",
-          harness: "cursor",
-          model: "cursor:composer-2.5",
+          harness: "pi",
+          model: "pi:composer-2.5",
           status: "completed",
         },
       ],
@@ -554,8 +559,8 @@ describe("orchestration composer and card", () => {
                       id: "ui",
                       title: "Audit UI",
                       prompt: "Review the UI",
-                      harness: "cursor",
-                      model: "cursor:composer-2.5",
+                      harness: "pi",
+                      model: "pi:composer-2.5",
                       files: [],
                       dependsOn: [],
                     },
@@ -580,7 +585,7 @@ describe("orchestration composer and card", () => {
         sessionId: "worker-b",
         leadId: "lead",
         title: "Audit UI",
-        harness: "cursor",
+        harness: "pi",
       },
     ]);
   });

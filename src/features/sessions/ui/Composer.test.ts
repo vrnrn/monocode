@@ -101,7 +101,7 @@ describe("Composer question focus", () => {
               transport: "stdio",
             },
             {
-              provider: "cursor",
+              provider: "pi",
               name: "other",
               scope: "user",
               configPath: "/cursor/mcp.json",

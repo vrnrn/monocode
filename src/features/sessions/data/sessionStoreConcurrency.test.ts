@@ -26,7 +26,7 @@ function session(id: string) {
   return {
     id,
     cwd: "/tmp/project",
-    harness: "cursor" as const,
+    harness: "pi" as const,
     model: "",
     modelSettings: {},
     runtimeMode: "supervised" as const,
@@ -91,7 +91,7 @@ describe("session persistence concurrency", () => {
     firstWrite.resolve({
       id: "s1",
       cwd: "/tmp/project",
-      harness: "cursor",
+      harness: "pi",
       model: "",
       runtimeMode: "supervised",
       title: "",
@@ -112,7 +112,7 @@ describe("session persistence concurrency", () => {
       return Promise.resolve({
         id: "s1",
         cwd: "/tmp/project",
-        harness: "cursor",
+        harness: "pi",
         model: "",
         runtimeMode: "supervised",
         title: "",
@@ -168,7 +168,7 @@ describe("session persistence concurrency", () => {
       return Promise.resolve({
         id: "s1",
         cwd: "/tmp/project",
-        harness: "cursor",
+        harness: "pi",
         model: "",
         runtimeMode: "supervised",
         title: "",
@@ -193,7 +193,7 @@ describe("session persistence concurrency", () => {
     firstWrite.resolve({
       id: "s1",
       cwd: "/tmp/project",
-      harness: "cursor",
+      harness: "pi",
       model: "",
       runtimeMode: "supervised",
       title: "",

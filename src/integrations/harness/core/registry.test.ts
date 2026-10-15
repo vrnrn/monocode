@@ -26,7 +26,7 @@ import type { SendTurnInput, SteerTurnInput } from "./types";
 import { registerBuiltinHarnesses } from "./register";
 
 function stub(
-  id: "cursor" | "codex" | "claude" | "pi",
+  id: "pi" | "codex" | "claude" | "pi",
   extra: Partial<HarnessAdapter> = {},
 ): HarnessAdapter {
   return {
@@ -51,18 +51,18 @@ describe("harness registry", () => {
   });
 
   it("tracks live adapters", () => {
-    registerHarness(stub("cursor"));
+    registerHarness(stub("pi"));
     registerHarness(stub("codex"));
     registerHarness(stub("claude"));
-    expect(isLiveHarness("cursor")).toBe(true);
+    expect(isLiveHarness("pi")).toBe(true);
     expect(isLiveHarness("codex")).toBe(true);
     expect(isLiveHarness("claude")).toBe(true);
     expect(
       listHarnesses()
         .map((a) => a.id)
-        .filter((id) => id === "claude" || id === "codex" || id === "cursor")
+        .filter((id) => id === "claude" || id === "codex" || id === "pi")
         .sort(),
-    ).toEqual(["claude", "codex", "cursor"]);
+    ).toEqual(["claude", "codex", "pi"]);
   });
 
   it("announces readiness when the provider accepts, while preserving the caller's acceptance callback", async () => {
@@ -101,60 +101,30 @@ describe("harness registry", () => {
 
   it("advertises isolated text prompt support by harness", () => {
     registerBuiltinHarnesses();
-    const ids: HarnessId[] = [
-      "claude",
-      "codex",
-      "cursor",
-      "grok",
-      "opencode",
-      "pi",
-      "omp",
-      "fx",
-      "hermes",
-      "antigravity",
-    ];
+    const ids: HarnessId[] = ["claude", "codex", "pi", "omp", "antigravity"];
 
     expect(
       Object.fromEntries(ids.map((id) => [id, canRunHarnessTextPrompt(id)])),
     ).toEqual({
       claude: true,
       codex: true,
-      cursor: true,
-      grok: true,
-      opencode: true,
       pi: true,
       omp: true,
-      fx: false,
-      hermes: false,
       antigravity: false,
     });
   });
 
   it("exposes the native compaction support matrix", () => {
     registerBuiltinHarnesses();
-    const ids: HarnessId[] = [
-      "claude",
-      "codex",
-      "cursor",
-      "grok",
-      "opencode",
-      "pi",
-      "omp",
-      "fx",
-      "antigravity",
-    ];
+    const ids: HarnessId[] = ["claude", "codex", "pi", "omp", "antigravity"];
 
     expect(
       Object.fromEntries(ids.map((id) => [id, canCompactHarnessContext(id)])),
     ).toEqual({
       claude: true,
       codex: true,
-      cursor: false,
-      grok: true,
-      opencode: true,
       pi: true,
       omp: true,
-      fx: false,
       antigravity: false,
     });
   });
@@ -234,28 +204,16 @@ describe("harness registry", () => {
 
   it("exposes the edit-last-turn support matrix", () => {
     registerBuiltinHarnesses();
-    const ids: HarnessId[] = [
-      "claude",
-      "codex",
-      "cursor",
-      "grok",
-      "opencode",
-      "pi",
-      "omp",
-      "fx",
-    ];
+    const ids: HarnessId[] = ["claude", "codex", "pi", "omp", "antigravity"];
 
     expect(
       Object.fromEntries(ids.map((id) => [id, canRewindHarnessLastTurn(id)])),
     ).toEqual({
       claude: false,
       codex: true,
-      cursor: false,
-      grok: false,
-      opencode: true,
       pi: true,
       omp: true,
-      fx: false,
+      antigravity: false,
     });
   });
 
@@ -332,13 +290,13 @@ describe("harness registry", () => {
   it("parks a live child a few minutes after the turn settles", async () => {
     vi.useFakeTimers();
     const stopSession = vi.fn(async () => undefined);
-    registerHarness(stub("cursor", { stopSession }));
+    registerHarness(stub("pi", { stopSession }));
 
     await sendHarnessTurn({
-      harness: "cursor",
+      harness: "pi",
       sessionId: "s1",
       cwd: "/tmp",
-      model: "cursor:composer-2.5",
+      model: "pi:composer-2.5",
       text: "hi",
       runtimeMode: "supervised",
       onEvent: () => undefined,
@@ -353,10 +311,10 @@ describe("harness registry", () => {
   describe("idle limit", () => {
     const turn = (sessionId: string) =>
       sendHarnessTurn({
-        harness: "cursor",
+        harness: "pi",
         sessionId,
         cwd: "/tmp",
-        model: "cursor:composer-2.5",
+        model: "pi:composer-2.5",
         text: "hi",
         runtimeMode: "supervised",
         onEvent: () => undefined,
@@ -365,7 +323,7 @@ describe("harness registry", () => {
     it("parks the longest-idle child once too many are warm", async () => {
       vi.useFakeTimers();
       const stopSession = vi.fn(async () => undefined);
-      registerHarness(stub("cursor", { stopSession }));
+      registerHarness(stub("pi", { stopSession }));
       configureHarnessIdlePark({ limit: () => 2, keep: () => false });
 
       for (const id of ["s1", "s2", "s3"]) await turn(id);
@@ -382,7 +340,7 @@ describe("harness registry", () => {
       const stopSession = vi.fn(async () => undefined);
       let finishRunning!: () => void;
       registerHarness(
-        stub("cursor", {
+        stub("pi", {
           stopSession,
           async sendTurn(input) {
             if (input.sessionId !== "running") return;
@@ -412,7 +370,7 @@ describe("harness registry", () => {
     it("parks every idle child at a limit of zero, including the one on screen", async () => {
       vi.useFakeTimers();
       const stopSession = vi.fn(async () => undefined);
-      registerHarness(stub("cursor", { stopSession }));
+      registerHarness(stub("pi", { stopSession }));
       configureHarnessIdlePark({ limit: () => 0, keep: () => true });
 
       await turn("viewed");
@@ -423,7 +381,7 @@ describe("harness registry", () => {
     it("applies a lowered limit straight away", async () => {
       vi.useFakeTimers();
       const stopSession = vi.fn(async () => undefined);
-      registerHarness(stub("cursor", { stopSession }));
+      registerHarness(stub("pi", { stopSession }));
       let limit = 3;
       configureHarnessIdlePark({ limit: () => limit, keep: () => false });
 

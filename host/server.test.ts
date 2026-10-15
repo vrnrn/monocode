@@ -119,14 +119,35 @@ describe("remote host API", () => {
   it("rejects a credential revoked while its request body is arriving", async () => {
     const s = await setup();
     const authenticated = vi.spyOn(s.store, "authenticated");
-    const body = JSON.stringify({ version: 1, environmentId: s.store.environmentId,
-      method: "commands.dispatch", params: { type: "create", commandId: "revoked-create",
-        projectId: s.project.id, harness: "codex", model: "codex:test", runtimeMode: "supervised" } });
+    const body = JSON.stringify({
+      version: 1,
+      environmentId: s.store.environmentId,
+      method: "commands.dispatch",
+      params: {
+        type: "create",
+        commandId: "revoked-create",
+        projectId: s.project.id,
+        harness: "codex",
+        model: "codex:test",
+        runtimeMode: "supervised",
+      },
+    });
     let req: ReturnType<typeof request>;
     const response = new Promise<number | undefined>((resolve, reject) => {
-      req = request(s.url, { method: "POST", headers: {
-        Authorization: `Bearer ${s.first.token}`, "Content-Length": Buffer.byteLength(body),
-      } }, (res) => { res.resume(); res.on("end", () => resolve(res.statusCode)); });
+      req = request(
+        s.url,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${s.first.token}`,
+            "Content-Length": Buffer.byteLength(body),
+          },
+        },
+        (res) => {
+          res.resume();
+          res.on("end", () => resolve(res.statusCode));
+        },
+      );
       req.on("error", reject);
       req.write(body.slice(0, 1));
     });
@@ -140,15 +161,42 @@ describe("remote host API", () => {
   it("uploads an authenticated attachment and sends its host path to the provider", async () => {
     const s = await setup();
     const id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
-    const upload = { id, offset: 0, size: 5, data: Buffer.from("hello").toString("base64") };
-    expect((await s.call("attachments.upload", upload, "invalid")).status).toBe(401);
-    expect((await s.call("attachments.upload", upload)).value.result).toEqual({ offset: 5 });
-    const created = await s.call("commands.dispatch", { type: "create", commandId: "upload-create",
-      projectId: s.project.id, harness: "codex", model: "codex:test", runtimeMode: "supervised" });
+    const upload = {
+      id,
+      offset: 0,
+      size: 5,
+      data: Buffer.from("hello").toString("base64"),
+    };
+    expect((await s.call("attachments.upload", upload, "invalid")).status).toBe(
+      401,
+    );
+    expect((await s.call("attachments.upload", upload)).value.result).toEqual({
+      offset: 5,
+    });
+    const created = await s.call("commands.dispatch", {
+      type: "create",
+      commandId: "upload-create",
+      projectId: s.project.id,
+      harness: "codex",
+      model: "codex:test",
+      runtimeMode: "supervised",
+    });
     const sessionId = created.value.result.sessionId;
-    const sent = await s.call("commands.dispatch", { type: "send", commandId: "upload-send",
-      sessionId, text: "Read this", attachments: [{ id, name: "notes.txt",
-        mimeType: "text/plain", kind: "file", size: 5 }] });
+    const sent = await s.call("commands.dispatch", {
+      type: "send",
+      commandId: "upload-send",
+      sessionId,
+      text: "Read this",
+      attachments: [
+        {
+          id,
+          name: "notes.txt",
+          mimeType: "text/plain",
+          kind: "file",
+          size: 5,
+        },
+      ],
+    });
     expect(sent.status).toBe(200);
     await vi.waitFor(() => expect(s.send).toHaveBeenCalledTimes(1));
     expect(s.turn().attachments?.[0].path).toContain(id);
@@ -172,18 +220,43 @@ describe("remote host API", () => {
       pinned: true,
     });
     expect(changed.status).toBe(200);
-    expect((await s.call("sessions.list", { projectId: s.project.id })).value.result[0])
-      .toMatchObject({ id: sessionId, title: "Codex · Card title", pinned: true, model: "codex:test" });
-    expect((await s.call("sessions.update", {
-      projectId: "wrong-project", sessionId, archived: true,
-    })).status).not.toBe(200);
-    expect((await s.call("sessions.delete", {
-      projectId: "wrong-project", sessionId,
-    })).status).not.toBe(200);
-    expect((await s.call("sessions.delete", {
-      projectId: s.project.id, sessionId,
-    })).status).toBe(200);
-    expect((await s.call("sessions.list", { projectId: s.project.id })).value.result).toEqual([]);
+    expect(
+      (await s.call("sessions.list", { projectId: s.project.id })).value
+        .result[0],
+    ).toMatchObject({
+      id: sessionId,
+      title: "Codex · Card title",
+      pinned: true,
+      model: "codex:test",
+    });
+    expect(
+      (
+        await s.call("sessions.update", {
+          projectId: "wrong-project",
+          sessionId,
+          archived: true,
+        })
+      ).status,
+    ).not.toBe(200);
+    expect(
+      (
+        await s.call("sessions.delete", {
+          projectId: "wrong-project",
+          sessionId,
+        })
+      ).status,
+    ).not.toBe(200);
+    expect(
+      (
+        await s.call("sessions.delete", {
+          projectId: s.project.id,
+          sessionId,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await s.call("sessions.list", { projectId: s.project.id })).value.result,
+    ).toEqual([]);
   });
 
   it("lists, creates, and selects registered remote worktrees through RPC", async () => {
@@ -217,7 +290,14 @@ describe("remote host API", () => {
         .value.result.current,
     ).toBe("main");
     // Prime the allowed-root cache before creating a checkout.
-    expect((await s.call("workspace.run", { command: "list_dir", args: { path: s.project.cwd } })).status).toBe(200);
+    expect(
+      (
+        await s.call("workspace.run", {
+          command: "list_dir",
+          args: { path: s.project.cwd },
+        })
+      ).status,
+    ).toBe(200);
     const created = await s.call("git.worktreeCreate", {
       projectId: s.project.id,
       branch: "feature",
@@ -233,9 +313,16 @@ describe("remote host API", () => {
       }),
     );
     expect(tree.branch).toBe("feature");
-    expect((await s.call("workspace.run", { command: "read_text_file", args: {
-      path: join(tree.path, "file.txt"),
-    } })).value.result).toBe("initial\n");
+    expect(
+      (
+        await s.call("workspace.run", {
+          command: "read_text_file",
+          args: {
+            path: join(tree.path, "file.txt"),
+          },
+        })
+      ).value.result,
+    ).toBe("initial\n");
     expect(
       (await s.call("git.worktrees", { projectId: s.project.id })).value.result
         .worktrees,
@@ -258,13 +345,15 @@ describe("remote host API", () => {
     expect(s.store.session(opened.value.result.sessionId).session.cwd).toBe(
       tree.path,
     );
-    expect((await s.call("sessions.list", { projectId: s.project.id })).value.result[0])
-      .toMatchObject({
-        id: opened.value.result.sessionId,
-        branch: "feature",
-        worktreeCwd: tree.path,
-        repo: s.project.name,
-      });
+    expect(
+      (await s.call("sessions.list", { projectId: s.project.id })).value
+        .result[0],
+    ).toMatchObject({
+      id: opened.value.result.sessionId,
+      branch: "feature",
+      worktreeCwd: tree.path,
+      repo: s.project.name,
+    });
     expect(
       (
         await s.call("commands.dispatch", {
@@ -298,12 +387,17 @@ describe("remote host API", () => {
     expect(modelProbe).toHaveBeenCalledTimes(2);
   });
   it("advertises newer providers only to desktops that request them", async () => {
-    const s = await setup(["codex", "cursor"]);
-    expect((await s.call("environment.describe")).value.result.providers)
-      .toEqual(["codex"]);
-    expect((await s.call("environment.describe", {
-      supportedProviders: ["codex", "cursor"],
-    })).value.result.providers).toEqual(["codex", "cursor"]);
+    const s = await setup(["codex", "pi"]);
+    expect(
+      (await s.call("environment.describe")).value.result.providers,
+    ).toEqual(["codex"]);
+    expect(
+      (
+        await s.call("environment.describe", {
+          supportedProviders: ["codex", "pi"],
+        })
+      ).value.result.providers,
+    ).toEqual(["codex", "pi"]);
   });
   it("re-probes models after the provider CLI is updated", async () => {
     const s = await setup();
@@ -500,7 +594,9 @@ describe("remote host API", () => {
   it("answers this app's file commands inside host projects only", async () => {
     const s = await setup();
     const outside = mkdtempSync(join(tmpdir(), "monocode-outside-"));
-    cleanups.push(async () => rmSync(outside, { recursive: true, force: true }));
+    cleanups.push(async () =>
+      rmSync(outside, { recursive: true, force: true }),
+    );
     const checkout = join(s.directory, "checkout");
     mkdirSync(join(checkout, "src"), { recursive: true });
     writeFileSync(join(checkout, "src", "app.ts"), "before\n");
@@ -518,7 +614,10 @@ describe("remote host API", () => {
     expect(
       (await run("read_binary_file", { path: `${root}/src/app.ts` })).result,
     ).toBe(Buffer.from("before\n").toString("base64"));
-    await run("write_text_file", { path: `${root}/src/app.ts`, content: "after\n" });
+    await run("write_text_file", {
+      path: `${root}/src/app.ts`,
+      content: "after\n",
+    });
     expect(
       (await run("read_text_file", { path: `${root}/src/app.ts` })).result,
     ).toBe("after\n");
@@ -529,24 +628,42 @@ describe("remote host API", () => {
     expect(typeof stat.mtimeMs).toBe("number");
 
     expect(
-      (await run("create_path", { parent: root, name: "docs/a.md", isDir: false }))
-        .result,
+      (
+        await run("create_path", {
+          parent: root,
+          name: "docs/a.md",
+          isDir: false,
+        })
+      ).result,
     ).toBe(`${root}/docs/a.md`);
     expect(
-      (await run("create_path", { parent: root, name: "docs/a.md", isDir: false }))
-        .error,
+      (
+        await run("create_path", {
+          parent: root,
+          name: "docs/a.md",
+          isDir: false,
+        })
+      ).error,
     ).toContain("already exists");
     expect(
       (await run("rename_path", { path: `${root}/docs/a.md`, name: "b.md" }))
         .result,
     ).toBe(`${root}/docs/b.md`);
     expect(
-      (await run("copy_path", { from: `${root}/docs/b.md`, destParent: `${root}/docs` }))
-        .result,
+      (
+        await run("copy_path", {
+          from: `${root}/docs/b.md`,
+          destParent: `${root}/docs`,
+        })
+      ).result,
     ).toBe(`${root}/docs/b copy.md`);
     expect(
-      (await run("move_path", { from: `${root}/docs/b.md`, destParent: `${root}/src` }))
-        .result,
+      (
+        await run("move_path", {
+          from: `${root}/docs/b.md`,
+          destParent: `${root}/src`,
+        })
+      ).result,
     ).toBe(`${root}/src/b.md`);
     await run("delete_path", { path: `${root}/docs` });
     expect(
@@ -566,30 +683,67 @@ describe("remote host API", () => {
     git("add", "src");
     git("commit", "-qm", "initial");
     writeFileSync(join(root, "src", "app.ts"), "changed\n");
-    expect((await run("search_project", { options: { cwd: root, query: "changed" } })).result.matches)
-      .toContainEqual(expect.objectContaining({
-        path: `${root}/src/app.ts`, relative: "src/app.ts", line: 1,
-      }));
+    expect(
+      (
+        await run("search_project", {
+          options: { cwd: root, query: "changed" },
+        })
+      ).result.matches,
+    ).toContainEqual(
+      expect.objectContaining({
+        path: `${root}/src/app.ts`,
+        relative: "src/app.ts",
+        line: 1,
+      }),
+    );
     const gitIndex = (await run("git_diff_index", { cwd: root })).result;
-    expect(gitIndex.files).toContainEqual(expect.objectContaining({
-      path: "src/app.ts", relative: "src/app.ts", unstaged: true,
-    }));
-    expect((await run("git_file_diff", { cwd: root, relative: "src/app.ts", staged: false })).result)
-      .toMatchObject({ original: "after\n", current: "changed\n" });
+    expect(gitIndex.files).toContainEqual(
+      expect.objectContaining({
+        path: "src/app.ts",
+        relative: "src/app.ts",
+        unstaged: true,
+      }),
+    );
+    expect(
+      (
+        await run("git_file_diff", {
+          cwd: root,
+          relative: "src/app.ts",
+          staged: false,
+        })
+      ).result,
+    ).toMatchObject({ original: "after\n", current: "changed\n" });
     await run("git_stage_file", { cwd: root, relative: "src/app.ts" });
-    expect((await run("git_diff_index", { cwd: root })).result.files)
-      .toContainEqual(expect.objectContaining({ relative: "src/app.ts", staged: true }));
+    expect(
+      (await run("git_diff_index", { cwd: root })).result.files,
+    ).toContainEqual(
+      expect.objectContaining({ relative: "src/app.ts", staged: true }),
+    );
     const history = (await run("git_history", { cwd: root, limit: 10 })).result;
-    expect(history.commits[0])
-      .toMatchObject({ subject: "initial", head: true });
+    expect(history.commits[0]).toMatchObject({
+      subject: "initial",
+      head: true,
+    });
     expect(history.commits[0].timestamp).toBeLessThan(10_000_000_000);
-    expect((await run("git_commit_files", { cwd: root, sha: history.head })).result)
-      .toContainEqual(expect.objectContaining({ relative: "src/app.ts", additions: 1 }));
-    expect((await run("git_commit_file_diff", {
-      cwd: root, sha: history.head, relative: "src/app.ts",
-    })).result).toMatchObject({ original: "", current: "after\n", status: "added" });
-    expect((await run("git_worktrees", { cwd: root })).result.worktrees)
-      .toContainEqual(expect.objectContaining({ path: project.cwd, isMain: true }));
+    expect(
+      (await run("git_commit_files", { cwd: root, sha: history.head })).result,
+    ).toContainEqual(
+      expect.objectContaining({ relative: "src/app.ts", additions: 1 }),
+    );
+    expect(
+      (
+        await run("git_commit_file_diff", {
+          cwd: root,
+          sha: history.head,
+          relative: "src/app.ts",
+        })
+      ).result,
+    ).toMatchObject({ original: "", current: "after\n", status: "added" });
+    expect(
+      (await run("git_worktrees", { cwd: root })).result.worktrees,
+    ).toContainEqual(
+      expect.objectContaining({ path: project.cwd, isMain: true }),
+    );
 
     for (const path of [outside, `${root}/../outside`, `${root}/.git/config`])
       expect((await run("read_text_file", { path })).error).toBeTruthy();

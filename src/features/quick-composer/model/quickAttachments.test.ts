@@ -78,6 +78,6 @@ it("rejects excess attachments and unsupported providers", () => {
     parseQuickLaunch({ ...base, attachments: Array(21).fill(file) }),
   ).toBeNull();
   expect(
-    parseQuickLaunch({ ...base, harness: "fx", attachments: [file] }),
+    parseQuickLaunch({ ...base, harness: "removed", attachments: [file] }),
   ).toBeNull();
 });

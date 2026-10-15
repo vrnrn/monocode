@@ -62,7 +62,7 @@ describe("orchestration proposals", () => {
       ...draft.settings,
       choices: [
         { harness: "codex" as const, model: "shared", name: "One" },
-        { harness: "opencode" as const, model: "shared", name: "Two" },
+        { harness: "omp" as const, model: "shared", name: "Two" },
       ],
     };
     expect(() =>
@@ -72,7 +72,7 @@ describe("orchestration proposals", () => {
       ),
     ).toThrow("a harness for assignment 1 (ui)");
     expect(() =>
-      validateProposedTasks([{ ...task, harness: "opencode" }], draft.settings),
+      validateProposedTasks([{ ...task, harness: "omp" }], draft.settings),
     ).toThrow("outside the available catalog");
     expect(() =>
       validateProposedTasks(

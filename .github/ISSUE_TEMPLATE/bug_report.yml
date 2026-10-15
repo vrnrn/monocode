@@ -41,12 +41,8 @@ body:
       options:
         - Claude Code
         - Codex
-        - Cursor
-        - Grok Build
-        - OpenCode
         - Pi
         - omp
-        - fx
         - Multiple / not sure
     validations:
       required: true

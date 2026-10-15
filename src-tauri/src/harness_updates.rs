@@ -15,7 +15,7 @@ fn npm_package(provider: &str) -> Option<&'static str> {
     match provider {
         "claude" => Some("@anthropic-ai/claude-code"),
         "codex" => Some("@openai/codex"),
-        "opencode" => Some("opencode-ai"),
+
         "pi" => Some("@earendil-works/pi-coding-agent"),
         _ => None,
     }
@@ -27,7 +27,7 @@ fn update_args(provider: &str) -> Option<&'static [&'static str]> {
     match provider {
         "claude" => Some(&["update"]),
         "codex" => Some(&["update"]),
-        "opencode" => Some(&["upgrade"]),
+
         "pi" => Some(&["update", "--self"]),
         _ => None,
     }
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn updates_only_through_each_cli_own_updater() {
         assert_eq!(update_args("pi"), Some(&["update", "--self"][..]));
-        assert_eq!(update_args("opencode"), Some(&["upgrade"][..]));
+        assert_eq!(update_args("opencode"), None);
         assert_eq!(update_args("cursor"), None);
     }
 
@@ -152,7 +152,9 @@ mod tests {
     #[test]
     fn reads_version_from_registry_payload() {
         assert_eq!(
-            latest_version(&json!({ "name": "opencode-ai", "version": "1.18.33" })),
+            latest_version(
+                &json!({ "name": "@earendil-works/pi-coding-agent", "version": "1.18.33" })
+            ),
             Some("1.18.33".to_string())
         );
         assert_eq!(latest_version(&json!({ "version": " " })), None);

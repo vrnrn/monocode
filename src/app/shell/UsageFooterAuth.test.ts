@@ -112,64 +112,6 @@ describe("UsageFooter provider authentication", () => {
     expect(rateLimitsFetch.fetchCodexRateLimits).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps a healthy Grok provider label non-interactive", () => {
-    act(() =>
-      root.render(
-        createElement(UsageFooter, {
-          providers: [],
-          session: {
-            id: "grok-session",
-            harness: "grok",
-            authRequired: false,
-          },
-        }),
-      ),
-    );
-
-    expect(container.textContent).toContain("grok");
-    expect(container.textContent).not.toContain("sign in");
-    expect(container.querySelector("button")).toBeNull();
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-  });
-
-  it("opens Grok sign-in from its footer provider popover", async () => {
-    let finishLogin: (() => void) | undefined;
-    auth.loginHarness.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          finishLogin = resolve;
-        }),
-    );
-    act(() =>
-      root.render(
-        createElement(UsageFooter, {
-          providers: [],
-          session: {
-            id: "grok-session",
-            harness: "grok",
-            authRequired: true,
-          },
-        }),
-      ),
-    );
-
-    expect(container.textContent).toContain("grok");
-    expect(container.textContent).toContain("sign in");
-    act(() => button("Grok Build sign-in required").click());
-
-    const dialog = document.querySelector('[role="dialog"]');
-    expect(dialog?.textContent).toContain("Authentication required");
-    expect(dialog?.querySelector(".size-9")).not.toBeNull();
-
-    act(() => button("Sign in to Grok Build").click());
-    expect(auth.loginHarness).toHaveBeenCalledWith("grok");
-    expect(dialog?.textContent).toContain("Waiting for browser…");
-
-    await act(async () => finishLogin?.());
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-    expect(container.textContent).not.toContain("sign in");
-  });
-
   it("starts a waiting recovery after another provider login fails", async () => {
     let rejectClaude: ((error: Error) => void) | undefined;
     auth.loginHarness.mockImplementation((harness) => {

@@ -16,7 +16,7 @@ export type AcpHandlers = {
   ) => void | Promise<void>;
 };
 
-/** ACP JSON-RPC client — thin wrapper preserving the Cursor numeric-id API. */
+/** ACP JSON-RPC client — thin wrapper using numeric request IDs. */
 export class AcpClient {
   private readonly rpc: JsonRpcClient;
 

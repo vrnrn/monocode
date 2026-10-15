@@ -40,34 +40,34 @@ describe("project provider settings", () => {
   });
 
   it("stores per-provider models and hidden providers", () => {
-    setProjectDefaultModel("/repo/a", "cursor", "cursor:composer-2.5");
-    setProjectProviderHidden("/repo/a", "grok", true);
+    setProjectDefaultModel("/repo/a", "pi", "pi:default");
+    setProjectProviderHidden("/repo/a", "antigravity", true);
     setProjectProviderHidden("/repo/a", "omp", true);
-    setProjectProviderHidden("/repo/a", "grok", false);
+    setProjectProviderHidden("/repo/a", "antigravity", false);
     expect(loadProjectProviderSettings("/repo/a")).toEqual({
-      models: { cursor: "cursor:composer-2.5" },
+      models: { pi: "pi:default" },
       hidden: ["omp"],
     });
   });
 
   it("scopes settings to the project path", () => {
-    setProjectProviderHidden("/repo/a", "cursor", true);
+    setProjectProviderHidden("/repo/a", "pi", true);
     expect(loadProjectProviderSettings("/repo/b")).toEqual({});
   });
 
   it("treats trailing slashes as the same project", () => {
-    setProjectProviderHidden("/repo/a/", "cursor", true);
-    expect(loadProjectProviderSettings("/repo/a").hidden).toEqual(["cursor"]);
+    setProjectProviderHidden("/repo/a/", "pi", true);
+    expect(loadProjectProviderSettings("/repo/a").hidden).toEqual(["pi"]);
   });
 
   it("drops the project entry once nothing is overridden", () => {
-    setProjectProviderHidden("/repo/a", "cursor", true);
-    setProjectProviderHidden("/repo/a", "cursor", false);
+    setProjectProviderHidden("/repo/a", "pi", true);
+    setProjectProviderHidden("/repo/a", "pi", false);
     expect(storage.get("monocode.projectProviderSettings.v1")).toBe("{}");
   });
 
   it("clears and rebases project entries", () => {
-    setProjectProviderHidden("/repo/a", "cursor", true);
+    setProjectProviderHidden("/repo/a", "pi", true);
     clearProjectProviders("/repo/a");
     expect(loadProjectProviderSettings("/repo/a")).toEqual({});
 
@@ -88,7 +88,24 @@ describe("project provider settings", () => {
 
   it("bumps the revision on writes", () => {
     const before = projectProvidersRevision();
-    setProjectProviderHidden("/repo/a", "cursor", true);
+    setProjectProviderHidden("/repo/a", "pi", true);
     expect(projectProvidersRevision()).toBeGreaterThan(before);
+  });
+  it("ignores removed provider defaults while keeping supported project overrides", () => {
+    storage.set(
+      "monocode.projectProviderSettings.v1",
+      JSON.stringify({
+        "/repo/a": {
+          defaultHarness: "cursor",
+          defaultModel: "cursor:composer-2.5",
+          models: { cursor: "old", pi: "pi:default", omp: "omp:default" },
+          hidden: ["opencode", "antigravity"],
+        },
+      }),
+    );
+    expect(loadProjectProviderSettings("/repo/a")).toEqual({
+      models: { pi: "pi:default", omp: "omp:default" },
+      hidden: ["antigravity"],
+    });
   });
 });

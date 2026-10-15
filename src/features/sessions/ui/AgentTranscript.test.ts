@@ -89,7 +89,8 @@ describe("AgentTranscript collapsed work", () => {
   });
 
   it("shows the full command before approving a MonoCode CLI call", () => {
-    const command = "monocode app sessions.send --json '{\"prompt\":\"private-marker\"}'";
+    const command =
+      'monocode app sessions.send --json \'{"prompt":"private-marker"}\'';
     const markup = renderToStaticMarkup(
       createElement(AgentTranscript, {
         blocks: [
@@ -170,20 +171,20 @@ describe("AgentTranscript collapsed work", () => {
   it("hides provider authentication errors handled by the sign-in modal", () => {
     const markup = renderToStaticMarkup(
       createElement(AgentTranscript, {
-        harness: "grok",
+        harness: "codex",
         blocks: [
           {
             id: "auth-error",
             role: "system",
             notice: "error",
-            text: "Authentication required\n\nGrok Build is not signed in.",
+            text: "Authentication required\n\nCodex is not signed in.",
           },
         ],
       }),
     );
 
     expect(markup).not.toContain("Authentication required");
-    expect(markup).not.toContain("Sign in to Grok Build");
+    expect(markup).not.toContain("Sign in to Codex");
     expect(markup).not.toContain("<button");
   });
 

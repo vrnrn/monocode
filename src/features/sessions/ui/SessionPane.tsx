@@ -1279,10 +1279,5 @@ const LocalSessionPane = memo(function LocalSessionPane({
 
 /** The providers whose plan usage a Mono on `harness` shows by its composer. */
 function monoUsageProviders(harness: HarnessId): RateLimitProvider[] {
-  return harness === "claude" ||
-    harness === "codex" ||
-    harness === "opencode" ||
-    harness === "devin"
-    ? [harness]
-    : [];
+  return harness === "claude" || harness === "codex" ? [harness] : [];
 }

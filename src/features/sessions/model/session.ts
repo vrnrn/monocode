@@ -15,32 +15,9 @@ import {
 } from "./models";
 import { loadProjectProviderSettings } from "./projectProviders";
 
-export type HarnessId =
-  | "claude"
-  | "codex"
-  | "cursor"
-  | "grok"
-  | "opencode"
-  | "pi"
-  | "omp"
-  | "fx"
-  | "hermes"
-  | "antigravity"
-  | "devin";
-
-export const HARNESSES: HarnessId[] = [
-  "claude",
-  "codex",
-  "cursor",
-  "grok",
-  "opencode",
-  "pi",
-  "omp",
-  "fx",
-  "hermes",
-  "antigravity",
-  "devin",
-];
+import type { HarnessId } from "./harnessIds";
+export { HARNESSES, isHarnessId } from "./harnessIds";
+export type { HarnessId } from "./harnessIds";
 
 export type BlockRole =
   | "user"
@@ -480,7 +457,7 @@ export type Session = {
    * A Mono's habit runs are, and disappear when the run ends.
    */
   ephemeral?: boolean;
-  /** Provider-side conversation id (Cursor ACP session id). */
+  /** Provider-side conversation id. */
   providerSessionId?: string;
   /** Named local credential profile used by Claude or Codex. */
   providerAccountId?: string;
@@ -537,34 +514,22 @@ export type PendingHarnessSwitch = {
 export const HARNESS_LABEL: Record<HarnessId, string> = {
   claude: "claude",
   codex: "codex",
-  cursor: "cursor",
-  grok: "grok",
-  opencode: "opencode",
   pi: "pi",
   omp: "omp",
-  fx: "fx",
-  hermes: "hermes",
   antigravity: "antigravity",
-  devin: "devin",
 };
 
 export const HARNESS_TITLE: Record<HarnessId, string> = {
   claude: "Claude Code",
   codex: "Codex",
-  cursor: "Cursor",
-  grok: "Grok Build",
-  opencode: "OpenCode",
   pi: "Pi",
   omp: "omp",
-  fx: "fx",
-  hermes: "Hermes Agent",
   antigravity: "Antigravity",
-  devin: "Devin",
 };
 
-/** fx ACP rejects attachment prompt blocks. */
-export function harnessSupportsAttachments(id: HarnessId): boolean {
-  return id !== "fx";
+/** The supported harnesses accept attachment prompt blocks. */
+export function harnessSupportsAttachments(_id: HarnessId): boolean {
+  return true;
 }
 
 export function newSession(

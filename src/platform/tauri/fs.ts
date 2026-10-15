@@ -25,7 +25,10 @@ const PATH_ARGS = ["path", "cwd", "parent", "from", "destParent", "paths"];
 
 /** Runs a command on the machine that owns its paths, so the same file and
  * Git UI works for a local project and one on a connected machine. */
-export function invokeWorkspace<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+export function invokeWorkspace<T>(
+  command: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
   const options = args?.options;
   const remoteOptions =
     options && typeof options === "object" && !Array.isArray(options)
@@ -73,8 +76,12 @@ export interface OmpAssistantText {
   concat: string;
 }
 
-export function ompActiveAssistantTexts(providerSessionId: string): Promise<OmpAssistantText[]> {
-  return invoke<OmpAssistantText[]>("omp_active_assistant_texts", { providerSessionId });
+export function ompActiveAssistantTexts(
+  providerSessionId: string,
+): Promise<OmpAssistantText[]> {
+  return invoke<OmpAssistantText[]>("omp_active_assistant_texts", {
+    providerSessionId,
+  });
 }
 
 export function claudeShellCommands(
@@ -144,19 +151,7 @@ export type DiscoveredSkill = {
   path: string;
   scope: "project" | "user" | "builtin";
   source:
-    | "agents"
-    | "claude"
-    | "cursor"
-    | "codex"
-    | "opencode"
-    | "pi"
-    | "omp"
-    | "fx"
-    | "grok"
-    | "hermes"
-    | "antigravity"
-    | "devin"
-    | "monocode";
+    "agents" | "claude" | "codex" | "pi" | "omp" | "antigravity" | "monocode";
 };
 
 export function listSkills(
@@ -344,7 +339,10 @@ export type GitStagedContext = {
   patch: string;
 };
 
-export function gitStagedContext(cwd: string, paths?: readonly string[]): Promise<GitStagedContext> {
+export function gitStagedContext(
+  cwd: string,
+  paths?: readonly string[],
+): Promise<GitStagedContext> {
   return invoke<GitStagedContext>("git_staged_context", {
     cwd, ...(paths === undefined ? {} : { paths }),
   });
@@ -518,7 +516,9 @@ export async function pickFolders(title = "Open projects"): Promise<string[]> {
   return typeof selected === "string" && selected ? [slash(selected)] : [];
 }
 
-export async function pickFiles(title = "Attach files"): Promise<string[] | null> {
+export async function pickFiles(
+  title = "Attach files",
+): Promise<string[] | null> {
   const selected = await open({
     multiple: true,
     directory: false,
@@ -567,7 +567,9 @@ export function statFiles(paths: string[]): Promise<FileMtime[]> {
     groups.set(machine, group);
   }
   return Promise.all(
-    [...groups.values()].map((group) => invoke<FileMtime[]>("stat_files", { paths: group })),
+    [...groups.values()].map((group) =>
+      invoke<FileMtime[]>("stat_files", { paths: group }),
+    ),
   ).then((results) => {
     const byPath = new Map(results.flat().map((entry) => [entry.path, entry]));
     return paths.map((path) => byPath.get(path) ?? { path, mtimeMs: null });

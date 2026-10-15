@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { HarnessId } from "../../sessions/model/session";
+import { isHarnessId, type HarnessId } from "../../sessions/model/harnessIds";
 
 export type ConfigurableBinaryProvider = HarnessId;
 
@@ -14,7 +14,9 @@ function readProviderBinaryPaths(): StoredBinaryPaths {
       return {};
     }
     return Object.fromEntries(
-      Object.entries(value).filter(([, path]) => typeof path === "string"),
+      Object.entries(value).filter(
+        ([provider, path]) => isHarnessId(provider) && typeof path === "string",
+      ),
     ) as StoredBinaryPaths;
   } catch {
     return {};
@@ -24,9 +26,12 @@ function readProviderBinaryPaths(): StoredBinaryPaths {
 const runtimeBinaryPaths = readProviderBinaryPaths();
 
 export async function initializeProviderBinaryPaths(): Promise<void> {
-  const active = await invoke<StoredBinaryPaths>("harness_runtime_binary_paths", {
-    paths: readProviderBinaryPaths(),
-  });
+  const active = await invoke<StoredBinaryPaths>(
+    "harness_runtime_binary_paths",
+    {
+      paths: readProviderBinaryPaths(),
+    },
+  );
   for (const provider of Object.keys(runtimeBinaryPaths)) {
     delete runtimeBinaryPaths[provider as ConfigurableBinaryProvider];
   }
@@ -50,7 +55,9 @@ export function loadProviderBinaryPath(
 export function providerBinaryPathChangePending(
   provider: ConfigurableBinaryProvider,
 ): boolean {
-  return runtimeProviderBinaryPath(provider) !== loadProviderBinaryPath(provider);
+  return (
+    runtimeProviderBinaryPath(provider) !== loadProviderBinaryPath(provider)
+  );
 }
 
 export function saveProviderBinaryPath(

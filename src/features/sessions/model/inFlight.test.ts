@@ -14,11 +14,8 @@ import {
 } from "./inFlight";
 import { newSession, type Session } from "./session";
 
-function chat(
-  cwd: string,
-  patch: Partial<Session> = {},
-): Session {
-  const session = newSession("cursor", cwd);
+function chat(cwd: string, patch: Partial<Session> = {}): Session {
+  const session = newSession("pi", cwd);
   session.blocks = [{ id: "u1", role: "user", text: "hello" }];
   return { ...session, ...patch, blocks: patch.blocks ?? session.blocks };
 }
@@ -68,20 +65,18 @@ describe("inFlightRefs", () => {
     const parked = chat("/tmp/parked", { busy: true });
     const openBusy = chat("/tmp/open", { busy: true });
     const idle = chat("/tmp/idle");
-    const blank = newSession("cursor", "/tmp/blank");
+    const blank = newSession("pi", "/tmp/blank");
     blank.busy = true;
 
     const tabs = [newTab(idle.id), newTab(openBusy.id)];
-    expect(
-      inFlightRefs([parked, openBusy, idle, blank], tabs),
-    ).toEqual([
+    expect(inFlightRefs([parked, openBusy, idle, blank], tabs)).toEqual([
       { sessionId: openBusy.id, cwd: "/tmp/open" },
       { sessionId: parked.id, cwd: "/tmp/parked" },
     ]);
   });
 
   it("skips chats that were never persisted", () => {
-    const blank = newSession("cursor", "/tmp/a");
+    const blank = newSession("pi", "/tmp/a");
     blank.busy = true;
     expect(inFlightRefs([blank], [newTab(blank.id)])).toEqual([]);
     expect(hasInFlightSessions([blank])).toBe(true);
@@ -178,7 +173,9 @@ describe("markTurnInterrupted", () => {
     expect(
       second.blocks.filter((block) => block.text === INTERRUPT_MESSAGE),
     ).toHaveLength(2);
-    expect(second.blocks[second.blocks.length - 1]?.text).toBe(INTERRUPT_MESSAGE);
+    expect(second.blocks[second.blocks.length - 1]?.text).toBe(
+      INTERRUPT_MESSAGE,
+    );
     expect(canAutoContinue(second)).toBe(true);
   });
 
@@ -237,9 +234,9 @@ describe("canAutoContinue", () => {
     expect(canAutoContinue(chat("/tmp/a", { providerSessionId: "p1" }))).toBe(
       false,
     );
-    expect(canAutoContinue(markTurnInterrupted(chat("/tmp/a", { busy: true })))).toBe(
-      false,
-    );
+    expect(
+      canAutoContinue(markTurnInterrupted(chat("/tmp/a", { busy: true }))),
+    ).toBe(false);
     expect(
       canAutoContinue({
         ...interrupted,
@@ -263,7 +260,12 @@ describe("shouldWriteInFlightSnapshot", () => {
 
   it("writes when a chat becomes in-flight", () => {
     expect(
-      shouldWriteInFlightSnapshot("a", [{ sessionId: "a", cwd: "/tmp" }], null, false),
+      shouldWriteInFlightSnapshot(
+        "a",
+        [{ sessionId: "a", cwd: "/tmp" }],
+        null,
+        false,
+      ),
     ).toBe(true);
   });
 
@@ -273,7 +275,12 @@ describe("shouldWriteInFlightSnapshot", () => {
 
   it("skips unchanged keys", () => {
     expect(
-      shouldWriteInFlightSnapshot("a", [{ sessionId: "a", cwd: "/tmp" }], "a", true),
+      shouldWriteInFlightSnapshot(
+        "a",
+        [{ sessionId: "a", cwd: "/tmp" }],
+        "a",
+        true,
+      ),
     ).toBe(false);
   });
 });

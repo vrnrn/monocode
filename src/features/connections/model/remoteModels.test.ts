@@ -58,10 +58,10 @@ it("describes a Claude model from built-in metadata when the host cannot", () =>
 it("keeps another provider's saved settings without inventing Claude controls", () => {
   const controls = remoteModelControls(
     undefined,
-    "cursor",
-    "cursor:custom-model",
+    "pi",
+    "pi:custom-model",
     { profile: "fast" },
-    "cursor:custom-model",
+    "pi:custom-model",
   );
   expect(controls.settings).toEqual([
     {

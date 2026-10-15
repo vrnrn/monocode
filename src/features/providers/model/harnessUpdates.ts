@@ -1,10 +1,7 @@
+import { parseCliVersion, compareSemver } from "../../../shared/lib/semver";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { HarnessId } from "../../sessions/model/session";
-import {
-  compareSemver,
-  parseOpenCodeVersion,
-} from "../../../integrations/harness/providers/opencode/opencodeProtocol";
 
 /**
  * Harnesses with an npm version feed and a self-updater MonoCode can run.
@@ -12,7 +9,6 @@ import {
 export const UPDATABLE_HARNESSES: ReadonlySet<HarnessId> = new Set([
   "claude",
   "codex",
-  "opencode",
   "pi",
 ]);
 
@@ -79,8 +75,8 @@ export async function findHarnessUpdates({
           installedVersion(harness),
           latestVersion(harness),
         ]);
-        const installed = parseOpenCodeVersion(installedOutput ?? "");
-        const latest = parseOpenCodeVersion(latestOutput);
+        const installed = parseCliVersion(installedOutput ?? "");
+        const latest = parseCliVersion(latestOutput);
         if (!installed || !latest) return null;
         if (compareSemver(latest, installed) <= 0) return null;
         return { harness, installed, latest };

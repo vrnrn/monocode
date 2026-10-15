@@ -27,7 +27,7 @@ export type AgentModel = {
   nativeId?: string;
   /** Concrete native id a moving alias (`opus`) currently launches. */
   aliasTarget?: string;
-  /** Upstream provider inside a multi-provider harness such as OpenCode. */
+  /** Upstream provider inside a multi-provider harness such as Pi or omp. */
   provider?: {
     id: string;
     name: string;
@@ -86,90 +86,6 @@ export const MODELS: AgentModel[] = [
     name: "Opus 4.5",
     nativeId: "claude-opus-4-5",
   },
-
-  {
-    id: "cursor:composer-2.5",
-    harness: "cursor",
-    name: "Composer 2.5",
-    nativeId: "composer-2.5",
-  },
-  {
-    id: "cursor:gpt-5.4",
-    harness: "cursor",
-    name: "GPT-5.4",
-    nativeId: "gpt-5.4",
-  },
-  {
-    id: "cursor:claude-sonnet-4-6",
-    harness: "cursor",
-    name: "Sonnet 4.6",
-    nativeId: "claude-sonnet-4-6",
-  },
-  {
-    id: "cursor:grok-4.6",
-    harness: "cursor",
-    name: "Cursor Grok 4.6",
-    nativeId: "grok-4.6",
-  },
-
-  {
-    id: "grok:grok-4.6",
-    harness: "grok",
-    name: "Grok 4.6",
-    nativeId: "grok-4.6",
-    contextWindow: 500_000,
-    settings: [
-      {
-        id: "effort",
-        label: "Reasoning",
-        kind: "select",
-        value: "high",
-        options: [
-          { value: "xhigh", label: "Extra High" },
-          { value: "high", label: "High" },
-          { value: "medium", label: "Medium" },
-          { value: "low", label: "Low" },
-        ],
-      },
-    ],
-  },
-  {
-    id: "grok:grok-4.5",
-    harness: "grok",
-    name: "Grok 4.5",
-    nativeId: "grok-4.5",
-    contextWindow: 500_000,
-    settings: [
-      {
-        id: "effort",
-        label: "Reasoning",
-        kind: "select",
-        value: "high",
-        options: [
-          { value: "high", label: "High" },
-          { value: "medium", label: "Medium" },
-          { value: "low", label: "Low" },
-        ],
-      },
-    ],
-  },
-
-  { id: "opencode:glm-5", harness: "opencode", name: "GLM 5" },
-  { id: "opencode:minimax-m2.5", harness: "opencode", name: "MiniMax M2.5" },
-  { id: "opencode:kimi-k2.5", harness: "opencode", name: "Kimi K2.5" },
-  {
-    id: "opencode:deepseek-v4-flash",
-    harness: "opencode",
-    name: "DeepSeek V4 Flash",
-  },
-  { id: "opencode:qwen-3.5", harness: "opencode", name: "Qwen 3.5" },
-  { id: "opencode:grok-4.5", harness: "opencode", name: "Grok 4.5" },
-  {
-    id: "opencode:claude-sonnet-4.6",
-    harness: "opencode",
-    name: "Claude Sonnet 4.6",
-  },
-  { id: "opencode:gpt-5.4", harness: "opencode", name: "GPT-5.4" },
   {
     id: "pi:default",
     harness: "pi",
@@ -183,43 +99,19 @@ export const MODELS: AgentModel[] = [
     nativeId: "",
   },
   {
-    id: "fx:zai/glm-5.2-fast",
-    harness: "fx",
-    name: "GLM 5.2 Fast",
-    nativeId: "zai/glm-5.2-fast",
-  },
-  {
-    id: "hermes:default",
-    harness: "hermes",
-    name: "Configured model",
-    nativeId: "",
-  },
-  {
     id: "antigravity:gemini-3.8-flash-high",
     harness: "antigravity",
     name: "Gemini 3.8 Flash (High)",
     nativeId: "gemini-3.8-flash-high",
-  },
-  {
-    id: "devin:adaptive",
-    harness: "devin",
-    name: "Adaptive",
-    nativeId: "adaptive",
   },
 ];
 
 export const DEFAULT_MODEL_ID: Record<HarnessId, string> = {
   claude: "claude:sonnet-5",
   codex: "",
-  cursor: "cursor:composer-2.5",
-  grok: "grok:grok-4.6",
-  opencode: "opencode:glm-5",
   pi: "pi:default",
   omp: "omp:default",
-  fx: "fx:zai/glm-5.2-fast",
-  hermes: "hermes:default",
   antigravity: "antigravity:gemini-3.8-flash-high",
-  devin: "devin:adaptive",
 };
 
 const FAVORITES_KEY = "monocode.favoriteModels";
@@ -241,15 +133,9 @@ export type LastModelChoice = {
 const HARNESS_ORDER: HarnessId[] = [
   "claude",
   "codex",
-  "cursor",
-  "grok",
-  "opencode",
   "pi",
   "omp",
-  "fx",
-  "hermes",
   "antigravity",
-  "devin",
 ];
 
 const EMPTY_MODELS: AgentModel[] = [];
@@ -565,8 +451,7 @@ const EFFORT_SETTING_IDS = new Set([
   "reasoningEffort",
   // Pi and OMP expose their reasoning level as a `thinking` select.
   "thinking",
-  // OpenCode exposes reasoning levels as `variant`; treat it as effort so the
-  // standalone effort control and dedup behave like Codex/Cursor/Grok.
+  // Treat model variants as effort levels for the standalone effort control.
   "variant",
 ]);
 
@@ -852,7 +737,7 @@ export function defaultSessionChoice(cwd?: string): LastModelChoice {
   const last = loadLastModelChoice();
   const harness = firstEnabledHarness(
     cwd,
-    project.defaultHarness ?? last?.harness ?? "cursor",
+    project.defaultHarness ?? last?.harness ?? "claude",
   );
   const model =
     project.models?.[harness] ??
@@ -952,7 +837,7 @@ function parseStringRecord(value: unknown): Record<string, string> {
   return out;
 }
 
-/** Cursor CLI uses `extra-high`; Claude uses `xhigh`. */
+/** Normalize provider-specific spellings of extra-high reasoning. */
 const SETTING_VALUE_ALIASES: Record<string, string> = {
   "extra-high": "xhigh",
   xhigh: "extra-high",
@@ -994,45 +879,11 @@ function pickDefaultId(harness: HarnessId, models: AgentModel[]): string {
       DEFAULT_MODEL_ID.claude
     );
   }
-  if (harness === "cursor") {
-    return (
-      models.find((model) => model.nativeId === "composer-2.5")?.id ??
-      models.find(
-        (model) => model.nativeId === "default" || model.nativeId === "auto",
-      )?.id ??
-      models[0]?.id ??
-      DEFAULT_MODEL_ID.cursor
-    );
-  }
+
   if (harness === "codex") {
     return models[0]?.id ?? "";
   }
-  if (harness === "grok") {
-    return (
-      models.find((model) => model.nativeId === "grok-4.6")?.id ??
-      models.find((model) => model.id === DEFAULT_MODEL_ID.grok)?.id ??
-      models[0]?.id ??
-      DEFAULT_MODEL_ID.grok
-    );
-  }
-  if (harness === "fx") {
-    const preferred = [
-      "zai/glm-5.2-fast",
-      "zai/glm-5.2",
-      "zai/glm-4.7-flash",
-      "zai/glm-4.7",
-      "openai/gpt-5.2",
-    ];
-    for (const nativeId of preferred) {
-      const hit = models.find((model) => model.nativeId === nativeId);
-      if (hit) return hit.id;
-    }
-    return (
-      models.find((model) => model.id === DEFAULT_MODEL_ID.fx)?.id ??
-      models[0]?.id ??
-      DEFAULT_MODEL_ID.fx
-    );
-  }
+
   return (
     models.find((model) => model.id === DEFAULT_MODEL_ID[harness])?.id ??
     models[0]?.id ??

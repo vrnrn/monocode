@@ -172,11 +172,7 @@ import {
   saveProviderBinaryPath,
   type ConfigurableBinaryProvider,
 } from "../../providers/model/providerBinaryPaths";
-import {
-  compareSemver,
-  MINIMUM_OPENCODE_VERSION,
-  parseOpenCodeVersion,
-} from "../../../integrations/harness/providers/opencode/opencodeProtocol";
+
 import {
   enforceHarnessIdleLimit,
   refreshHarnessCatalogs,
@@ -2546,13 +2542,7 @@ function binaryInspectionError(
   ) {
     return "Codex CLI returned an invalid version.";
   }
-  if (provider === "opencode") {
-    const version = parseOpenCodeVersion(inspection.version ?? "");
-    if (!version) return "OpenCode CLI returned an invalid version.";
-    if (compareSemver(version, MINIMUM_OPENCODE_VERSION) < 0) {
-      return `OpenCode v${version} is too old. Upgrade to v${MINIMUM_OPENCODE_VERSION} or newer.`;
-    }
-  }
+
   return null;
 }
 
@@ -2936,7 +2926,7 @@ function ProvidersPage({
   const effectiveDefaultHarness = project
     ? firstEnabledHarness(
         project,
-        projectSettings.defaultHarness ?? choice?.harness ?? "cursor",
+        projectSettings.defaultHarness ?? choice?.harness ?? "claude",
       )
     : (choice?.harness ?? null);
 

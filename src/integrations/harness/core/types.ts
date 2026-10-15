@@ -202,7 +202,7 @@ export type SteerTurnInput = {
 export type RewindLastTurnInput = CompactContextInput & {
   /** Provider turn boundary for the visible user message, when known. */
   providerTurnId?: string;
-  /** When set, Cursor may resend via session/edit_prompt in one RPC. */
+  /** When supported, resend the edited prompt in one provider RPC. */
   text?: string;
   attachments?: Attachment[];
 };

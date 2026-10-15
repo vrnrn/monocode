@@ -74,7 +74,7 @@ describe("canDispatchQueuedHead", () => {
     const preparing = appendPreparingHandoff(
       chat({ queuedMessages: [queued("a")] }),
       "claude",
-      "cursor",
+      "pi",
     );
     expect(canDispatchQueuedHead(preparing)).toBe(false);
   });

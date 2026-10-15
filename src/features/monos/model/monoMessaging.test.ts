@@ -122,7 +122,7 @@ describe("optimistic Mono messages", () => {
 
   it("promotes the existing bubble when a provider needs a new turn", () => {
     const session = enqueueMonoMessage(
-      stopStreaming(appendUser(newSession("fx", "/tmp"), "First")),
+      stopStreaming(appendUser(newSession("codex", "/tmp"), "First")),
       message("second"),
     );
     expect(session.busy).toBe(false);

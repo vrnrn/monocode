@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { newFileTab, newTab, placePane, type WorkspaceTab } from "../../workspace/model/layout";
+import {
+  newFileTab,
+  newTab,
+  placePane,
+  type WorkspaceTab,
+} from "../../workspace/model/layout";
 import { newSession, type Session } from "../../sessions/model/session";
 import { planProjectReturn, reconcileProjectReturn } from "./projectReturn";
 import {
@@ -12,7 +17,7 @@ import { applyPlaceSessionOnPane } from "../../workspace/model/workspaceTabGroup
 
 function chat(id: string, cwd: string): Session {
   return {
-    ...newSession("cursor", cwd),
+    ...newSession("pi", cwd),
     id,
     blocks: [{ id: `${id}-user`, role: "user", text: id }],
   };
@@ -182,7 +187,11 @@ describe("project return memory", () => {
       activeTabId: "tab-b2",
       projectPath: "/alpha",
     });
-    expect(decision).toEqual({ action: "activate", tabId: "tab-a1", paneId: "a2" });
+    expect(decision).toEqual({
+      action: "activate",
+      tabId: "tab-a1",
+      paneId: "a2",
+    });
     expect(placed.tabs.find((tab) => tab.id === "tab-a1")?.focusedId).toBe(
       "a2",
     );

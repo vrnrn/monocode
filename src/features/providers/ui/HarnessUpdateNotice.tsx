@@ -1,3 +1,4 @@
+import { parseCliVersion, compareSemver } from "../../../shared/lib/semver";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { GlassBackdrop } from "../../../app/shell/GlassBackdrop";
@@ -9,10 +10,7 @@ import {
   inspectHarnessBinary,
   updateHarnessCli,
 } from "../../../integrations/harness/core/child";
-import {
-  compareSemver,
-  parseOpenCodeVersion,
-} from "../../../integrations/harness/providers/opencode/opencodeProtocol";
+
 import { refreshHarnessCatalogs } from "../../../integrations/harness/core/registry";
 import { LAYER } from "../../../shared/lib/layers";
 import { Check, Loader, X } from "../../../shared/ui/icons";
@@ -74,7 +72,7 @@ async function runUpdate(update: HarnessUpdate): Promise<RowState> {
   try {
     await updateHarnessCli(update.harness);
     const after = await inspectHarnessBinary(update.harness);
-    const version = parseOpenCodeVersion(after.version ?? "");
+    const version = parseCliVersion(after.version ?? "");
     if (version && compareSemver(version, update.latest) >= 0) {
       await refreshHarnessCatalogs([update.harness], { force: true });
       void announceHarnessUpdated(update.harness).catch(() => undefined);

@@ -162,7 +162,7 @@ it("adds a standard mcpServers entry to the selected provider and project", asyn
   await act(async () => provider.click());
   const cursor = [
     ...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]'),
-  ].find((button) => button.textContent === "Cursor")!;
+  ].find((button) => button.textContent === "Codex")!;
   await act(async () => cursor.click());
   const config = document.body.querySelector<HTMLTextAreaElement>("textarea")!;
   const json =
@@ -181,10 +181,10 @@ it("adds a standard mcpServers entry to the selected provider and project", asyn
   );
   expect(invoke).toHaveBeenCalledWith("mcp_add", {
     cwd: "/other",
-    provider: "cursor",
+    provider: "codex",
     name: "",
     config: json,
-    scope: "project",
+    scope: "user",
   });
   expect(invoke).toHaveBeenLastCalledWith("claude_mcp_list", { cwd: "/other" });
 });
@@ -254,13 +254,13 @@ it("shows only configured provider chips until the filter button reveals all", a
     '[aria-label="Filter MCP servers by provider"]',
   )!;
   expect(chips.textContent).toContain("Codex");
-  expect(chips.textContent).not.toContain("Cursor");
+  expect(chips.textContent).not.toContain("Claude Desktop");
   await act(async () =>
     container
       .querySelector<HTMLButtonElement>('[aria-label="Show all providers"]')!
       .click(),
   );
-  expect(chips.textContent).toContain("Cursor");
+  expect(chips.textContent).toContain("Codex");
   await act(async () =>
     container
       .querySelector<HTMLButtonElement>(
@@ -268,7 +268,7 @@ it("shows only configured provider chips until the filter button reveals all", a
       )!
       .click(),
   );
-  expect(chips.textContent).not.toContain("Cursor");
+  expect(chips.textContent).not.toContain("Claude Desktop");
 });
 
 it("ignores discovery from a previous project after cwd changes", async () => {
@@ -281,7 +281,7 @@ it("ignores discovery from a previous project after cwd changes", async () => {
       });
     return Promise.resolve([
       {
-        provider: "cursor",
+        provider: "codex",
         name: "new-project",
         scope: "project",
         configPath: "/new/.cursor/mcp.json",
@@ -299,7 +299,7 @@ it("ignores discovery from a previous project after cwd changes", async () => {
   await act(async () =>
     resolveOld([
       {
-        provider: "cursor",
+        provider: "codex",
         name: "old-project",
         scope: "project",
         configPath: "/old/.cursor/mcp.json",
@@ -326,7 +326,7 @@ it("reuses the loaded list when returning to the page and reloads on Refresh", a
     command === "mcp_discover"
       ? [
           {
-            provider: "cursor",
+            provider: "codex",
             name: "updated",
             scope: "project",
             configPath: "/repo/.cursor/mcp.json",
@@ -423,7 +423,7 @@ it("uses the shared project picker and caches each project's list", async () => 
     command === "mcp_discover"
       ? [
           {
-            provider: "cursor",
+            provider: "codex",
             name: `${args.cwd.slice(1)}-server`,
             scope: "project",
             configPath: `${args.cwd}/.cursor/mcp.json`,

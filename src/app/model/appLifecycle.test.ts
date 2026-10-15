@@ -19,7 +19,10 @@ import {
   hydrateWorkspaceSnapshot,
   parseWorkspaceSnapshot,
 } from "../../features/workspace/model/workspaceSnapshot";
-import { loadWorkspaceSnapshot, saveWorkspaceSnapshot } from "../../features/sessions/data/sessionStore";
+import {
+  loadWorkspaceSnapshot,
+  saveWorkspaceSnapshot,
+} from "../../features/sessions/data/sessionStore";
 import { reconcileProjectReturn } from "../../features/projects/model/projectReturn";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -59,7 +62,7 @@ describe("project choices through lifecycle saves", () => {
 
   function workspace() {
     const sessions = ["a1", "a2", "b1", "b2"].map((id) => ({
-      ...newSession("cursor", id.startsWith("a") ? "/alpha" : "/beta"),
+      ...newSession("pi", id.startsWith("a") ? "/alpha" : "/beta"),
       id,
     }));
     const tabs = sessions.map((session) => ({
@@ -207,12 +210,17 @@ describe("project choices through lifecycle saves", () => {
     const { handleQuitRequested } = await import("./appLifecycle");
     await handleQuitRequested();
     expect([...(lastSavedMemory() ?? [])]).toEqual([...state.memory]);
-    const args = vi.mocked(invoke).mock.calls
-      .filter(([command]) => command === "workspace_set_snapshot").at(-1)?.[1];
-    const saved = args && typeof args === "object" && "snapshot" in args
-      ? parseWorkspaceSnapshot(args.snapshot) : null;
-    expect(saved?.sessions.find((session) => session.id === "a1")?.worktreeCwd)
-      .toBe("/alpha-worktrees/feature");
+    const args = vi
+      .mocked(invoke)
+      .mock.calls.filter(([command]) => command === "workspace_set_snapshot")
+      .at(-1)?.[1];
+    const saved =
+      args && typeof args === "object" && "snapshot" in args
+        ? parseWorkspaceSnapshot(args.snapshot)
+        : null;
+    expect(
+      saved?.sessions.find((session) => session.id === "a1")?.worktreeCwd,
+    ).toBe("/alpha-worktrees/feature");
   });
 });
 
@@ -223,7 +231,7 @@ describe("closing a busy window", () => {
   });
 
   function workspace() {
-    const session = newSession("cursor", "C:/test");
+    const session = newSession("pi", "C:/test");
     session.busy = true;
     session.blocks = [{ id: "user", role: "user", text: "test" }];
     const tab = newTab(session.id);
@@ -244,7 +252,7 @@ describe("closing a busy window", () => {
     try {
       await closeBusyWindow();
       expect(ask).toHaveBeenCalled();
-      expect(forgetHarnessSession).toHaveBeenCalledWith("cursor", session.id);
+      expect(forgetHarnessSession).toHaveBeenCalledWith("pi", session.id);
       expect(killAllChildren).not.toHaveBeenCalled();
       expect(invoke).toHaveBeenCalledWith("destroy_window");
       expect(
@@ -278,7 +286,7 @@ describe("coordinated quit", () => {
   });
 
   function busyWorkspace() {
-    const session = newSession("cursor", "C:/test");
+    const session = newSession("pi", "C:/test");
     session.busy = true;
     session.blocks = [{ id: "user", role: "user", text: "test" }];
     const tab = newTab(session.id);
@@ -310,7 +318,7 @@ describe("coordinated quit", () => {
   });
 
   it("counts a running Inbox Ask, which cannot be resumed", async () => {
-    const session = newSession("cursor", "C:/test");
+    const session = newSession("pi", "C:/test");
     session.busy = true;
     session.inboxAsk = true;
     const tab = newTab(session.id);
@@ -421,7 +429,7 @@ describe("remembering the terminal dock side across restarts", () => {
 
   function dockWorkspace(side: DockSide | null) {
     const sessions = ["a1"].map((id) => ({
-      ...newSession("cursor", "/alpha"),
+      ...newSession("pi", "/alpha"),
       id,
     }));
     const tabs = sessions.map((session) => ({

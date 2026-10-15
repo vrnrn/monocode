@@ -1,5 +1,5 @@
 // Display names for upstream providers that multi-provider harnesses
-// (OpenCode, Pi/omp, Hermes) report only as slugs.
+// (Pi/omp) report only as slugs.
 const PROVIDER_NAMES: Record<string, string> = {
   anthropic: "Anthropic",
   deepseek: "DeepSeek",

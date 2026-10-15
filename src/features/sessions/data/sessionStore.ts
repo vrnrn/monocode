@@ -6,7 +6,6 @@ import {
   titleFromToolInput,
 } from "../../../integrations/harness/core/preview";
 import { codexCommandPresentation } from "../../../integrations/harness/providers/codex/codexProtocol";
-import { recoverCursorSubagents } from "../../../integrations/harness/providers/cursor/cursorSubagents";
 import { persistableAttachment } from "../model/attachments";
 import { ARTIFACT_KINDS } from "../../artifacts/artifacts";
 import type { ContextUsage } from "../model/contextUsage";
@@ -46,6 +45,8 @@ import type {
   TurnMetrics,
 } from "../model/session";
 
+import { defaultSessionChoice } from "../model/models";
+import { isHarnessId } from "../model/harnessIds";
 import { HARNESSES, RUNTIME_MODES } from "../model/session";
 
 import { restoreOrchestrationProposal } from "../../orchestration/model/orchestrationPlan";
@@ -638,7 +639,7 @@ export async function getSession(sessionId: string): Promise<Session | null> {
     }
   }
   if (session.harness !== "omp" || !session.providerSessionId) {
-    return recoverCursorSubagents(session);
+    return session;
   }
   try {
     const anchors = await ompSessionInterjections(session.providerSessionId);
@@ -1382,13 +1383,17 @@ function sanitizeTaskList(value: unknown): TaskListMeta | null {
 
 function normalizeSummary(summary: SessionSummary): SessionSummary {
   const linkedWorkItem = sanitizeLinkedWorkItem(summary.linkedWorkItem);
+  const choice = isHarnessId(summary.harness)
+    ? { harness: summary.harness, model: summary.model }
+    : defaultSessionChoice(summary.cwd);
   return {
     ...summary,
-    harness: asHarness(summary.harness),
+    harness: choice.harness,
+    model: choice.model,
     runtimeMode: asRuntimeMode(summary.runtimeMode),
-    ...(summary.providerSessionId
-      ? { providerSessionId: summary.providerSessionId }
-      : {}),
+    providerSessionId: isHarnessId(summary.harness)
+      ? summary.providerSessionId
+      : undefined,
     ...(summary.branch ? { branch: summary.branch } : {}),
     ...(summary.repo ? { repo: summary.repo } : {}),
     additions: summary.additions ?? 0,
@@ -1411,16 +1416,28 @@ function recordToSession(record: SessionRecord): Session {
         .map((block) => sanitizeBlock(block, { hydrate: true }))
         .filter((block): block is Block => block != null)
     : [];
+  const choice = isHarnessId(record.harness)
+    ? { harness: record.harness, model: record.model }
+    : defaultSessionChoice(record.cwd);
+  const providerRemoved = !isHarnessId(record.harness);
+  if (providerRemoved)
+    blocks.push({
+      id: `provider-removed-${record.id}`,
+      role: "system",
+      text: `The ${record.harness} CLI is no longer supported. Your conversation history is kept. Choose a supported provider to continue.`,
+    });
   const linkedWorkItem = sanitizeLinkedWorkItem(record.linkedWorkItem);
   const queuedMessages = sanitizeQueuedMessages(record.queuedMessages);
   return {
     id: record.id,
     sidebarHidden: record.sidebarHidden === true || undefined,
     cwd: record.cwd,
-    harness: asHarness(record.harness),
-    model: record.model,
+    harness: choice.harness,
+    model: choice.model,
     modelSettings:
-      record.modelSettings && typeof record.modelSettings === "object"
+      !providerRemoved &&
+      record.modelSettings &&
+      typeof record.modelSettings === "object"
         ? record.modelSettings
         : {},
     runtimeMode: asRuntimeMode(record.runtimeMode),
@@ -1438,10 +1455,10 @@ function recordToSession(record: SessionRecord): Session {
         (block) =>
           block.orchestrationLeadId && block.orchestrationLeadId !== record.id,
       )?.orchestrationLeadId,
-    ...(record.providerSessionId
+    ...(!providerRemoved && record.providerSessionId
       ? { providerSessionId: record.providerSessionId }
       : {}),
-    ...(record.providerAccountId
+    ...(!providerRemoved && record.providerAccountId
       ? { providerAccountId: record.providerAccountId }
       : {}),
     ...(record.branch ? { branch: record.branch } : {}),
@@ -1475,18 +1492,12 @@ function contextFromRecord(
   };
 }
 
-function asHarness(value: string): HarnessId {
-  return (HARNESSES as string[]).includes(value)
-    ? (value as HarnessId)
-    : "cursor";
-}
-
 const HANDOFF_STATUSES: HandoffStatus[] = ["preparing", "ready"];
 
 function sanitizeHandoff(value: Block["handoff"]): HandoffMeta | undefined {
   if (!value) return undefined;
-  if (!(HARNESSES as string[]).includes(value.from)) return undefined;
-  if (!(HARNESSES as string[]).includes(value.to)) return undefined;
+  if (!(HARNESSES as readonly string[]).includes(value.from)) return undefined;
+  if (!(HARNESSES as readonly string[]).includes(value.to)) return undefined;
   if (!HANDOFF_STATUSES.includes(value.status)) return undefined;
   const interrupted = value.status === "preparing";
   return {
@@ -1501,8 +1512,8 @@ function sanitizeSecondOpinion(
   value: Block["secondOpinion"],
 ): SecondOpinionMeta | undefined {
   if (!value) return undefined;
-  if (!(HARNESSES as string[]).includes(value.from)) return undefined;
-  if (!(HARNESSES as string[]).includes(value.to)) return undefined;
+  if (!(HARNESSES as readonly string[]).includes(value.from)) return undefined;
+  if (!(HARNESSES as readonly string[]).includes(value.to)) return undefined;
   const request =
     typeof value.request === "string" ? value.request.trim().slice(0, 240) : "";
   const files =

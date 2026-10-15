@@ -1,6 +1,9 @@
 import { fuzzyMatch } from "../../../shared/lib/fuzzy";
 import { projectName } from "../../../shared/lib/paths";
-import { sameProjectPath, type RecentProject } from "../../projects/model/recents";
+import {
+  sameProjectPath,
+  type RecentProject,
+} from "../../projects/model/recents";
 import {
   HARNESSES,
   sessionDisplayTitle,
@@ -75,11 +78,7 @@ export type ProjectHit = {
 };
 
 export type AppSearchHit =
-  | ConversationHit
-  | MessageHit
-  | FileHit
-  | ContentHit
-  | ProjectHit;
+  ConversationHit | MessageHit | FileHit | ContentHit | ProjectHit;
 
 export type GroupedHits = {
   conversations: ConversationHit[];
@@ -123,9 +122,9 @@ const SCOPE_LIMITS: Record<SearchScope, Record<keyof GroupedHits, number>> = {
 };
 
 export function asHarness(value: string): HarnessId {
-  return (HARNESSES as string[]).includes(value)
+  return (HARNESSES as readonly string[]).includes(value)
     ? (value as HarnessId)
-    : "cursor";
+    : "claude";
 }
 
 export function snippetAround(
@@ -407,8 +406,12 @@ export function groupHits(
   }
   grouped.conversations.sort(byScoreThenRecency);
   grouped.messages.sort(byScoreThenRecency);
-  grouped.files.sort((a, b) => b.score - a.score || a.relative.localeCompare(b.relative));
-  grouped.projects.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  grouped.files.sort(
+    (a, b) => b.score - a.score || a.relative.localeCompare(b.relative),
+  );
+  grouped.projects.sort(
+    (a, b) => b.score - a.score || a.name.localeCompare(b.name),
+  );
 
   const limits = SCOPE_LIMITS[scope];
   return {

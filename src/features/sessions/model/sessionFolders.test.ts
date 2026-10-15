@@ -35,10 +35,10 @@ function summary(
   return {
     id,
     cwd: "/tmp/project",
-    harness: "cursor",
+    harness: "pi",
     model: "gpt-5",
     runtimeMode: "supervised",
-    title: `cursor · ${id}`,
+    title: `pi · ${id}`,
     createdAt: 1,
     updatedAt: 1,
     additions: 0,

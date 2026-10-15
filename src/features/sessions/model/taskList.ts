@@ -7,7 +7,7 @@ export function isTaskListToolName(value: string): boolean {
   );
 }
 
-/** Common todo-write payload used by Claude, OpenCode, and Pi extensions. */
+/** Common todo-write payload used by Claude and Pi extensions. */
 export function taskListFromToolInput(
   toolName: string,
   input: unknown,

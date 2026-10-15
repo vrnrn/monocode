@@ -25,7 +25,7 @@ function summary(
   return {
     id,
     cwd,
-    harness: "cursor",
+    harness: "pi",
     model: "gpt-5",
     runtimeMode: "supervised",
     title,
@@ -56,15 +56,15 @@ describe("searchConversationTitles", () => {
         {
           id: "s1",
           cwd: "/tmp/a",
-          harness: "cursor",
-          title: "cursor · Fix sidebar search",
+          harness: "pi",
+          title: "pi · Fix sidebar search",
           updatedAt: 10,
         },
         {
           id: "s2",
           cwd: "/tmp/a",
-          harness: "cursor",
-          title: "cursor · Unrelated",
+          harness: "pi",
+          title: "pi · Unrelated",
           updatedAt: 11,
         },
       ],
@@ -77,9 +77,13 @@ describe("searchConversationTitles", () => {
 
 describe("searchSessionMessages", () => {
   it("finds matching user and assistant text", () => {
-    const session = newSession("cursor", "/tmp/a");
+    const session = newSession("pi", "/tmp/a");
     session.blocks = [
-      { id: "u1", role: "user", text: "Please search the sidebar filter chips" },
+      {
+        id: "u1",
+        role: "user",
+        text: "Please search the sidebar filter chips",
+      },
       { id: "a1", role: "assistant", text: "Opening the explorer next." },
       { id: "r1", role: "reasoning", text: "sidebar internals" },
     ];
@@ -122,7 +126,7 @@ describe("merge and group", () => {
       kind: "conversation",
       sessionId: "s1",
       cwd: "/tmp/a",
-      harness: "cursor",
+      harness: "pi",
       title: "One",
       updatedAt: 1,
       score: 4,
@@ -184,8 +188,8 @@ describe("hitsFromSessionSearch", () => {
         kind: "conversation",
         sessionId: "s1",
         cwd: "/tmp/a",
-        harness: "cursor",
-        title: "cursor · Fix search",
+        harness: "pi",
+        title: "pi · Fix search",
         updatedAt: 1,
         preview: "",
       },
@@ -193,8 +197,8 @@ describe("hitsFromSessionSearch", () => {
         kind: "message",
         sessionId: "s1",
         cwd: "/tmp/a",
-        harness: "cursor",
-        title: "cursor · Fix search",
+        harness: "pi",
+        title: "pi · Fix search",
         updatedAt: 1,
         blockId: "u1",
         role: "user",
@@ -235,15 +239,15 @@ describe("hitsFromContentMatches", () => {
 
 describe("conversationRowsFrom", () => {
   it("prefers live session titles over history", () => {
-    const live = newSession("cursor", "/tmp/a");
+    const live = newSession("pi", "/tmp/a");
     live.id = "s1";
-    live.title = "cursor · Live title";
+    live.title = "pi · Live title";
     const rows = conversationRowsFrom(
-      [summary("s1", "/tmp/a", "cursor · Old title", 5)],
+      [summary("s1", "/tmp/a", "pi · Old title", 5)],
       [live],
     );
     expect(rows).toEqual([
-      expect.objectContaining({ id: "s1", title: "cursor · Live title" }),
+      expect.objectContaining({ id: "s1", title: "pi · Live title" }),
     ]);
   });
 });
@@ -256,7 +260,7 @@ describe("filterHitsByProject", () => {
         kind: "conversation",
         sessionId: "s1",
         cwd: "/tmp/a",
-        harness: "cursor",
+        harness: "pi",
         title: "A",
         updatedAt: 1,
         score: 1,
@@ -267,15 +271,15 @@ describe("filterHitsByProject", () => {
         kind: "conversation",
         sessionId: "s2",
         cwd: "/tmp/b",
-        harness: "cursor",
+        harness: "pi",
         title: "B",
         updatedAt: 1,
         score: 1,
         positions: [],
       },
     ];
-    expect(
-      filterHitsByProject(hits, "/tmp/a").map((hit) => hit.id),
-    ).toEqual(["conversation:s1"]);
+    expect(filterHitsByProject(hits, "/tmp/a").map((hit) => hit.id)).toEqual([
+      "conversation:s1",
+    ]);
   });
 });

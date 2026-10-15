@@ -107,7 +107,7 @@ export function warmupCodexText(cwd: string): Promise<void> {
   return run.catch(() => undefined);
 }
 
-/** Codex app-server turn that reuses a warm process, like Cursor text generation. */
+/** Codex app-server turn that reuses a warm process. */
 export async function runCodexTextPrompt(
   input: TextPromptInput,
 ): Promise<string> {

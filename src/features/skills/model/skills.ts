@@ -8,7 +8,10 @@ import {
 } from "../../../platform/tauri/fs";
 import { invalidateProjectFiles } from "../../files/model/fileIndex";
 import { joinPath } from "../../../shared/lib/paths";
-import { isLocalProject, normalizeProjectPath } from "../../projects/model/recents";
+import {
+  isLocalProject,
+  normalizeProjectPath,
+} from "../../projects/model/recents";
 import { isMarkdownBlockquotePosition } from "../../sessions/model/quoteDraft";
 import type { HarnessId } from "../../sessions/model/session";
 import { getHarness } from "../../../integrations/harness/core/registry";
@@ -63,19 +66,7 @@ function disabledSkillPathSet(): Set<string> {
 
 export type SkillScope = "project" | "user" | "builtin";
 export type SkillSource =
-  | "agents"
-  | "claude"
-  | "cursor"
-  | "codex"
-  | "opencode"
-  | "pi"
-  | "omp"
-  | "fx"
-  | "grok"
-  | "hermes"
-  | "antigravity"
-  | "devin"
-  | "monocode";
+  "agents" | "claude" | "codex" | "pi" | "omp" | "antigravity" | "monocode";
 
 type SkillCommon = {
   name: string;

@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { access, readFile, realpath, readlink, stat } from "node:fs/promises";
+import { access, readFile, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, extname, join, basename } from "node:path";
@@ -13,15 +13,9 @@ const npmEntries: Record<string, string> = {
 const binaryNames: Record<RemoteProvider, string[]> = {
   codex: ["codex"],
   claude: ["claude"],
-  cursor: ["cursor-agent", "agent"],
-  grok: ["grok"],
-  opencode: ["opencode"],
   pi: ["pi-coding-agent", "pi"],
   omp: ["omp"],
-  fx: ["fx"],
-  hermes: ["hermes"],
   antigravity: ["agy_acp_server.par"],
-  devin: ["devin"],
 };
 
 const providerDirectories = (provider: RemoteProvider): string[] => {
@@ -31,24 +25,7 @@ const providerDirectories = (provider: RemoteProvider): string[] => {
       join(home, ".claude", "local"),
       join(home, ".local", "share", "claude"),
     ],
-    grok: [join(home, ".grok", "bin")],
-    opencode: [join(home, ".opencode", "bin")],
-    fx: [join(home, ".fx", "bin")],
-    hermes: [
-      join(home, ".hermes", "hermes-agent", "venv", "bin"),
-      join(home, ".hermes", "hermes-agent", ".venv", "bin"),
-    ],
     antigravity: [join(home, ".local", "share", "agy-acp")],
-    devin: [
-      process.platform === "win32"
-        ? join(
-            process.env.LOCALAPPDATA ?? join(home, "AppData", "Local"),
-            "devin",
-            "cli",
-            "bin",
-          )
-        : join(home, ".local", "bin"),
-    ],
   };
   return [
     ...new Set([
@@ -72,23 +49,8 @@ async function matchesProvider(
   provider: RemoteProvider,
   name: string,
 ): Promise<boolean> {
-  if (provider === "cursor" && name === "agent") {
-    try {
-      if ((await readlink(candidate)).toLowerCase().includes("cursor-agent"))
-        return true;
-    } catch {
-      /* not a symlink */
-    }
-    return fileContains(candidate, ["cursor-agent"], 64 * 1024);
-  }
   if (provider === "pi" && name === "pi") return isPiLaunchCandidate(candidate);
-  if (provider === "fx")
-    return fileContains(candidate, [
-      "vercel-labs/fx",
-      "fx_model",
-      "createfxagent",
-      "fx acp",
-    ]);
+
   return true;
 }
 
