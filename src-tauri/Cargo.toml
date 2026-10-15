@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 description = "MonoCode — one UI for every agent harness"
 authors = ["Nick"]
-repository = "https://github.com/hardbeat920/monocode"
+repository = "https://github.com/vrnrn/monocode"
 homepage = "https://usemono.dev"
 license.workspace = true
 

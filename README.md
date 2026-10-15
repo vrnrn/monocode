@@ -14,6 +14,8 @@
 
 Works with your subscriptions on Claude Code, Codex, Pi, omp, and Antigravity. If they’re installed and logged in, MonoCode can run them. Tabs are sessions. The composer is the input. MonoCode does not sell tokens.
 
+This repository is [vrnrn/monocode](https://github.com/vrnrn/monocode), a fork of [hardbeat920/monocode](https://github.com/hardbeat920/monocode). The downloads below are published by the upstream project.
+
 ## Install
 
 Install and sign in to at least one supported agent first. See [provider setup](docs/providers.md) for instructions.
@@ -52,6 +54,8 @@ MonoCode is still early. If something breaks, [report a bug](https://github.com/
 You’ll need Node.js 20+ and a stable Rust toolchain. See [build setup](docs/building.md) for platform dependencies and packaging.
 
 ```bash
+git clone https://github.com/vrnrn/monocode.git
+cd monocode
 npm install
 npm run tauri dev
 ```
