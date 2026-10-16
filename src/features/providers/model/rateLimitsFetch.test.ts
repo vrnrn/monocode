@@ -59,10 +59,19 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   cachedDevinIdentity,
   fetchCodexRateLimits,
+  fetchClaudeRateLimits,
   fetchDevinRateLimits,
 } from "./rateLimitsFetch";
 
 describe("fetchCodexRateLimits", () => {
+  it("keeps Bedrock metadata without reporting a missing OAuth login", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ status: "ok", authProvider: "bedrock" });
+    expect(await fetchClaudeRateLimits("account-work")).toMatchObject({
+      provider: "claude", authProvider: "bedrock", status: "ok", error: null,
+    });
+    expect(invoke).toHaveBeenCalledWith("fetch_claude_usage", { accountId: "account-work" });
+  });
+
   beforeEach(() => {
     child.live = 0;
     child.maxLive = 0;

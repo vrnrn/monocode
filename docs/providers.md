@@ -23,3 +23,31 @@ To run MonoCode from a checkout, see [building from source](building.md). Return
 On macOS and Linux, desktop launches do not inherit your interactive shell environment. MonoCode forwards `COPILOT_GITHUB_TOKEN` from that shell to every provider process when the app environment lacks the variable. An inherited value takes precedence.
 
 Export `COPILOT_GITHUB_TOKEN` in your shell configuration before you start MonoCode. Restart MonoCode after you change the token.
+
+## Copilot GPT models in Claude Code
+
+Install Node.js 20 or later on the machine that runs Claude Code.
+Export `COPILOT_GITHUB_TOKEN="$(gh auth token 2>/dev/null)"`, or sign in with `gh auth login`.
+Restart MonoCode after you change the credential.
+Select **Claude Code**, then select **GPT-6.1 Sol (1M)** or **GPT-6 Luna (1M)**.
+Use the effort selector beside the model to select a supported level.
+
+MonoCode lists these models only when the Copilot API reports access and a context window of at least one million tokens.
+The adapter requests the long-context tier and uses the server's prompt budget for automatic compaction.
+The prompt budget comes from the Copilot model catalog and reserves space for output.
+The adapter rejects unavailable 1M variants instead of falling back to the normal tier.
+
+The effort selector uses Copilot's advertised levels, with **Medium** as the default when available.
+The adapter preserves **None** instead of passing it through Claude's incompatible effort handling.
+Saved effort settings survive startup before model discovery finishes.
+Claude-only options such as Fast Mode and Ultrathink do not appear for Copilot models.
+
+Each Copilot session uses a private localhost adapter for the Anthropic Messages and Copilot Responses protocols.
+The adapter stops with the session and does not change your Claude settings.
+Ordinary Claude models retain your existing provider, including Bedrock.
+Remote hosts use the same adapter and their own credentials.
+
+Anthropic does not officially support non-Claude models in Claude Code.
+The adapter supports text, images, streamed tool calls, and tool results.
+
+When Claude Code reports Amazon Bedrock as its configured API provider, the usage chip displays **AWS Bedrock**. Subscription usage and Claude sign-in prompts do not apply to that connection.

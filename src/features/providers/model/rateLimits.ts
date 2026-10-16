@@ -32,6 +32,8 @@ export type RateLimitResetCredits = {
 
 export type ProviderRateLimits = {
   provider: RateLimitProvider;
+  /** Claude's effective API provider, without credentials or account details. */
+  authProvider?: "bedrock";
   session: RateLimitWindow | null;
   weekly: RateLimitWindow | null;
   monthly: RateLimitWindow | null;
@@ -72,7 +74,7 @@ export function fetchingRateLimits(
 ): ProviderRateLimits {
   if (
     previous &&
-    (previous.session ||
+    (previous.authProvider || previous.session ||
       previous.weekly ||
       previous.monthly ||
       previous.resetCredits)

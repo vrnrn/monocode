@@ -13,3 +13,4 @@ await build({
   sourcemap: true,
 });
 await copyFile("host/provider-guard.mjs", "build/host/provider-guard.mjs");
+await copyFile("host/claude-copilot.mjs", "build/host/claude-copilot.mjs");

@@ -96,6 +96,10 @@ describe("existing providers over headless process I/O", () => {
       mkdtempSync(join(tmpdir(), "monocode-provider-test-")),
     );
     fixtureHome.path = directory;
+    vi.stubEnv("COPILOT_GITHUB_TOKEN", "");
+    vi.stubEnv("GH_TOKEN", "");
+    vi.stubEnv("GITHUB_TOKEN", "");
+    vi.stubEnv("GH_CONFIG_DIR", join(directory, "gh"));
     const binary = join(directory, "provider.cjs");
     writeFileSync(binary, fixture, { mode: 0o700 });
     backend = new HostChildBackend({

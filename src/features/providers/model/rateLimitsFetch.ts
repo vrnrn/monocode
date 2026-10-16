@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "../../../platform/tauri/fs";
 import {
   errorRateLimits,
+  idleRateLimits,
   parseClaudeOAuthUsage,
   parseCodexRateLimits,
   unavailableRateLimits,
@@ -25,6 +26,7 @@ export type CodexRateLimitResetOutcome =
   "reset" | "nothingToReset" | "noCredit" | "alreadyRedeemed";
 
 type ClaudeUsageFetch = {
+  authProvider?: string;
   status: "ok" | "error" | "unavailable" | string;
   httpStatus?: number | null;
   body?: string | null;
@@ -38,6 +40,14 @@ export async function fetchClaudeRateLimits(
     const result = await invoke<ClaudeUsageFetch>("fetch_claude_usage", {
       accountId,
     });
+    if (result.authProvider === "bedrock") {
+      return {
+        ...idleRateLimits("claude"),
+        authProvider: "bedrock",
+        status: "ok",
+        updatedAt: Date.now(),
+      };
+    }
     if (result.status === "ok" && result.body) {
       const parsed = parseClaudeOAuthUsage(result.body);
       if (parsed.session || parsed.weekly) return parsed;

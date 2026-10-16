@@ -132,16 +132,17 @@ export function UsageProviderChip({
   const [reconnectState, setReconnectState] =
     useState<ProviderSignInState>("idle");
   const [reconnectError, setReconnectError] = useState<string | null>(null);
+  const bedrock = limits.provider === "claude" && limits.authProvider === "bedrock";
   const loading =
-    limits.status === "idle" ||
+    !bedrock && (limits.status === "idle" ||
     (limits.status === "fetching" &&
       !limits.session &&
       !limits.weekly &&
-      !limits.monthly);
-  const disconnected = limits.status === "unavailable";
+      !limits.monthly));
+  const disconnected = !bedrock && limits.status === "unavailable";
   const windows = usageWindows(limits);
   const loginView = Boolean(
-    onReconnect &&
+    !bedrock && onReconnect &&
     windows.length === 0 &&
     (needsProviderLogin(limits) || reconnectState !== "idle"),
   );
@@ -260,7 +261,7 @@ export function UsageProviderChip({
         aria-expanded={open}
         aria-haspopup="dialog"
         title={
-          tooltip ||
+          (bedrock ? "AWS Bedrock" : "") || tooltip ||
           limits.error ||
           (disconnected
             ? "Not connected"
@@ -271,7 +272,9 @@ export function UsageProviderChip({
         onClick={() => setOpen((value) => !value)}
       >
         <HarnessIcon harness={iconHarness} className="size-3 shrink-0" />
-        {loading ? (
+        {bedrock ? (
+          <span>AWS Bedrock</span>
+        ) : loading ? (
           <span className="animate-pulse text-content/35">···</span>
         ) : disconnected ? (
           <span className="text-content/35">not connected</span>
@@ -376,7 +379,7 @@ export function UsageProviderChip({
                 </span>
                 <div className="min-w-0 flex-1">
                   <h2 className="text-[13px] font-medium leading-4">
-                    {providerLabel} usage
+                    {bedrock ? "AWS Bedrock" : `${providerLabel} usage`}
                   </h2>
                   <p className="mt-0.5 text-[10px] leading-4 text-content/40">
                     {updatedLabel(limits, now)}
@@ -442,7 +445,7 @@ export function UsageProviderChip({
                     />
                   ))}
                 </div>
-              ) : (
+              ) : bedrock ? null : (
                 <EmptyUsageState limits={limits} loading={loading} />
               )}
 
@@ -1143,6 +1146,7 @@ function EmptyUsageState({
 }
 
 export function needsProviderLogin(limits: ProviderRateLimits): boolean {
+  if (limits.provider === "claude" && limits.authProvider === "bedrock") return false;
   if (limits.status === "unavailable") return true;
   if (limits.status !== "error") return false;
   const text = limits.error?.toLowerCase() ?? "";

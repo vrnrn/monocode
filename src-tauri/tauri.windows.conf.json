@@ -30,6 +30,8 @@
         "installerIcon": "icons/icon.ico"
       }
     },
-    "resources": null
+    "resources": {
+      "../host/claude-copilot.mjs": "claude-copilot.mjs"
+    }
   }
 }
