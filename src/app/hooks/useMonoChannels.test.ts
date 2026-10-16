@@ -8,8 +8,12 @@ import {
   findMonoChannel,
 } from "../../features/monos/model/monoChannels";
 import { shouldPersistSession } from "../../features/sessions/data/sessionStore";
-import { newSession, type Session } from "../../features/sessions/model/session";
+import {
+  newSession,
+  type Session,
+} from "../../features/sessions/model/session";
 import { useMonoChannels, type MonoChannelHost } from "./useMonoChannels";
+import type { ControlOutcome } from "../../features/orchestration/model/orchestration";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -46,6 +50,133 @@ function mountHook(host: MonoChannelHost) {
 }
 
 describe("useMonoChannels", () => {
+  it.each(["turn", "cancellation"])(
+    "serializes restart when %s settles first after Stop",
+    async (firstToSettle) => {
+      const mono = createMono(["/code/api"]);
+      const channel = createMonoChannel({
+        name: "restart",
+        memberIds: [mono.id],
+      });
+      const sessions: Session[] = [];
+      const settlements: ((outcome: ControlOutcome) => void)[] = [];
+      let finishCancellation!: () => void;
+      const cancellation = new Promise<void>((resolve) => {
+        finishCancellation = resolve;
+      });
+      const host: MonoChannelHost = {
+        sessions: () => sessions,
+        ensureMono: async () => newSession("codex", "/code/api"),
+        openSession: async () => undefined,
+        addSession: (session) => {
+          sessions.push(session);
+        },
+        runTurn: vi.fn(
+          () =>
+            new Promise((resolve) => {
+              settlements.push(resolve);
+            }),
+        ),
+        stopSession: vi.fn(() => cancellation),
+      };
+      const hook = mountHook(host);
+      await act(async () => {
+        hook.current.sendUserChannelMessage(channel.id, "Original request");
+      });
+      const backingId = sessions[0].id;
+      let stopping!: Promise<void>;
+      act(() => {
+        stopping = hook.current.stopChannel(channel.id);
+      });
+      await act(async () => {
+        hook.current.sendUserChannelMessage(channel.id, "Replacement request");
+      });
+      expect(host.runTurn).toHaveBeenCalledTimes(1);
+
+      const finishTurn = () =>
+        settlements[0]({ status: "completed", text: "Stale reply" });
+      await act(async () => {
+        if (firstToSettle === "turn") finishTurn();
+        else finishCancellation();
+      });
+      expect(host.runTurn).toHaveBeenCalledTimes(1);
+      expect(
+        findMonoChannel(channel.id)?.memberCursors[mono.id],
+      ).toBeUndefined();
+      expect(
+        findMonoChannel(channel.id)?.messages.some(
+          (m) => m.text === "Stale reply",
+        ),
+      ).toBe(false);
+
+      await act(async () => {
+        if (firstToSettle === "turn") finishCancellation();
+        else finishTurn();
+        await stopping;
+      });
+      expect(host.runTurn).toHaveBeenCalledTimes(2);
+      expect(hook.current.busyChannelIds.has(channel.id)).toBe(true);
+      expect(hook.current.currentHop(backingId)).toBe(1);
+
+      // A later message queues behind the replacement, and Stop still targets it.
+      await act(async () => {
+        hook.current.sendUserChannelMessage(channel.id, "Third request");
+      });
+      expect(host.runTurn).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        await hook.current.stopChannel(channel.id);
+      });
+      expect(host.stopSession).toHaveBeenLastCalledWith(backingId);
+      expect(host.stopSession).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        settlements[1]({ status: "cancelled", text: "" });
+      });
+      expect(host.runTurn).toHaveBeenCalledTimes(2);
+      expect(hook.current.busyChannelIds.has(channel.id)).toBe(false);
+    },
+  );
+
+  it("does not launch a stopped turn when backing-session setup finishes late", async () => {
+    const mono = createMono(["/code/api"]);
+    const channel = createMonoChannel({ name: "setup", memberIds: [mono.id] });
+    const sessions: Session[] = [];
+    let finishSetup!: (session: Session) => void;
+    const setup = new Promise<Session>((resolve) => {
+      finishSetup = resolve;
+    });
+    const host: MonoChannelHost = {
+      sessions: () => sessions,
+      ensureMono: vi.fn(() => setup),
+      openSession: async () => undefined,
+      addSession: (session) => {
+        sessions.push(session);
+      },
+      runTurn: vi.fn(async () => ({
+        status: "completed" as const,
+        text: "Fresh reply",
+      })),
+      stopSession: vi.fn(async () => {}),
+    };
+    const hook = mountHook(host);
+    await act(async () => {
+      hook.current.sendUserChannelMessage(channel.id, "Original request");
+    });
+    await act(async () => {
+      await hook.current.stopChannel(channel.id);
+    });
+    await act(async () => {
+      hook.current.sendUserChannelMessage(channel.id, "New request");
+    });
+    expect(host.ensureMono).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      finishSetup(newSession("codex", "/code/api"));
+    });
+    expect(sessions).toHaveLength(1);
+    expect(host.runTurn).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(host.runTurn).mock.calls[0][1]).toContain("New request");
+    expect(hook.current.busyChannelIds.has(channel.id)).toBe(false);
+  });
+
   it("inherits the Mono session runtimeMode, persists backing sessions, and queues follow-up turns for an active speaker", async () => {
     const alpha = createMono(["/code/api"]);
     saveMonoName(alpha.id, "Alpha");
@@ -63,7 +194,8 @@ describe("useMonoChannels", () => {
 
     const host: MonoChannelHost = {
       sessions: () => sessions,
-      ensureMono: async (id) => (id === alpha.id ? alphaMonoSession : undefined),
+      ensureMono: async (id) =>
+        id === alpha.id ? alphaMonoSession : undefined,
       openSession: async (id) => sessions.find((s) => s.id === id),
       addSession: (session) => {
         sessions.push(session);
@@ -72,7 +204,11 @@ describe("useMonoChannels", () => {
         prompts.push(prompt);
         const s = sessions.find((entry) => entry.id === sessionId);
         if (s) {
-          s.blocks.push({ id: `u-${prompts.length}`, role: "user", text: prompt });
+          s.blocks.push({
+            id: `u-${prompts.length}`,
+            role: "user",
+            text: prompt,
+          });
         }
         if (prompts.length === 1) {
           await firstTurnGate;
@@ -110,7 +246,10 @@ describe("useMonoChannels", () => {
 
     // While Alpha is still running turn 1, user sends a second follow-up message
     act(() => {
-      hook.current.sendUserChannelMessage(channel.id, "@Alpha Second follow-up");
+      hook.current.sendUserChannelMessage(
+        channel.id,
+        "@Alpha Second follow-up",
+      );
     });
 
     // Finish turn 1; turn 2 should automatically run and receive the follow-up!
@@ -171,7 +310,10 @@ describe("useMonoChannels", () => {
     const hook = mountHook(host);
 
     act(() => {
-      hook.current.sendUserChannelMessage(channel.id, "@Alpha Try during outage");
+      hook.current.sendUserChannelMessage(
+        channel.id,
+        "@Alpha Try during outage",
+      );
     });
 
     await vi.waitFor(() => {
@@ -180,7 +322,10 @@ describe("useMonoChannels", () => {
 
     shouldFailSetup = false;
     act(() => {
-      hook.current.sendUserChannelMessage(channel.id, "@Alpha Try after recovery");
+      hook.current.sendUserChannelMessage(
+        channel.id,
+        "@Alpha Try after recovery",
+      );
     });
 
     await vi.waitFor(() => {

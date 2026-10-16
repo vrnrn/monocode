@@ -39,9 +39,12 @@ export function useMonoChannels(host: MonoChannelHost) {
   hostRef.current = host;
 
   const queuesRef = useRef(new Map<string, QueuedSpeaker[]>());
+  // Keep ownership until both the turn and any provider cancellation settle.
+  const workersRef = useRef(new Set<string>());
+  const generationsRef = useRef(new Map<string, number>());
+  const stoppingRef = useRef(new Map<string, Promise<void>>());
   const runningSpeakerRef = useRef(new Map<string, string>());
   const activeSessionByChannelRef = useRef(new Map<string, string>());
-  const stoppedChannelsRef = useRef(new Set<string>());
   const activeHopBySessionRef = useRef(new Map<string, number>());
   const cliPostedInTurnRef = useRef(new Set<string>());
 
@@ -107,7 +110,6 @@ export function useMonoChannels(host: MonoChannelHost) {
   const enqueueChannelTurns = useCallback(
     (channelId: string, monoIds: readonly string[], hop: number) => {
       if (hop > MAX_CHANNEL_AUTONOMOUS_HOPS || monoIds.length === 0) return;
-      stoppedChannelsRef.current.delete(channelId);
       const queue = queuesRef.current.get(channelId) ?? [];
       for (const monoId of monoIds) {
         if (!findMono(monoId)) continue;
@@ -121,18 +123,18 @@ export function useMonoChannels(host: MonoChannelHost) {
       queuesRef.current.set(channelId, queue);
       syncChannelActiveState(channelId);
 
-      if (runningSpeakerRef.current.has(channelId)) return;
+      if (workersRef.current.has(channelId)) return;
+      workersRef.current.add(channelId);
 
       void (async () => {
         try {
           while (true) {
+            const stopping = stoppingRef.current.get(channelId);
+            if (stopping) await stopping.catch(() => undefined);
             const pending = queuesRef.current.get(channelId);
             const next = pending?.shift();
             if (!next) break;
-            if (stoppedChannelsRef.current.has(channelId)) {
-              queuesRef.current.delete(channelId);
-              break;
-            }
+            const generation = generationsRef.current.get(channelId) ?? 0;
 
             const channel = findMonoChannel(channelId);
             const mono = findMono(next.monoId);
@@ -154,7 +156,10 @@ export function useMonoChannels(host: MonoChannelHost) {
             } catch {
               backing = undefined;
             }
-            if (!backing || stoppedChannelsRef.current.has(channelId)) {
+            if (
+              !backing ||
+              generation !== (generationsRef.current.get(channelId) ?? 0)
+            ) {
               syncChannelActiveState(channelId);
               continue;
             }
@@ -194,13 +199,19 @@ export function useMonoChannels(host: MonoChannelHost) {
               activeSessionByChannelRef.current.delete(channelId);
             }
 
+            // Stop invalidates this turn even if a new message is already queued.
+            // A cancelled turn must not post a reply or advance an unread cursor.
+            if (generation !== (generationsRef.current.get(channelId) ?? 0)) {
+              cliPostedInTurnRef.current.delete(`${backing.id}:${channelId}`);
+              continue;
+            }
+
             // Record the last message this turn actually saw before posting its
             // reply; if new messages arrived concurrently, postChannelMessage
             // preserves this cursor so the queued follow-up turn sees them.
             markChannelCursor(channelId, next.monoId, lastMessageId);
 
             if (
-              stoppedChannelsRef.current.has(channelId) ||
               outcome.status !== "completed" ||
               cliPostedInTurnRef.current.has(`${backing.id}:${channelId}`)
             ) {
@@ -262,6 +273,7 @@ export function useMonoChannels(host: MonoChannelHost) {
             }
           }
         } finally {
+          workersRef.current.delete(channelId);
           runningSpeakerRef.current.delete(channelId);
           activeSessionByChannelRef.current.delete(channelId);
           syncChannelActiveState(channelId);
@@ -288,14 +300,25 @@ export function useMonoChannels(host: MonoChannelHost) {
 
   const stopChannel = useCallback(
     async (channelId: string) => {
-      stoppedChannelsRef.current.add(channelId);
+      generationsRef.current.set(
+        channelId,
+        (generationsRef.current.get(channelId) ?? 0) + 1,
+      );
       queuesRef.current.delete(channelId);
       const activeSessionId = activeSessionByChannelRef.current.get(channelId);
       runningSpeakerRef.current.delete(channelId);
       activeSessionByChannelRef.current.delete(channelId);
       syncChannelActiveState(channelId);
       if (activeSessionId) {
-        await hostRef.current.stopSession(activeSessionId);
+        const stopping = hostRef.current
+          .stopSession(activeSessionId)
+          .finally(() => {
+            if (stoppingRef.current.get(channelId) === stopping) {
+              stoppingRef.current.delete(channelId);
+            }
+          });
+        stoppingRef.current.set(channelId, stopping);
+        await stopping;
       }
     },
     [syncChannelActiveState],

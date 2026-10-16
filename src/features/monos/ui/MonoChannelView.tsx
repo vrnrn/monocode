@@ -258,15 +258,15 @@ export function MonoChannelView({
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col font-sans"
     >
       {/* Slack-like Top Channel Header */}
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/50 bg-surface-raised/30 px-5 py-2.5">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-stroke bg-selection-subtle px-5 py-2.5">
         <div className="flex min-w-0 items-center gap-2.5">
-          <div className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 bg-content/[0.05] px-2.5 text-[13.5px] font-semibold text-content">
+          <div className="inline-flex h-7 min-w-0 items-center gap-1.5 rounded-lg border border-stroke bg-content/[0.05] px-2.5 text-[13.5px] font-semibold text-content">
             <span className="font-bold text-accent">#</span>
-            <span>{channel.name}</span>
+            <span className="truncate">{channel.name}</span>
           </div>
           {channel.topic ? (
             <>
-              <span className="h-3.5 w-px shrink-0 bg-border/60" />
+              <span className="h-3.5 w-px shrink-0 bg-stroke" />
               <span className="min-w-0 truncate text-[12px] text-content/55">
                 {channel.topic}
               </span>
@@ -296,7 +296,7 @@ export function MonoChannelView({
                   className={`inline-flex h-6 items-center gap-1.5 rounded-full border pr-2.5 pl-1.5 text-[11px] font-medium transition-colors ${
                     speakingInChannel
                       ? "border-accent/45 bg-accent/10 text-content"
-                      : "border-border/60 bg-surface-raised/60 text-content/80 hover:border-content/25 hover:bg-content/[0.06] hover:text-content"
+                      : "border-stroke bg-selection-subtle text-content/80 hover:border-content/25 hover:bg-content/[0.06] hover:text-content"
                   }`}
                 >
                   <PixelMascot
@@ -334,7 +334,7 @@ export function MonoChannelView({
       {flowNodes.length > 0 ? (
         <div
           data-channel-message-flow
-          className="flex shrink-0 items-center justify-between gap-3 border-b border-border/35 bg-content/[0.02] px-5 py-2"
+          className="flex shrink-0 items-center justify-between gap-3 border-b border-stroke bg-content/[0.02] px-5 py-2"
         >
           <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
             <span className="mr-1 shrink-0 text-[10.5px] font-semibold uppercase tracking-wider text-content/40">
@@ -349,7 +349,7 @@ export function MonoChannelView({
                   />
                 ) : null}
                 {node.kind === "user" ? (
-                  <span className="inline-flex h-5 items-center gap-1 rounded-md border border-border/55 bg-surface-raised px-2 text-[11px] font-medium text-content/75">
+                  <span className="inline-flex h-5 items-center gap-1 rounded-md border border-stroke bg-selection-subtle px-2 text-[11px] font-medium text-content/75">
                     <span>{node.label}</span>
                   </span>
                 ) : (
@@ -360,8 +360,8 @@ export function MonoChannelView({
                       node.state === "speaking"
                         ? "border-accent/50 bg-accent/12 text-content"
                         : node.state === "queued"
-                          ? "border-dashed border-border/70 bg-content/[0.03] text-content/55"
-                          : "border-border/55 bg-surface-raised text-content/85 hover:border-content/30"
+                          ? "border-dashed border-stroke bg-content/[0.03] text-content/55"
+                          : "border-stroke bg-selection-subtle text-content/85 hover:border-content/30"
                     }`}
                   >
                     <PixelMascot
@@ -397,7 +397,7 @@ export function MonoChannelView({
             <button
               type="button"
               onClick={() => onStopChannel(channel.id)}
-              className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border/60 bg-surface-raised px-2 text-[11px] font-medium text-content/70 transition-colors hover:border-content/30 hover:bg-content/[0.06] hover:text-content"
+              className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-stroke bg-selection-subtle px-2 text-[11px] font-medium text-content/70 transition-colors hover:border-content/30 hover:bg-content/[0.06] hover:text-content"
             >
               <Square className="size-2.5 fill-current" />
               <span>Stop</span>
@@ -414,7 +414,7 @@ export function MonoChannelView({
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col">
           {/* Channel Hero Header */}
           <header
-            className={`flex flex-col items-start border-b border-border/35 pb-5 ${
+            className={`flex flex-col items-start border-b border-stroke pb-5 ${
               empty ? "my-auto items-center border-none py-10 text-center" : "mb-4 pt-1"
             }`}
           >
@@ -427,7 +427,7 @@ export function MonoChannelView({
                     <div
                       key={mono.id}
                       style={{ zIndex: memberMonos.length - index }}
-                      className="rounded-full bg-background-base/90 p-1 ring-1 ring-border/40 backdrop-blur-sm"
+                      className="rounded-full bg-background-base/90 p-1 ring-1 ring-stroke backdrop-blur-sm"
                     >
                       <PixelMascot
                         name={look.mascot}
@@ -464,7 +464,7 @@ export function MonoChannelView({
                       "@all Give a quick status check on your projects and anything you need from each other.",
                     )
                   }
-                  className="rounded-full border border-border/60 bg-surface-raised/60 px-3 py-1.5 text-[12px] text-content/75 transition-colors hover:border-content/25 hover:bg-content/[0.06] hover:text-content"
+                  className="rounded-full border border-stroke bg-selection-subtle px-3 py-1.5 text-[12px] text-content/75 transition-colors hover:border-content/25 hover:bg-content/[0.06] hover:text-content"
                 >
                   @all Quick status check across projects
                 </button>
@@ -479,7 +479,7 @@ export function MonoChannelView({
                       );
                       textareaRef.current?.focus();
                     }}
-                    className="rounded-full border border-border/60 bg-surface-raised/60 px-3 py-1.5 text-[12px] text-content/75 transition-colors hover:border-content/25 hover:bg-content/[0.06] hover:text-content"
+                    className="rounded-full border border-stroke bg-selection-subtle px-3 py-1.5 text-[12px] text-content/75 transition-colors hover:border-content/25 hover:bg-content/[0.06] hover:text-content"
                   >
                     Coordinate between {monoLook(memberMonos[0]).name} &{" "}
                     {monoLook(memberMonos[1]).name}
@@ -490,7 +490,7 @@ export function MonoChannelView({
           </header>
 
           {/* Slack-style Message Stream */}
-          <div className="flex flex-col divide-y divide-border/25">
+          <div className="flex flex-col divide-y divide-stroke">
             {channel.messages.map((message) => (
               <ChannelMessageRow
                 key={message.id}
@@ -535,7 +535,7 @@ export function MonoChannelView({
                 <button
                   type="button"
                   onClick={() => onStopChannel(channel.id)}
-                  className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border/60 bg-surface-raised px-2 text-[11px] font-medium text-content/70 transition-colors hover:border-content/25 hover:bg-content/[0.06] hover:text-content"
+                  className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-stroke bg-selection-subtle px-2 text-[11px] font-medium text-content/70 transition-colors hover:border-content/25 hover:bg-content/[0.06] hover:text-content"
                 >
                   <Square className="size-2.5 fill-current" />
                   <span>Stop</span>
@@ -548,7 +548,7 @@ export function MonoChannelView({
 
       {/* Slack-like Channel Composer */}
       <div className="shrink-0 px-6 pb-5 pt-2">
-        <div className="mx-auto w-full max-w-3xl rounded-2xl border border-border/65 bg-surface-raised/85 p-3 shadow-sm backdrop-blur-md">
+        <div className="mx-auto w-full max-w-3xl rounded-2xl border border-stroke bg-selection-subtle p-3 shadow-sm backdrop-blur-md">
           {/* Quick @Mention chips */}
           {memberMonos.length > 0 ? (
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
@@ -556,7 +556,7 @@ export function MonoChannelView({
               <button
                 type="button"
                 onClick={() => insertMention("all")}
-                className="inline-flex h-5 items-center rounded-full border border-border/55 bg-content/[0.04] px-2 text-[11px] font-medium text-content/65 transition-colors hover:border-content/25 hover:bg-content/[0.08] hover:text-content"
+                className="inline-flex h-5 items-center rounded-full border border-stroke bg-content/[0.04] px-2 text-[11px] font-medium text-content/65 transition-colors hover:border-content/25 hover:bg-content/[0.08] hover:text-content"
               >
                 @all
               </button>
@@ -567,7 +567,7 @@ export function MonoChannelView({
                     key={mono.id}
                     type="button"
                     onClick={() => insertMention(look.name)}
-                    className="inline-flex h-5 items-center gap-1 rounded-full border border-border/55 bg-content/[0.04] px-2 text-[11px] font-medium text-content/75 transition-colors hover:border-content/25 hover:bg-content/[0.08] hover:text-content"
+                    className="inline-flex h-5 items-center gap-1 rounded-full border border-stroke bg-content/[0.04] px-2 text-[11px] font-medium text-content/75 transition-colors hover:border-content/25 hover:bg-content/[0.08] hover:text-content"
                   >
                     <span
                       className="size-1.5 rounded-full"
@@ -627,7 +627,7 @@ export function MonoChannelView({
                   }));
                 }
               }}
-              className="h-7 w-full rounded-md border border-border/65 bg-content/[0.04] px-2 text-[12.5px] text-content focus:border-accent focus:outline-none"
+              className="h-7 w-full rounded-md border border-stroke bg-content/[0.04] px-2 text-[12.5px] text-content focus:border-accent focus:outline-none"
             />
           </label>
           <label className="mb-3 block">
@@ -645,7 +645,7 @@ export function MonoChannelView({
                   topic: editingTopic.trim() || undefined,
                 }));
               }}
-              className="h-7 w-full rounded-md border border-border/65 bg-content/[0.04] px-2 text-[12.5px] text-content placeholder:text-content/35 focus:border-accent focus:outline-none"
+              className="h-7 w-full rounded-md border border-stroke bg-content/[0.04] px-2 text-[12.5px] text-content placeholder:text-content/35 focus:border-accent focus:outline-none"
             />
           </label>
           <div className="mb-1.5 text-[11px] font-medium text-content/55">
@@ -683,14 +683,14 @@ export function MonoChannelView({
               );
             })}
           </div>
-          <div className="border-t border-border/50 pt-2">
+          <div className="border-t border-stroke pt-2">
             <button
               type="button"
               onClick={() => {
                 setManageAnchor(null);
                 onDeleteChannel(channel.id);
               }}
-              className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[12.5px] text-danger hover:bg-danger/10"
+              className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[12.5px] text-red-500 hover:bg-red-500/10"
             >
               <Trash2 className="size-3.5 shrink-0" strokeWidth={1.75} />
               <span>Delete channel</span>
@@ -752,7 +752,7 @@ function ChannelMessageRow({
     >
       {/* Left Slack-style Avatar */}
       {isUser ? (
-        <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border/60 bg-content/[0.07] text-[11px] font-bold uppercase tracking-wider text-content/75">
+        <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-stroke bg-content/[0.07] text-[11px] font-bold uppercase tracking-wider text-content/75">
           You
         </div>
       ) : (
@@ -762,7 +762,7 @@ function ChannelMessageRow({
             message.from.kind === "mono" && onOpenMono(message.from.monoId)
           }
           title={`Open ${senderLook?.name ?? "Mono"}`}
-          className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border/55 bg-surface-raised/80 transition-transform hover:scale-105"
+          className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-stroke bg-selection-subtle transition-transform hover:scale-105"
         >
           <PixelMascot
             name={senderLook?.mascot ?? "invader"}
@@ -877,7 +877,7 @@ function ChannelMessageRow({
               <span
                 key={`${reaction.monoId}-${idx}`}
                 title={`Reacted by ${reaction.name}`}
-                className="inline-flex h-5 items-center gap-1 rounded-full border border-border/55 bg-surface-raised px-2 text-[11px]"
+                className="inline-flex h-5 items-center gap-1 rounded-full border border-stroke bg-selection-subtle px-2 text-[11px]"
               >
                 <span>{reaction.emoji}</span>
                 <span className="text-[10px] font-medium text-content/60">
