@@ -18,8 +18,8 @@ In **Settings → Providers**, use **Models** beside an agent to choose which mo
 
 To run MonoCode from a checkout, see [building from source](building.md). Return to the [README](../README.md) for desktop downloads.
 
-## GitHub Copilot with omp
+## GitHub Copilot credentials
 
-On macOS and Linux, desktop launches do not inherit your interactive shell environment. MonoCode forwards `COPILOT_GITHUB_TOKEN` from that shell only to omp when the app environment lacks the variable. An inherited value takes precedence.
+On macOS and Linux, desktop launches do not inherit your interactive shell environment. MonoCode forwards `COPILOT_GITHUB_TOKEN` from that shell to every provider process when the app environment lacks the variable. An inherited value takes precedence.
 
 Export `COPILOT_GITHUB_TOKEN` in your shell configuration before you start MonoCode. Restart MonoCode after you change the token.

@@ -760,7 +760,7 @@ pub fn harness_spawn(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    prepare_child(&mut cmd, &command);
+    prepare_child(&mut cmd);
     apply_provider_account(&app, &mut cmd, account.as_ref())?;
     let codex_store = match codex_store.as_deref() {
         None => None,
@@ -1131,7 +1131,7 @@ pub(crate) fn exec_output(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    prepare_child(&mut cmd, command);
+    prepare_child(&mut cmd);
     if let Some(dir) = cwd {
         let workdir = expand_home(dir);
         if workdir.is_dir() {
@@ -2226,13 +2226,9 @@ pub(crate) fn apply_gui_env(cmd: &mut Command) {
     }
 }
 
-fn prepare_child(cmd: &mut Command, command: &str) {
+fn prepare_child(cmd: &mut Command) {
     apply_gui_env(cmd);
-    if Path::new(command)
-        .file_stem()
-        .is_some_and(|name| name == "omp")
-        && std::env::var_os("COPILOT_GITHUB_TOKEN").is_none()
-    {
+    if std::env::var_os("COPILOT_GITHUB_TOKEN").is_none() {
         if let Some(token) = login_shell_env("COPILOT_GITHUB_TOKEN") {
             cmd.env("COPILOT_GITHUB_TOKEN", token);
         }
@@ -2342,30 +2338,39 @@ mod tests {
     use std::os::unix::process::CommandExt;
 
     #[test]
-    fn copilot_token_authorizes_only_omp() {
+    fn copilot_token_reaches_all_providers() {
         const SCENARIO: &str = "MONOCODE_COPILOT_AUTH_SCENARIO";
         const ROOT: &str = "MONOCODE_COPILOT_AUTH_ROOT";
+        const BINARY: &str = "MONOCODE_COPILOT_AUTH_BINARY";
         const SHELL_TOKEN: &str = "fixture-shell-copilot-token";
         const INHERITED_TOKEN: &str = "fixture-inherited-copilot-token";
+        const BINARIES: [&str; 6] = [
+            "omp",
+            "pi",
+            "claude",
+            "codex",
+            "agy_acp_server.par",
+            "custom-agent",
+        ];
 
         if let Ok(scenario) = std::env::var(SCENARIO) {
             let root = PathBuf::from(std::env::var_os(ROOT).expect("fixture root"));
-            let (binary, expected_token, allowed) = match scenario.as_str() {
-                "shell-token-for-omp" => ("omp", SHELL_TOKEN, true),
-                "inherited-token-for-omp" => ("omp", INHERITED_TOKEN, true),
-                "shell-token-for-other" => ("other-agent", SHELL_TOKEN, false),
+            let binary = std::env::var(BINARY).expect("fixture binary name");
+            let expected_token = match scenario.as_str() {
+                "shell-token" => SHELL_TOKEN,
+                "inherited-token" => INHERITED_TOKEN,
+                "empty-inherited-token" => "",
                 _ => panic!("unknown Copilot authorization scenario: {scenario}"),
             };
-            let binary_path = root.join(binary);
+            let binary_path = root.join(&binary);
             let mut cmd = Command::new(&binary_path);
             cmd.arg(expected_token).stdin(Stdio::null());
-            prepare_child(&mut cmd, binary_path.to_str().expect("fixture binary path"));
+            prepare_child(&mut cmd);
             let status = cmd.status().expect("run authorization fixture");
-            if allowed {
-                assert!(status.success(), "{scenario} must authorize");
-            } else {
-                assert_eq!(status.code(), Some(1), "{scenario} must deny authorization");
-            }
+            assert!(
+                status.success(),
+                "{binary}: {scenario} must preserve the expected token"
+            );
             return;
         }
 
@@ -2389,7 +2394,7 @@ mod tests {
         .expect("write fixture shell");
         std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755))
             .expect("make fixture shell executable");
-        for name in ["omp", "other-agent"] {
+        for name in BINARIES {
             let path = root.0.join(name);
             std::fs::write(
                 &path,
@@ -2400,35 +2405,38 @@ mod tests {
                 .expect("make authorization fixture executable");
         }
 
-        for (scenario, inherited_token) in [
-            ("shell-token-for-omp", None),
-            ("inherited-token-for-omp", Some(INHERITED_TOKEN)),
-            ("shell-token-for-other", None),
-        ] {
-            let mut child = Command::new(std::env::current_exe().expect("test executable"));
-            child
-                .args([
-                    "--exact",
-                    "harness::tests::copilot_token_authorizes_only_omp",
-                ])
-                .env_clear()
-                .env("HOME", &root.0)
-                .env("TMPDIR", &root.0)
-                .env("PATH", "/usr/bin:/bin")
-                .env("SHELL", &shell)
-                .env(SCENARIO, scenario)
-                .env(ROOT, &root.0)
-                .stdin(Stdio::null());
-            if let Some(token) = inherited_token {
-                child.env("COPILOT_GITHUB_TOKEN", token);
+        for name in BINARIES {
+            for (scenario, inherited_token) in [
+                ("shell-token", None),
+                ("inherited-token", Some(INHERITED_TOKEN)),
+                ("empty-inherited-token", Some("")),
+            ] {
+                let mut child = Command::new(std::env::current_exe().expect("test executable"));
+                child
+                    .args([
+                        "--exact",
+                        "harness::tests::copilot_token_reaches_all_providers",
+                    ])
+                    .env_clear()
+                    .env("HOME", &root.0)
+                    .env("TMPDIR", &root.0)
+                    .env("PATH", "/usr/bin:/bin")
+                    .env("SHELL", &shell)
+                    .env(SCENARIO, scenario)
+                    .env(ROOT, &root.0)
+                    .env(BINARY, name)
+                    .stdin(Stdio::null());
+                if let Some(token) = inherited_token {
+                    child.env("COPILOT_GITHUB_TOKEN", token);
+                }
+                let output = child.output().expect("run isolated authorization scenario");
+                assert!(
+                    output.status.success(),
+                    "{name}: {scenario} failed: {}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
             }
-            let output = child.output().expect("run isolated authorization scenario");
-            assert!(
-                output.status.success(),
-                "{scenario} failed: {}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
         }
     }
 
