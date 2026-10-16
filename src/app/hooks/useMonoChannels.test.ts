@@ -177,12 +177,68 @@ describe("useMonoChannels", () => {
     expect(hook.current.busyChannelIds.has(channel.id)).toBe(false);
   });
 
+  it.each(["failed", "cancelled", "rejected"])(
+    "keeps unread messages available after a %s turn",
+    async (failure) => {
+      const mono = createMono(["/code/api"]);
+      const channel = createMonoChannel({
+        name: "retry",
+        memberIds: [mono.id],
+      });
+      const sessions: Session[] = [];
+      const runTurn = vi.fn<MonoChannelHost["runTurn"]>();
+      if (failure === "rejected") {
+        runTurn.mockRejectedValueOnce(new Error("Provider unavailable"));
+      } else {
+        runTurn.mockResolvedValueOnce({
+          status: failure as "failed" | "cancelled",
+          text: "Partial response",
+        });
+      }
+      runTurn.mockResolvedValue({
+        status: "completed",
+        text: "Recovered reply",
+      });
+      const hook = mountHook({
+        sessions: () => sessions,
+        ensureMono: async () => newSession("codex", "/code/api"),
+        openSession: async () => undefined,
+        addSession: (session) => {
+          sessions.push(session);
+        },
+        runTurn,
+        stopSession: async () => {},
+      });
+
+      await act(async () => {
+        hook.current.sendUserChannelMessage(channel.id, "Original question");
+      });
+      expect(runTurn).toHaveBeenCalledTimes(1);
+      expect(hook.current.busyChannelIds.has(channel.id)).toBe(false);
+      expect(
+        findMonoChannel(channel.id)?.memberCursors[mono.id],
+      ).toBeUndefined();
+      expect(findMonoChannel(channel.id)?.messages).toHaveLength(1);
+
+      await act(async () => {
+        hook.current.sendUserChannelMessage(channel.id, "Please retry");
+      });
+      expect(runTurn).toHaveBeenCalledTimes(2);
+      expect(runTurn.mock.calls[1][1]).toContain("Original question");
+      expect(runTurn.mock.calls[1][1]).toContain("Please retry");
+      expect(
+        findMonoChannel(channel.id)?.messages.map((message) => message.text),
+      ).toEqual(["Original question", "Please retry", "Recovered reply"]);
+    },
+  );
+
   it("inherits the Mono session runtimeMode, persists backing sessions, and queues follow-up turns for an active speaker", async () => {
     const alpha = createMono(["/code/api"]);
     saveMonoName(alpha.id, "Alpha");
     const alphaMonoSession: Session = {
       ...newSession("claude", "/code/api", "claude-sonnet-4-6", "auto"),
       id: alpha.id,
+      providerAccountId: "account-work",
     };
 
     const sessions: Session[] = [alphaMonoSession];
@@ -240,6 +296,7 @@ describe("useMonoChannels", () => {
     const backing = sessions.find((s) => s.id === backingId)!;
     // Must preserve the Mono's selected permission mode ("auto", not "full-access")
     expect(backing.runtimeMode).toBe("auto");
+    expect(backing.providerAccountId).toBe("account-work");
     // Must be persistable once populated (not ephemeral)
     expect(backing.ephemeral).toBeUndefined();
     expect(shouldPersistSession(backing)).toBe(true);

@@ -24,7 +24,10 @@ import {
 } from "./monoChannels";
 import { canSteerQueuedHead } from "../../sessions/model/messageQueue";
 import { newSession } from "../../sessions/model/session";
-import { handleAgentApp, type AgentAppHost } from "../../agent-app/model/agentApp";
+import {
+  handleAgentApp,
+  type AgentAppHost,
+} from "../../agent-app/model/agentApp";
 
 beforeEach(() => {
   const stored = new Map<string, string>();
@@ -467,8 +470,7 @@ describe("monoChannels & peer Mono collaboration", () => {
     };
     const mergedHost: AgentAppHost = {
       ...host,
-      isMono: (id) =>
-        id === skull.id || id === cypress.id || id === bramble.id,
+      isMono: (id) => id === skull.id || id === cypress.id || id === bramble.id,
       monoOf: (id) =>
         id === bramble.id
           ? { id: bramble.id, projects: ["/code/infra"] }
@@ -515,6 +517,51 @@ describe("monoChannels & peer Mono collaboration", () => {
         exhaustedChannelHost,
       ),
     ).rejects.toThrow(/hop limit/);
+
+    // Switching between channels and DMs must not reset the autonomy budget.
+    await expect(
+      handleAgentApp(
+        skullSession,
+        "req-channel-to-dm-over-hop",
+        "monos.send",
+        { to: "Cypress", message: "Continue in a DM" },
+        exhaustedChannelHost,
+      ),
+    ).rejects.toThrow(/hop limit/);
+    const beforeMessages = findMonoChannel(createdChan.channel.id)?.messages
+      .length;
+    for (const action of ["channels.post", "channels.create"]) {
+      await expect(
+        handleAgentApp(
+          exhaustedSession,
+          `req-peer-to-${action.replace(".", "-")}`,
+          action,
+          action === "channels.post"
+            ? {
+                channel: "release-coordination",
+                message: "Continue in channel",
+              }
+            : {
+                name: "peer-budget-bypass",
+                members: ["Cypress"],
+                message: "Continue here",
+              },
+          host,
+        ),
+      ).rejects.toThrow(/hop limit/);
+    }
+    expect(findMonoChannel("peer-budget-bypass")).toBeUndefined();
+    expect(findMonoChannel(createdChan.channel.id)?.messages).toHaveLength(
+      beforeMessages!,
+    );
+    const bridged = await handleAgentApp(
+      skullSession,
+      "req-channel-to-peer-hop",
+      "monos.send",
+      { to: "Cypress", message: "Continue with remaining budget" },
+      { ...host, channels: { ...host.channels, currentHop: () => 2 } },
+    );
+    expect(bridged).toMatchObject({ hop: 3 });
   });
 
   it("parses multi-word display names emitted by mention chips without matching shorter prefixes", () => {

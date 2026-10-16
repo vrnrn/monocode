@@ -990,6 +990,14 @@ function sourcePeerHop(source: Session): number {
   return 0;
 }
 
+/** A handoff between DMs and channels continues the same autonomous chain. */
+function sourceCollaborationHop(source: Session, host: AgentAppHost): number {
+  const channelHop =
+    host.channels?.currentHop?.(source.id) ??
+    (channelForMemberSession(source.id) ? 1 : 0);
+  return Math.max(sourcePeerHop(source), channelHop);
+}
+
 async function handleMonos(
   source: Session,
   requestId: string,
@@ -1054,7 +1062,7 @@ async function handleMonos(
       const expectReply = input.expectReply ?? true;
       if (typeof expectReply !== "boolean")
         throw new Error("expectReply must be true or false");
-      const nextHop = sourcePeerHop(source) + 1;
+      const nextHop = sourceCollaborationHop(source, host) + 1;
       if (nextHop > MAX_PEER_AUTONOMOUS_HOPS) {
         throw new Error(
           `Autonomous peer-to-peer hop limit (${MAX_PEER_AUTONOMOUS_HOPS}) reached; report back to the user before continuing.`,
@@ -1162,10 +1170,7 @@ async function handleChannels(
         throw new Error("Channel messages cannot include /operator");
       let openingHop = 1;
       if (openingMessage) {
-        const memberTurn = channelForMemberSession(source.id);
-        const currentHop =
-          host.channels?.currentHop?.(source.id) ?? (memberTurn ? 1 : 0);
-        openingHop = currentHop + 1;
+        openingHop = sourceCollaborationHop(source, host) + 1;
         if (openingHop > MAX_CHANNEL_AUTONOMOUS_HOPS) {
           throw new Error(
             `Channel autonomous hop limit (${MAX_CHANNEL_AUTONOMOUS_HOPS}) reached; pause and let the user weigh in.`,
@@ -1275,10 +1280,7 @@ async function handleChannels(
           : resolveMemberQueries(input.to, "to").filter(
               (id) => id !== callerMonoId,
             );
-      const memberTurn = channelForMemberSession(source.id);
-      const currentHop =
-        host.channels?.currentHop?.(source.id) ?? (memberTurn ? 1 : 0);
-      const nextHop = currentHop + 1;
+      const nextHop = sourceCollaborationHop(source, host) + 1;
       if (nextHop > MAX_CHANNEL_AUTONOMOUS_HOPS) {
         throw new Error(
           `Channel autonomous hop limit (${MAX_CHANNEL_AUTONOMOUS_HOPS}) reached; pause and let the user weigh in.`,

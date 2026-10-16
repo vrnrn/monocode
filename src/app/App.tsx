@@ -8171,7 +8171,11 @@ function Workspace({
             ...(providerFailureSeen ? { error: controlOutcome.error } : {}),
           };
           await flushSessionCheckpoint(sessionId);
-          setSessions((prev) =>
+          // Stop or a replacement turn may have won while persistence awaited.
+          if (turnGen.current.get(sessionId) !== gen) return;
+          // onSettled can immediately send a peer reply using the runtime
+          // snapshot. Publish completion there before that callback runs.
+          updateSessionState(sessionsRef, setSessions, (prev) =>
             prev.map((s) => {
               if (s.id !== sessionId) return s;
               const stopped = stopStreaming(s);
@@ -8257,7 +8261,7 @@ function Workspace({
               message: controlOutcome.error!,
             });
             flushHarnessEvents();
-            setSessions((prev) =>
+            updateSessionState(sessionsRef, setSessions, (prev) =>
               prev.map((session) => {
                 if (session.id !== sessionId) return session;
                 const stopped = {
@@ -8337,13 +8341,16 @@ function Workspace({
       );
       return;
     }
-    const next: Session = { ...mono, blocks: [...mono.blocks, block] };
-    sessionsRef.current = sessionsRef.current.map((session) =>
-      session.id === monoId ? next : session,
+    const updated = updateSessionState(sessionsRef, setSessions, (sessions) =>
+      sessions.map((session) =>
+        session.id === monoId
+          ? { ...session, blocks: [...session.blocks, block] }
+          : session,
+      ),
     );
-    setSessions(sessionsRef.current);
+    const next = updated.find((session) => session.id === monoId);
     persistSession(next);
-    then?.(next);
+    if (next) then?.(next);
   };
   const decideMonoBlock = (
     monoId: string,
@@ -8361,8 +8368,9 @@ function Workspace({
             ),
           }
         : session;
-    sessionsRef.current = sessionsRef.current.map(decide);
-    setSessions(sessionsRef.current);
+    updateSessionState(sessionsRef, setSessions, (sessions) =>
+      sessions.map(decide),
+    );
     persistSession(
       sessionsRef.current.find((session) => session.id === monoId),
     );
@@ -8373,8 +8381,10 @@ function Workspace({
     sessions: () => sessionsRef.current,
     open: async (id) => (await ensureOpenSession(id)) ?? undefined,
     add: (session) => {
-      sessionsRef.current = [...sessionsRef.current, session];
-      setSessions(sessionsRef.current);
+      updateSessionState(sessionsRef, setSessions, (sessions) => [
+        ...sessions,
+        session,
+      ]);
     },
     run: (id, prompt) =>
       new Promise((resolve) => {
@@ -8393,10 +8403,9 @@ function Workspace({
           ),
         );
       await deleteSession(id, []);
-      sessionsRef.current = sessionsRef.current.filter(
-        (session) => session.id !== id,
+      updateSessionState(sessionsRef, setSessions, (sessions) =>
+        sessions.filter((session) => session.id !== id),
       );
-      setSessions(sessionsRef.current);
     },
     post: (monoId, habit, text, name, artifacts, launches) =>
       appendToMono(
@@ -8457,8 +8466,11 @@ function Workspace({
         load: ensureOpenSession,
         create: newDefaultSession,
         add: (created) => {
-          sessionsRef.current = [...sessionsRef.current, created];
-          setSessions(sessionsRef.current);
+          updateSessionState(sessionsRef, setSessions, (sessions) =>
+            sessions.some((session) => session.id === created.id)
+              ? sessions
+              : [...sessions, created],
+          );
         },
       });
       if (!targetSession)
@@ -8476,10 +8488,13 @@ function Workspace({
             `${input.fromMonoId}->${input.toMonoId}:${gen}`,
           );
         }
-        sessionsRef.current = sessionsRef.current.map((s) =>
-          s.id === currentTarget.id ? enqueued.session : s,
+        updateSessionState(sessionsRef, setSessions, (sessions) =>
+          sessions.map((session) =>
+            session.id === currentTarget.id
+              ? enqueueMonoPeerMessage(session, enqueued.message).session
+              : session,
+          ),
         );
-        setSessions(sessionsRef.current);
         persistSession(enqueued.session);
       }
       return { alreadyQueued: enqueued.alreadyQueued };
@@ -8497,14 +8512,18 @@ function Workspace({
         load: ensureOpenSession,
         create: newDefaultSession,
         add: (created) => {
-          sessionsRef.current = [...sessionsRef.current, created];
-          setSessions(sessionsRef.current);
+          updateSessionState(sessionsRef, setSessions, (sessions) => [
+            ...sessions,
+            created,
+          ]);
         },
       }),
     openSession: async (id) => (await ensureOpenSession(id)) ?? undefined,
     addSession: (session) => {
-      sessionsRef.current = [...sessionsRef.current, session];
-      setSessions(sessionsRef.current);
+      updateSessionState(sessionsRef, setSessions, (sessions) => [
+        ...sessions,
+        session,
+      ]);
     },
     runTurn: (id, prompt) =>
       new Promise((resolve) => {
@@ -8690,7 +8709,7 @@ function Workspace({
         removingSessionIds.current.has(monoId)
       )
         return;
-      setSessions((previous) => {
+      updateSessionState(sessionsRef, setSessions, (previous) => {
         const latest = current();
         return latest
           ? previous.map((session) =>
@@ -10293,7 +10312,7 @@ function Workspace({
           })
         : Promise.resolve();
       void cancelling.catch(console.error);
-      setSessions((prev) =>
+      updateSessionState(sessionsRef, setSessions, (prev) =>
         prev.map((s) => {
           if (s.id !== sessionId) return s;
           const stopped = stopStreaming(s);
