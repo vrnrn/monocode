@@ -1,6 +1,8 @@
 # Ticket context
 
-Jira, GitHub and GitLab issues offer **Send to chat**, a searchable destination picker with **Projects** and **Monos**, and **Copy context**. Opening a destination attaches a ticket card and leaves the message unsent. A Mono keeps its conversation and typed draft; another pending ticket must be sent or removed first.
+Jira, GitHub and GitLab issues, and GitLab merge requests, offer **Send to chat**, a searchable destination picker with **Projects** and **Monos**, and **Copy context**. Opening a destination attaches a ticket card and leaves the message unsent. A Mono keeps its conversation and typed draft; another pending ticket must be sent or removed first.
+
+For new project chats from Jira or GitLab, choose a **Default agent** in Settings → Integrations. The selected provider uses its model defaults for the destination project. If that provider is unavailable or hidden, or **Project default** is selected, the chat uses the normal project and provider defaults.
 
 Copy context writes a reference such as:
 
@@ -12,8 +14,8 @@ Paste it into a project or Mono message, including a remote project chat. When s
 
 Opening a native link brings MonoCode forward and opens a new unsent project chat with the ticket attached. Markdown links in MonoCode open the same flow. Native protocol registration ships in the desktop bundle; macOS needs a rebuilt installed bundle to handle links from other applications. No message is automatically submitted by opening a link.
 
-Jira links must match the connected site's origin and base path. GitLab links must match the connected host. GitHub uses the authenticated GitHub CLI for the explicit repository. Lookups fail if the account cannot access the ticket. At most eight unique tickets resolve per message; large descriptions and comment histories are bounded and marked as truncated.
+Jira links must match the connected site's origin and base path. GitLab links must match the connected host. A merge request link ends in `/-/merge_requests/<number>`. The fetched context for a merge request also lists its source and target branches. GitHub uses the authenticated GitHub CLI for the explicit repository. Lookups fail if the account cannot access the ticket. At most eight unique tickets resolve per message; large descriptions and comment histories are bounded and marked as truncated.
 
-The implementation is shared: `ticketContext.ts` owns portable references and provider adapters, `ticketChat.ts` owns Mono attachment, and `TicketContextActions.tsx` owns destination selection and clipboard feedback. Add another provider's reference parser and fetch adapter to extend the same flow. Pull requests, merge requests and other inbox sources keep their existing actions.
+The implementation is shared: `ticketContext.ts` owns portable references and provider adapters, `ticketChat.ts` owns Mono attachment, and `TicketContextActions.tsx` owns destination selection and clipboard feedback. Add another provider's reference parser and fetch adapter to extend the same flow. GitHub pull requests and other inbox sources keep their existing actions.
 
 Dummy Jira, GitHub and GitLab data cover this flow in tests; no live tracker account is needed. Open `/tests/browser/jira-context.html` on the development server for the interactive fixture.

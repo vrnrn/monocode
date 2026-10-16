@@ -1,12 +1,21 @@
 import { expect, test } from "@playwright/test";
 
-for (const provider of ["jira", "github", "gitlab"]) {
+for (const provider of ["jira", "github", "gitlab", "gitlab-mr"]) {
   test(`${provider}: copy and attach live context to a Mono`, async ({
     page,
   }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    await page.goto(`/tests/browser/jira-context.html?provider=${provider}`);
+    const mergeRequest = provider === "gitlab-mr";
+    await page.goto(
+      `/tests/browser/jira-context.html?provider=${mergeRequest ? "gitlab&kind=pr" : provider}`,
+    );
+    if (mergeRequest) {
+      await expect(
+        page.getByRole("button", { name: "Pipeline passed", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText("!42", { exact: true })).toBeVisible();
+    }
     await page
       .getByRole("button", { name: "Copy context", exact: true })
       .click();
@@ -38,6 +47,14 @@ for (const provider of ["jira", "github", "gitlab"]) {
     await expect(page.getByLabel("Resolved ticket context")).toContainText(
       "Please investigate",
     );
+    if (mergeRequest) {
+      await expect(page.getByLabel("Resolved ticket context")).toContainText(
+        '"sourceBranch":"feature/context"',
+      );
+      await expect(page.getByLabel("Resolved ticket context")).toContainText(
+        '"targetBranch":"main"',
+      );
+    }
     expect(errors).toEqual([]);
   });
 }

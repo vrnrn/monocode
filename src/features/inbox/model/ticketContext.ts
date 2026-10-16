@@ -26,6 +26,8 @@ export function requestOpenTicketContext(link: string): void {
 }
 export type TicketReference = {
   provider: TicketProvider;
+  /** A GitLab merge request is a "pr"; every other reference is an issue. */
+  kind: "issue" | "pr";
   url: string;
   key: string;
   repo: string;
@@ -39,8 +41,9 @@ export function supportsTicketContext(
 ): boolean {
   return (
     item.provider === "jira" ||
-    ((item.provider === "github" || item.provider === "gitlab") &&
-      item.kind === "issue")
+    (item.provider === "github" && item.kind === "issue") ||
+    (item.provider === "gitlab" &&
+      (item.kind === "issue" || item.kind === "pr"))
   );
 }
 
@@ -88,6 +91,7 @@ export function parseTicketContextLink(value: string): TicketReference | null {
         return null;
       return {
         provider,
+        kind: "issue",
         url: url.href,
         key: match[2].toUpperCase(),
         repo: "",
@@ -96,11 +100,13 @@ export function parseTicketContextLink(value: string): TicketReference | null {
     }
     const match =
       provider === "github" && url.host === "github.com"
-        ? /^\/([\w.-]+\/[\w.-]+)\/issues\/([1-9]\d*)\/?$/.exec(url.pathname)
+        ? /^\/([\w.-]+\/[\w.-]+)\/(issues)\/([1-9]\d*)\/?$/.exec(url.pathname)
         : provider === "gitlab"
-          ? /^\/(.+)\/-\/issues\/([1-9]\d*)\/?$/.exec(url.pathname)
+          ? /^\/(.+)\/-\/(issues|merge_requests)\/([1-9]\d*)\/?$/.exec(
+              url.pathname,
+            )
           : null;
-    if (!match || !Number.isSafeInteger(Number(match[2]))) return null;
+    if (!match || !Number.isSafeInteger(Number(match[3]))) return null;
     if (
       !match[1]
         .split("/")
@@ -111,10 +117,11 @@ export function parseTicketContextLink(value: string): TicketReference | null {
       return null;
     return {
       provider: provider as TicketProvider,
+      kind: match[2] === "merge_requests" ? "pr" : "issue",
       url: url.href,
-      key: `#${match[2]}`,
+      key: `${match[2] === "merge_requests" ? "!" : "#"}${match[3]}`,
       repo: match[1],
-      number: Number(match[2]),
+      number: Number(match[3]),
     };
   } catch {
     return null;
@@ -126,7 +133,7 @@ export function ticketComposerCard(item: InboxItem, body?: string) {
   return supportsTicketContext(item)
     ? {
         ...card,
-        prompt: `Work on this ${item.provider === "jira" ? "Jira" : item.provider === "gitlab" ? "GitLab" : "GitHub"} issue:\n\n${card.identifier} ${card.title}\n${ticketContextLink(item)}`,
+        prompt: `Work on this ${item.provider === "jira" ? "Jira" : item.provider === "gitlab" ? "GitLab" : "GitHub"} ${item.provider === "gitlab" && item.kind === "pr" ? "merge request" : "issue"}:\n\n${card.identifier} ${card.title}\n${ticketContextLink(item)}`,
       }
     : card;
 }
@@ -184,8 +191,8 @@ const providers = {
         "Connect this GitLab host in Settings → Integrations before using its context link.",
       );
     const [details, thread] = await Promise.all([
-      gitlabWorkItemDetails(ref.repo, "issue", ref.number),
-      gitlabWorkItemThread(ref.repo, "issue", ref.number, { force: true }),
+      gitlabWorkItemDetails(ref.repo, ref.kind, ref.number),
+      gitlabWorkItemThread(ref.repo, ref.kind, ref.number, { force: true }),
     ]);
     return {
       ...details,
@@ -223,8 +230,15 @@ export async function applyTicketContextToTurn(
           comment,
           ...(comment.replies ?? []),
         ]);
+        const { baseRefName, headRefName } = data as {
+          baseRefName?: string;
+          headRefName?: string;
+        };
         return {
           ...ref,
+          ...(headRefName
+            ? { sourceBranch: headRefName, targetBranch: baseRefName }
+            : {}),
           description: data.body.slice(0, 60_000),
           comments: comments.slice(-40).map(({ author, body, createdAt }) => ({
             author,
@@ -247,7 +261,7 @@ export async function applyTicketContextToTurn(
 export function inboxItemFromTicketReference(ref: TicketReference): InboxItem {
   return {
     provider: ref.provider,
-    kind: ref.provider === "jira" ? "jira" : "issue",
+    kind: ref.provider === "jira" ? "jira" : ref.kind,
     id: ref.key,
     identifier: ref.key,
     number: ref.number,

@@ -10,6 +10,7 @@ import {
   defaultSessionChoice,
   firstEnabledHarness,
   preferredModelId,
+  preferredSessionChoice,
   preferredModelSettings,
   resolveModel,
 } from "./models";
@@ -572,12 +573,14 @@ export function newSession(
   };
 }
 
-/** New conversation using the Providers defaults. */
+/** New conversation using the Providers defaults, or `preferred` when it is enabled. */
 export function newDefaultSession(
   cwd = "~",
   runtimeMode: RuntimeMode = DEFAULT_RUNTIME_MODE,
+  preferred?: HarnessId,
 ): Session {
-  const choice = defaultSessionChoice(cwd);
+  const choice =
+    preferredSessionChoice(preferred, cwd) ?? defaultSessionChoice(cwd);
   return newSession(choice.harness, cwd, choice.model, runtimeMode);
 }
 

@@ -30,6 +30,8 @@ export type GitlabWorkItemDetails = {
   baseRefName?: string;
   headRefName?: string;
   reviewDecision?: string;
+  pipelineStatus?: string;
+  pipelineUrl?: string;
 };
 
 export type GitlabWorkItemComment = {
@@ -63,6 +65,30 @@ export type GitlabMrDiff = {
   patch: string;
   truncated: boolean;
 };
+
+export type GitlabPipelineSummary = "passed" | "failed" | "running";
+
+/** Collapse GitLab's pipeline statuses to the three a reader acts on. */
+export function gitlabPipelineSummary(
+  status: string | undefined,
+): GitlabPipelineSummary | null {
+  switch (status?.trim().toLowerCase()) {
+    case "success":
+      return "passed";
+    case "failed":
+      return "failed";
+    case "created":
+    case "preparing":
+    case "waiting_for_resource":
+    case "waiting_for_callback":
+    case "pending":
+    case "running":
+      return "running";
+    // Canceled, skipped, manual and scheduled runs say nothing about the code.
+    default:
+      return null;
+  }
+}
 
 export const GITLAB_CHANGE_EVENT = "monocode:gitlab-change";
 

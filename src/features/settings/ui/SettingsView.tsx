@@ -51,6 +51,11 @@ import {
   useInboxConnectors,
 } from "../../inbox/model/inboxConnectors";
 import {
+  setInboxAgent,
+  useInboxAgents,
+  type InboxAgentSource,
+} from "../../inbox/model/inboxAgents";
+import {
   INBOX_SOURCE_LABELS,
   type InboxSource,
 } from "../../inbox/model/inboxFilters";
@@ -216,6 +221,7 @@ import {
 import {
   HARNESSES,
   HARNESS_TITLE,
+  isHarnessId,
   sessionDisplayTitle,
   type HarnessId,
 } from "../../sessions/model/session";
@@ -1227,6 +1233,7 @@ function InboxPage({
         enabled={connectors.gitlab}
         description="Merge requests from GitLab.com or a self-managed instance."
       >
+        <InboxAgentRow source="gitlab" />
         <GitlabSettings />
       </InboxConnectorGroup>
 
@@ -1235,9 +1242,37 @@ function InboxPage({
         enabled={connectors.jira}
         description="Jira Cloud issues filtered by project or a JQL query."
       >
+        <InboxAgentRow source="jira" />
         <JiraSettings onFilterModeChange={setJiraFilterMode} />
       </InboxConnectorGroup>
     </>
+  );
+}
+
+/** The provider that new sessions for one inbox source start with. */
+function InboxAgentRow({ source }: { source: InboxAgentSource }) {
+  const agents = useInboxAgents();
+  const name = INBOX_SOURCE_LABELS[source];
+  return (
+    <Row
+      label="Default agent"
+      description={`New project chats for ${name} items start with this provider when available and visible in the project.`}
+    >
+      <Select
+        label={`${name} default agent`}
+        value={agents[source] ?? ""}
+        options={[
+          { value: "", label: "Project default" },
+          ...HARNESSES.map((harness) => ({
+            value: harness,
+            label: HARNESS_TITLE[harness],
+          })),
+        ]}
+        onChange={(value) =>
+          setInboxAgent(source, isHarnessId(value) ? value : null)
+        }
+      />
+    </Row>
   );
 }
 

@@ -708,6 +708,7 @@ import type { InboxSessionPortal } from "../features/inbox/ui/InboxDiscussionPan
 import { inboxAskKey, inboxAskPrompt } from "../features/inbox/model/inboxAsk";
 import {
   githubWorkItemThread,
+  inboxItemRef,
   type InboxItem,
 } from "../features/inbox/model/githubTasks";
 import {
@@ -730,6 +731,7 @@ import {
   type TicketReference,
 } from "../features/inbox/model/ticketContext";
 import { openTicketInMono } from "../features/inbox/model/ticketChat";
+import { inboxAgentFor } from "../features/inbox/model/inboxAgents";
 import { useTicketDeepLinks } from "./hooks/useTicketDeepLinks";
 import { inboxTrackerDescription } from "../features/inbox/model/inboxContext";
 import {
@@ -2805,13 +2807,14 @@ function Workspace({
         const cwd =
           item.projectPath || active?.cwd || sessionDefaults?.cwd || projectCwd;
         setSidebarTab("sessions", cwd);
-        const ref =
-          item.provider === "jira"
-            ? item.identifier?.trim() || `#${item.number}`
-            : `#${item.number}`;
+        const ref = inboxItemRef(item);
         const linkedWorkItem = linkedWorkItemFromInboxItem(item);
         const session = {
-          ...newDefaultSession(cwd, sessionDefaults?.runtimeMode),
+          ...newDefaultSession(
+            cwd,
+            sessionDefaults?.runtimeMode,
+            inboxAgentFor(item.provider),
+          ),
           title: `${ref} ${item.title}`,
           inboxCard: ticketComposerCard(item, description),
           ...(linkedWorkItem ? { linkedWorkItem } : {}),
