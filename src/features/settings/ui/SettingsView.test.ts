@@ -7,7 +7,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { SettingsView } from "./SettingsView";
 import { rememberNotificationProjects } from "../../notifications/model/notificationProjects";
 import { loadInboxConnectors } from "../../inbox/model/inboxConnectors";
-import { loadInboxAgents } from "../../inbox/model/inboxAgents";
+import { loadInboxMonos } from "../../inbox/model/inboxMonos";
 import { loadJiraInboxFilter } from "../../inbox/model/jira";
 import {
   SETTINGS_INDEX,
@@ -120,13 +120,17 @@ afterEach(async () => {
 });
 
 describe("settings pages", () => {
-  it("saves separate default agents for Jira and GitLab and can clear them", async () => {
+  it("saves separate default Monos for Jira and GitLab and can clear them", async () => {
+    const reviews = createMono();
+    const tickets = createMono();
+    updateMono(reviews.id, (mono) => ({ ...mono, name: "Review Mono" }));
+    updateMono(tickets.id, (mono) => ({ ...mono, name: "Ticket Mono" }));
     await render("inbox");
-    const chooseAgent = async (source: string, label: string) => {
+    const chooseMono = async (source: string, label: string) => {
       await act(async () =>
         container
           .querySelector<HTMLButtonElement>(
-            `button[aria-label^="${source} default agent:"]`,
+            `button[aria-label^="${source} default Mono:"]`,
           )!
           .click(),
       );
@@ -136,16 +140,30 @@ describe("settings pages", () => {
           .click(),
       );
     };
-    await chooseAgent("GitLab", "Codex");
-    await chooseAgent("Jira", "Pi");
-    expect(loadInboxAgents()).toEqual({ gitlab: "codex", jira: "pi" });
+    await chooseMono("GitLab", "Review Mono");
+    await chooseMono("Jira", "Ticket Mono");
+    expect(loadInboxMonos()).toEqual({ gitlab: reviews.id, jira: tickets.id });
     await render("general");
     await render("inbox");
     expect(
-      container.querySelector('[aria-label^="GitLab default agent:"]')?.textContent,
-    ).toBe("Codex");
-    await chooseAgent("GitLab", "Project default");
-    expect(loadInboxAgents()).toEqual({ jira: "pi" });
+      container.querySelector('[aria-label^="GitLab default Mono:"]')?.textContent,
+    ).toBe("Review Mono");
+    await act(async () =>
+      updateMono(reviews.id, (mono) => ({ ...mono, name: "Renamed Mono" })),
+    );
+    expect(
+      container.querySelector('[aria-label^="GitLab default Mono:"]')?.textContent,
+    ).toBe("Renamed Mono");
+    await chooseMono("GitLab", "No default Mono");
+    expect(loadInboxMonos()).toEqual({ jira: tickets.id });
+  });
+
+  it("explains how to choose a default when there are no Monos", async () => {
+    await render("inbox");
+    expect(
+      container.querySelector('[aria-label^="GitLab default Mono:"]')?.textContent,
+    ).toBe("No default Mono");
+    expect(container.textContent).toContain("Create a Mono in Monos settings");
   });
 
   it("hides Jira notification rows immediately when the dropdown selects JQL", async () => {

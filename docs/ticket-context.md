@@ -2,7 +2,7 @@
 
 Jira, GitHub and GitLab issues, and GitLab merge requests, offer **Send to chat**, a searchable destination picker with **Projects** and **Monos**, and **Copy context**. Opening a destination attaches a ticket card and leaves the message unsent. A Mono keeps its conversation and typed draft; another pending ticket must be sent or removed first.
 
-For new project chats from Jira or GitLab, choose a **Default agent** in Settings → Integrations. The selected provider uses its model defaults for the destination project. If that provider is unavailable or hidden, or **Project default** is selected, the chat uses the normal project and provider defaults.
+Choose a **Default Mono** for Jira and GitLab in Settings → Integrations. **Send to chat** preselects that Mono, and you can choose another Mono or project before sending. Choose **No default Mono** to keep the usual destination selection. If the saved Mono is no longer available, the picker falls back to an available project or Mono. Sending attaches the ticket to the chosen chat and leaves the message unsent.
 
 Copy context writes a reference such as:
 

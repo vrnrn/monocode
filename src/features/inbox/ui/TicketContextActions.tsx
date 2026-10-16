@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { InboxItem } from "../model/githubTasks";
+import { useInboxMonos } from "../model/inboxMonos";
 import {
   ticketContextLink,
   type TicketChatTarget,
@@ -40,8 +41,19 @@ export function TicketContextActions({
     monoId?: string,
   ) => void | Promise<void>;
 }) {
-  const [target, setTarget] = useState<TicketChatTarget>(() =>
-    projects.length
+  const defaults = useInboxMonos();
+  const defaultMonoId =
+    item.provider === "jira" || item.provider === "gitlab"
+      ? defaults[item.provider]
+      : undefined;
+  const defaultMono = monos.find((mono) => mono.id === defaultMonoId);
+  const [selection, setSelection] = useState<{
+    url: string;
+    target: TicketChatTarget;
+  }>();
+  const defaultTarget: TicketChatTarget = defaultMono
+    ? { kind: "mono", id: defaultMono.id }
+    : projects.length
       ? {
           kind: "project",
           path:
@@ -51,8 +63,8 @@ export function TicketContextActions({
         }
       : monos.length
         ? { kind: "mono", id: monos[0].id }
-        : { kind: "project", path: "" },
-  );
+        : { kind: "project", path: "" };
+  const target = selection?.url === item.url ? selection.target : defaultTarget;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const sendingRef = useRef(false);
@@ -77,7 +89,7 @@ export function TicketContextActions({
     target.kind === "mono" ? monos.find((m) => m.id === target.id) : undefined;
   const valid = target.kind === "mono" ? !!mono : !!project;
   const select = (next: TicketChatTarget) => {
-    setTarget(next);
+    setSelection({ url: item.url, target: next });
     setOpen(false);
     setQuery("");
     anchor.current?.focus();

@@ -731,7 +731,6 @@ import {
   type TicketReference,
 } from "../features/inbox/model/ticketContext";
 import { openTicketInMono } from "../features/inbox/model/ticketChat";
-import { inboxAgentFor } from "../features/inbox/model/inboxAgents";
 import { useTicketDeepLinks } from "./hooks/useTicketDeepLinks";
 import { inboxTrackerDescription } from "../features/inbox/model/inboxContext";
 import {
@@ -2810,11 +2809,7 @@ function Workspace({
         const ref = inboxItemRef(item);
         const linkedWorkItem = linkedWorkItemFromInboxItem(item);
         const session = {
-          ...newDefaultSession(
-            cwd,
-            sessionDefaults?.runtimeMode,
-            inboxAgentFor(item.provider),
-          ),
+          ...newDefaultSession(cwd, sessionDefaults?.runtimeMode),
           title: `${ref} ${item.title}`,
           inboxCard: ticketComposerCard(item, description),
           ...(linkedWorkItem ? { linkedWorkItem } : {}),

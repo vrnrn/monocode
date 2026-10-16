@@ -59,6 +59,32 @@ for (const provider of ["jira", "github", "gitlab", "gitlab-mr"]) {
   });
 }
 
+for (const provider of ["jira", "gitlab"]) {
+  test(`${provider}: Send to chat defaults to the saved Mono`, async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("monocode.inboxMonos.v1", JSON.stringify({
+        jira: "mono-demo",
+        gitlab: "mono-demo",
+      }));
+    });
+    await page.goto(
+      `/tests/browser/jira-context.html?provider=${provider}&kind=pr`,
+    );
+    await expect(
+      page.getByRole("button", { name: "Choose chat destination" }),
+    ).toContainText("Demo Mono");
+    await page
+      .getByRole("button", { name: "Send to chat", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Demo Mono" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Resolved ticket context")).toContainText(
+      "Ticket attached. Add a message",
+    );
+  });
+}
+
 test("opens a project chat with the same ticket card", async ({ page }) => {
   await page.goto("/tests/browser/jira-context.html");
   await page.getByRole("button", { name: "Send to chat", exact: true }).click();
