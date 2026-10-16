@@ -1158,22 +1158,35 @@ async function handleChannels(
         callerMonoId,
       );
       const openingMessage = optionalString(input.message, "message", 60_000);
-      const existing = findMonoChannel(name);
-      const channel =
-        existing ??
-        createMonoChannel({
-          name,
-          topic,
-          memberIds,
-        });
+      if (openingMessage && consumeOperatorCommand(openingMessage).matched)
+        throw new Error("Channel messages cannot include /operator");
+      let openingHop = 1;
+      if (openingMessage) {
+        const memberTurn = channelForMemberSession(source.id);
+        const currentHop =
+          host.channels?.currentHop?.(source.id) ?? (memberTurn ? 1 : 0);
+        openingHop = currentHop + 1;
+        if (openingHop > MAX_CHANNEL_AUTONOMOUS_HOPS) {
+          throw new Error(
+            `Channel autonomous hop limit (${MAX_CHANNEL_AUTONOMOUS_HOPS}) reached; pause and let the user weigh in.`,
+          );
+        }
+      }
+      const alreadyExisted = Boolean(findMonoChannel(name));
+      const channel = createMonoChannel({
+        name,
+        topic,
+        memberIds,
+      });
       let posted: Record<string, unknown> | undefined;
       if (openingMessage) {
         const postResult = postChannelMessage({
           channelId: channel.id,
           from: { kind: "mono", monoId: callerMonoId },
           text: openingMessage,
-          hop: 1,
+          hop: openingHop,
           requestId: `chan-init-${source.id}-${requestId}`,
+          turnSessionId: source.id,
         });
         await host.channels?.onPosted?.(
           postResult.channel,
@@ -1183,6 +1196,7 @@ async function handleChannels(
         );
         posted = {
           messageId: postResult.message.id,
+          hop: openingHop,
           wokeMonos: postResult.wakeMonoIds.map((id) => {
             const peer = findMono(id);
             return peer ? { id: peer.id, name: monoLook(peer).name } : { id, name: id };
@@ -1194,7 +1208,7 @@ async function handleChannels(
           findMonoChannel(channel.id) ?? channel,
           callerMonoId,
         ),
-        alreadyExisted: Boolean(existing),
+        alreadyExisted,
         ...(posted ? { posted } : {}),
       };
     }

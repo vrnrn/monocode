@@ -268,73 +268,82 @@ export function MonoRailSection({
         })}
       </div>
 
-      {/* Multi-Mono Channels Subsection */}
-      {monos.length >= 2 || channels.length > 0 ? (
-        <div className="mt-2" data-mono-channels-rail>
-          <div className="flex items-center gap-1 px-3 pb-1 pt-1">
-            <span className="min-w-0 flex-1 truncate px-1 text-xs leading-5 text-content/50">
-              Channels
-            </span>
-            <button
-              type="button"
-              title="New channel"
-              aria-label="New channel"
-              onClick={(event) => openCreateChannel(event.currentTarget)}
-              className="grid size-5 shrink-0 place-items-center rounded-md text-content/50 hover:bg-content/8 hover:text-content"
-            >
-              <Plus className="size-3.5" strokeWidth={1.75} />
-            </button>
-          </div>
+      {/* Multi-Mono Channels Subsection (below Monos, above Projects) */}
+      <div className="mt-2.5" data-mono-channels-rail>
+        <div className="flex items-center gap-1 px-3 pb-1.5 pt-1">
+          <span className="min-w-0 flex-1 truncate px-1 text-xs leading-5 text-content/50">
+            Channels
+          </span>
+          <button
+            type="button"
+            title="New channel"
+            aria-label="New channel"
+            onClick={(event) => openCreateChannel(event.currentTarget)}
+            className="grid size-5 shrink-0 place-items-center rounded-md text-content/50 hover:bg-content/8 hover:text-content"
+          >
+            <Plus className="size-3.5" strokeWidth={1.75} />
+          </button>
+        </div>
+        <div className="flex flex-col gap-px px-2">
           {channels.length > 0 ? (
-            <div className="flex flex-col gap-px px-2">
-              {channels.map((channel) => {
-                const selected = channel.id === activeChannelId;
-                const busy = busyChannelIds?.has(channel.id) ?? false;
-                const memberLooks = channel.memberIds
-                  .map((id) => findMono(id))
-                  .filter((m): m is NonNullable<typeof m> => Boolean(m))
-                  .map(monoLook);
-                return (
-                  <div
-                    key={channel.id}
-                    data-selected={selected || undefined}
-                    data-channel-id={channel.id}
-                    onClick={() => onOpenChannel?.(channel.id)}
-                    className={`group relative flex h-7 cursor-default items-center rounded-md px-2 ${
-                      selected
-                        ? "bg-selection-strong text-content"
-                        : "opacity-65 hover:opacity-100"
-                    }`}
+            channels.map((channel) => {
+              const selected = channel.id === activeChannelId;
+              const busy = busyChannelIds?.has(channel.id) ?? false;
+              const memberLooks = channel.memberIds
+                .map((id) => findMono(id))
+                .filter((m): m is NonNullable<typeof m> => Boolean(m))
+                .map(monoLook);
+              const msgCount = channel.messages.length;
+              return (
+                <div
+                  key={channel.id}
+                  data-selected={selected || undefined}
+                  data-channel-id={channel.id}
+                  onClick={() => onOpenChannel?.(channel.id)}
+                  className={`group relative flex h-8 cursor-default items-stretch rounded-md px-2 ${
+                    selected
+                      ? "bg-selection-strong text-content"
+                      : "opacity-65 hover:bg-content/[0.04] hover:opacity-100"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    title={[
+                      `#${channel.name}`,
+                      channel.topic,
+                      memberLooks.length
+                        ? `Members: ${memberLooks.map((m) => m.name).join(", ")}`
+                        : undefined,
+                    ]
+                      .filter(Boolean)
+                      .join("\n")}
+                    aria-current={selected ? "true" : undefined}
+                    className="flex min-w-0 flex-1 cursor-default items-center gap-2 text-left transition-[padding] duration-150 motion-reduce:transition-none group-hover:pr-6"
                   >
-                    <button
-                      type="button"
-                      title={[
-                        `#${channel.name}`,
-                        channel.topic,
-                        memberLooks.map((m) => m.name).join(", "),
-                      ]
-                        .filter(Boolean)
-                        .join("\n")}
-                      aria-current={selected ? "true" : undefined}
-                      className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 text-left group-hover:pr-5"
+                    <span
+                      className={`grid size-4 shrink-0 place-items-center rounded text-[12px] font-bold leading-none ${
+                        busy || selected
+                          ? "bg-accent/15 text-accent"
+                          : "text-content/45"
+                      }`}
                     >
-                      <span className="shrink-0 text-xs font-semibold text-content/45">
-                        #
+                      #
+                    </span>
+                    {busy ? (
+                      <Shimmer
+                        as="span"
+                        duration={1.4}
+                        className="min-w-0 flex-1 truncate text-sm font-medium leading-tight"
+                      >
+                        {channel.name}
+                      </Shimmer>
+                    ) : (
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium leading-tight">
+                        {channel.name}
                       </span>
-                      {busy ? (
-                        <Shimmer
-                          as="span"
-                          duration={1.4}
-                          className="min-w-0 flex-1 truncate text-[13px] font-medium leading-tight"
-                        >
-                          {channel.name}
-                        </Shimmer>
-                      ) : (
-                        <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-tight">
-                          {channel.name}
-                        </span>
-                      )}
-                      <span className="flex shrink-0 items-center -space-x-1 group-hover:hidden">
+                    )}
+                    <span className="flex shrink-0 items-center gap-1.5 group-hover:hidden">
+                      <span className="flex items-center -space-x-1">
                         {memberLooks.slice(0, 3).map((look, idx) => (
                           <span
                             key={idx}
@@ -343,27 +352,43 @@ export function MonoRailSection({
                           />
                         ))}
                       </span>
-                    </button>
-                    <button
-                      type="button"
-                      title={`Delete #${channel.name}`}
-                      aria-label={`Delete #${channel.name}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        if (onDeleteChannel) onDeleteChannel(channel.id);
-                        else removeMonoChannel(channel.id);
-                      }}
-                      className="absolute right-1 top-1/2 hidden size-5 -translate-y-1/2 place-items-center rounded-md text-content/45 hover:bg-content/8 hover:text-red-400 group-hover:grid"
-                    >
-                      <Trash2 className="size-3" strokeWidth={1.75} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
+                      {msgCount > 0 ? (
+                        <span className="rounded-full bg-content/[0.07] px-1.5 py-0.5 text-[10px] font-medium tabular-nums leading-none text-content/55">
+                          {msgCount > 99 ? "99+" : msgCount}
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    title={`Delete #${channel.name}`}
+                    aria-label={`Delete #${channel.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (onDeleteChannel) onDeleteChannel(channel.id);
+                      else removeMonoChannel(channel.id);
+                    }}
+                    className="absolute right-1 top-1/2 hidden size-6 -translate-y-1/2 place-items-center rounded-md text-content/45 hover:bg-content/8 hover:text-red-400 group-hover:grid"
+                  >
+                    <Trash2 className="size-3.5" strokeWidth={1.75} />
+                  </button>
+                </div>
+              );
+            })
+          ) : (
+            <button
+              type="button"
+              onClick={(event) => openCreateChannel(event.currentTarget)}
+              className="flex h-7 items-center gap-2 rounded-md px-2 text-left text-xs text-content/45 transition-colors hover:bg-content/[0.04] hover:text-content/75"
+            >
+              <span className="grid size-4 shrink-0 place-items-center text-[12px] font-semibold text-content/35">
+                #
+              </span>
+              <span className="truncate">Add a channel...</span>
+            </button>
+          )}
         </div>
-      ) : null}
+      </div>
 
       {newChannelAnchor ? (
         <Popover

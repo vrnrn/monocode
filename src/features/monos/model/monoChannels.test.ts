@@ -457,5 +457,134 @@ describe("monoChannels & peer Mono collaboration", () => {
       host,
     )) as { messages: { text: string }[] };
     expect(readChan.messages).toHaveLength(2);
+
+    // Calling channels.create on an existing channel merges new members & updates topic
+    const bramble = createMono(["/code/infra"]);
+    saveMonoName(bramble.id, "Bramble");
+    const brambleSession = {
+      ...newSession("claude", "/code/infra"),
+      id: bramble.id,
+    };
+    const mergedHost: AgentAppHost = {
+      ...host,
+      isMono: (id) =>
+        id === skull.id || id === cypress.id || id === bramble.id,
+      monoOf: (id) =>
+        id === bramble.id
+          ? { id: bramble.id, projects: ["/code/infra"] }
+          : host.monoOf?.(id),
+    };
+    const mergedChan = (await handleAgentApp(
+      brambleSession,
+      "req-chan-merge",
+      "channels.create",
+      {
+        name: "release-coordination",
+        topic: "Release v2 + Infra",
+      },
+      mergedHost,
+    )) as {
+      alreadyExisted: boolean;
+      channel: { topic: string; members: { id: string }[] };
+    };
+    expect(mergedChan.alreadyExisted).toBe(true);
+    expect(mergedChan.channel.topic).toBe("Release v2 + Infra");
+    expect(mergedChan.channel.members.map((m) => m.id)).toEqual([
+      skull.id,
+      cypress.id,
+      bramble.id,
+    ]);
+
+    // Enforces hop limit on channels.create opening message
+    const exhaustedChannelHost: AgentAppHost = {
+      ...mergedHost,
+      channels: {
+        currentHop: () => MAX_CHANNEL_AUTONOMOUS_HOPS,
+        onPosted: () => {},
+      },
+    };
+    await expect(
+      handleAgentApp(
+        skullSession,
+        "req-chan-create-over-hop",
+        "channels.create",
+        {
+          name: "release-coordination",
+          message: "@Cypress try to bypass hop cap",
+        },
+        exhaustedChannelHost,
+      ),
+    ).rejects.toThrow(/hop limit/);
+  });
+
+  it("parses multi-word display names emitted by mention chips without matching shorter prefixes", () => {
+    const build = createMono(["/code/core"]);
+    saveMonoName(build.id, "Build");
+    const buildBot = createMono(["/code/ci"]);
+    saveMonoName(buildBot.id, "Build Bot");
+
+    const parsed = parseChannelMentions(
+      "@Build Bot please verify the artifacts.",
+      [build, buildBot],
+    );
+    expect(parsed.monoIds).toEqual([buildBot.id]);
+
+    const parsedBoth = parseChannelMentions(
+      "@Build and @Build Bot please sync.",
+      [build, buildBot],
+    );
+    expect(parsedBoth.monoIds).toEqual([build.id, buildBot.id]);
+  });
+
+  it("preserves unread messages that arrive while a Mono turn is in flight", () => {
+    const alpha = createMono(["/code/api"]);
+    saveMonoName(alpha.id, "Alpha");
+    const channel = createMonoChannel({
+      name: "alpha-room",
+      memberIds: [alpha.id],
+    });
+
+    // 1. User posts m1
+    const m1 = postChannelMessage({
+      channelId: channel.id,
+      from: { kind: "user" },
+      text: "First question",
+    });
+
+    // 2. Alpha starts turn 1 and reads up to m1
+    const turn1 = buildChannelTurnPrompt(
+      findMonoChannel(channel.id)!,
+      alpha.id,
+      1,
+    );
+    expect(turn1.lastMessageId).toBe(m1.message.id);
+    expect(turn1.prompt).toContain("First question");
+
+    // 3. While Alpha is running turn 1, User posts m2
+    const m2 = postChannelMessage({
+      channelId: channel.id,
+      from: { kind: "user" },
+      text: "@Alpha Second follow-up question",
+    });
+
+    // 4. Turn 1 finishes: markChannelCursor records what Turn 1 actually read (m1),
+    // and then Alpha posts its Turn 1 reply (m3).
+    markChannelCursor(channel.id, alpha.id, turn1.lastMessageId!);
+    postChannelMessage({
+      channelId: channel.id,
+      from: { kind: "mono", monoId: alpha.id },
+      text: "Answer to first question.",
+      hop: 1,
+    });
+
+    // Cursor must remain at m1 (not jump to m3), so Turn 2 sees m2!
+    const afterTurn1 = findMonoChannel(channel.id)!;
+    expect(afterTurn1.memberCursors[alpha.id]).toBe(m1.message.id);
+
+    // 5. Turn 2 builds its prompt: sees m2 (and excludes Alpha's own m3 reply)
+    const turn2 = buildChannelTurnPrompt(afterTurn1, alpha.id, 1);
+    expect(turn2.lastMessageId).toBe(m2.message.id);
+    expect(turn2.prompt).toContain("Second follow-up question");
+    expect(turn2.prompt).not.toContain("Answer to first question.");
   });
 });

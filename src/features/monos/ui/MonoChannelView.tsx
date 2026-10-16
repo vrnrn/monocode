@@ -9,6 +9,7 @@ import {
 import {
   ArrowUp,
   Check,
+  ChevronRight as ArrowRight,
   MoreHorizontal,
   Plus,
   Square,
@@ -29,6 +30,7 @@ import {
   type MonoState,
 } from "../model/mono";
 import {
+  MAX_CHANNEL_AUTONOMOUS_HOPS,
   updateMonoChannel,
   type MonoChannel,
   type MonoChannelMessage,
@@ -49,6 +51,24 @@ export type MonoChannelViewProps = {
   onOpenFile?: OpenFileFn;
 };
 
+type MessageFlowNode =
+  | {
+      key: string;
+      kind: "user";
+      label: string;
+      state: "sent";
+    }
+  | {
+      key: string;
+      kind: "mono";
+      monoId: string;
+      name: string;
+      mascot: string;
+      color: string;
+      hop?: number;
+      state: "sent" | "speaking" | "queued";
+    };
+
 function formatChannelTimestamp(ts: number): string {
   const date = new Date(ts);
   const now = new Date();
@@ -64,6 +84,74 @@ function formatChannelTimestamp(ts: number): string {
         hour: "numeric",
         minute: "2-digit",
       });
+}
+
+/**
+ * Build the message-passing flow chain for the latest exchange in the channel
+ * so the user can visually see how messages are being routed from User -> Mono
+ * -> Peer Mono -> Queued Monos.
+ */
+function buildChannelMessageFlow(
+  messages: readonly MonoChannelMessage[],
+  activeChannelMonoIds: readonly string[],
+): MessageFlowNode[] {
+  const nodes: MessageFlowNode[] = [];
+  if (messages.length === 0 && activeChannelMonoIds.length === 0) return nodes;
+
+  let startIndex = Math.max(0, messages.length - 6);
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].from.kind === "user") {
+      startIndex = i;
+      break;
+    }
+  }
+
+  for (const msg of messages.slice(startIndex)) {
+    if (msg.from.kind === "user") {
+      nodes.push({
+        key: `msg-${msg.id}`,
+        kind: "user",
+        label: "You",
+        state: "sent",
+      });
+    } else {
+      const liveMono = findMono(msg.from.monoId);
+      const look = liveMono
+        ? monoLook(liveMono)
+        : {
+            name: msg.from.name,
+            mascot: msg.from.mascot,
+            color: msg.from.color,
+          };
+      nodes.push({
+        key: `msg-${msg.id}`,
+        kind: "mono",
+        monoId: msg.from.monoId,
+        name: look.name,
+        mascot: look.mascot,
+        color: look.color,
+        hop: msg.hop,
+        state: "sent",
+      });
+    }
+  }
+
+  activeChannelMonoIds.forEach((monoId, index) => {
+    const mono = findMono(monoId);
+    if (!mono) return;
+    const look = monoLook(mono);
+    nodes.push({
+      key: `active-${monoId}-${index}`,
+      kind: "mono",
+      monoId,
+      name: look.name,
+      mascot: look.mascot,
+      color: look.color,
+      state: index === 0 ? "speaking" : "queued",
+    });
+  });
+
+  return nodes;
 }
 
 export function MonoChannelView({
@@ -157,6 +245,11 @@ export function MonoChannelView({
     [activeChannelMonoIds, allMonos],
   );
 
+  const flowNodes = useMemo(
+    () => buildChannelMessageFlow(channel.messages, activeChannelMonoIds),
+    [channel.messages, activeChannelMonoIds],
+  );
+
   const empty = channel.messages.length === 0;
 
   return (
@@ -164,19 +257,27 @@ export function MonoChannelView({
       data-mono-channel-view={channel.id}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col font-sans"
     >
-      {/* Top bar with channel name, topic, member pills, and manage popover */}
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/45 px-5 py-2.5">
+      {/* Slack-like Top Channel Header */}
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/50 bg-surface-raised/30 px-5 py-2.5">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="inline-flex h-6 items-center gap-1 rounded-md bg-content/[0.06] px-2 text-[13px] font-semibold text-content">
-            <span className="text-content/45">#</span>
+          <div className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 bg-content/[0.05] px-2.5 text-[13.5px] font-semibold text-content">
+            <span className="font-bold text-accent">#</span>
             <span>{channel.name}</span>
-          </span>
+          </div>
           {channel.topic ? (
-            <span className="min-w-0 truncate text-[12px] text-content/50">
-              {channel.topic}
-            </span>
+            <>
+              <span className="h-3.5 w-px shrink-0 bg-border/60" />
+              <span className="min-w-0 truncate text-[12px] text-content/55">
+                {channel.topic}
+              </span>
+            </>
           ) : null}
+          <span className="shrink-0 rounded-full bg-content/[0.05] px-2 py-0.5 text-[11px] tabular-nums text-content/45">
+            {channel.messages.length}{" "}
+            {channel.messages.length === 1 ? "message" : "messages"}
+          </span>
         </div>
+
         <div className="flex shrink-0 items-center gap-1.5">
           <div className="flex items-center gap-1">
             {memberMonos.map((mono) => {
@@ -192,7 +293,11 @@ export function MonoChannelView({
                   type="button"
                   onClick={() => onOpenMono(mono.id)}
                   title={`Open ${look.name} (${effectiveStatus})`}
-                  className="inline-flex h-6 items-center gap-1.5 rounded-full border border-border/60 bg-surface-raised/60 pr-2.5 pl-1.5 text-[11px] font-medium text-content/80 transition-colors hover:border-content/25 hover:bg-content/[0.06] hover:text-content"
+                  className={`inline-flex h-6 items-center gap-1.5 rounded-full border pr-2.5 pl-1.5 text-[11px] font-medium transition-colors ${
+                    speakingInChannel
+                      ? "border-accent/45 bg-accent/10 text-content"
+                      : "border-border/60 bg-surface-raised/60 text-content/80 hover:border-content/25 hover:bg-content/[0.06] hover:text-content"
+                  }`}
                 >
                   <PixelMascot
                     name={look.mascot}
@@ -218,58 +323,136 @@ export function MonoChannelView({
             onClick={(event) =>
               setManageAnchor((prev) => (prev ? null : event.currentTarget))
             }
-            className="grid size-6 place-items-center rounded-md text-content/55 transition-colors hover:bg-content/[0.08] hover:text-content"
+            className="grid size-7 place-items-center rounded-md text-content/55 transition-colors hover:bg-content/[0.08] hover:text-content"
           >
             <MoreHorizontal className="size-4" strokeWidth={1.75} />
           </button>
         </div>
       </div>
 
-      {/* Scrollable transcript */}
+      {/* Message-Passing Flow Strip: visualizes messages being passed around */}
+      {flowNodes.length > 0 ? (
+        <div
+          data-channel-message-flow
+          className="flex shrink-0 items-center justify-between gap-3 border-b border-border/35 bg-content/[0.02] px-5 py-2"
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+            <span className="mr-1 shrink-0 text-[10.5px] font-semibold uppercase tracking-wider text-content/40">
+              Message Flow
+            </span>
+            {flowNodes.map((node, idx) => (
+              <div key={node.key} className="flex shrink-0 items-center gap-1.5">
+                {idx > 0 ? (
+                  <ArrowRight
+                    className="size-3 shrink-0 text-content/35"
+                    strokeWidth={2}
+                  />
+                ) : null}
+                {node.kind === "user" ? (
+                  <span className="inline-flex h-5 items-center gap-1 rounded-md border border-border/55 bg-surface-raised px-2 text-[11px] font-medium text-content/75">
+                    <span>{node.label}</span>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onOpenMono(node.monoId)}
+                    className={`inline-flex h-5 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition-colors ${
+                      node.state === "speaking"
+                        ? "border-accent/50 bg-accent/12 text-content"
+                        : node.state === "queued"
+                          ? "border-dashed border-border/70 bg-content/[0.03] text-content/55"
+                          : "border-border/55 bg-surface-raised text-content/85 hover:border-content/30"
+                    }`}
+                  >
+                    <PixelMascot
+                      name={node.mascot}
+                      color={node.color}
+                      status={node.state === "speaking" ? "working" : "idle"}
+                      className="size-3 shrink-0"
+                    />
+                    {node.state === "speaking" ? (
+                      <Shimmer as="span" duration={1.4}>
+                        {node.name}
+                      </Shimmer>
+                    ) : (
+                      <span>{node.name}</span>
+                    )}
+                    {node.hop != null && node.hop > 0 ? (
+                      <span className="text-[9.5px] tabular-nums text-content/45">
+                        h{node.hop}
+                      </span>
+                    ) : null}
+                    {node.state === "queued" ? (
+                      <span className="text-[9.5px] text-content/40">
+                        next
+                      </span>
+                    ) : null}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {activeSpeakerMonos.length > 0 && onStopChannel ? (
+            <button
+              type="button"
+              onClick={() => onStopChannel(channel.id)}
+              className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border/60 bg-surface-raised px-2 text-[11px] font-medium text-content/70 transition-colors hover:border-content/30 hover:bg-content/[0.06] hover:text-content"
+            >
+              <Square className="size-2.5 fill-current" />
+              <span>Stop</span>
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Scrollable Slack-style transcript */}
       <div
         ref={scrollRef}
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none px-6 py-6"
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none px-6 py-5"
       >
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col">
           {/* Channel Hero Header */}
           <header
-            className={`flex flex-col items-center px-6 text-center ${
-              empty ? "my-auto py-10" : "pb-6 pt-2"
+            className={`flex flex-col items-start border-b border-border/35 pb-5 ${
+              empty ? "my-auto items-center border-none py-10 text-center" : "mb-4 pt-1"
             }`}
           >
-            <div className="flex items-center justify-center -space-x-2">
-              {memberMonos.map((mono, index) => {
-                const look = monoLook(mono);
-                const speaking = activeChannelMonoIds.includes(mono.id);
-                return (
-                  <div
-                    key={mono.id}
-                    style={{ zIndex: memberMonos.length - index }}
-                    className="rounded-full bg-background-base/80 p-1 backdrop-blur-sm"
-                  >
-                    <PixelMascot
-                      name={look.mascot}
-                      color={look.color}
-                      status={speaking ? "working" : "idle"}
-                      className={empty ? "size-11" : "size-7"}
-                    />
-                  </div>
-                );
-              })}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center -space-x-2">
+                {memberMonos.map((mono, index) => {
+                  const look = monoLook(mono);
+                  const speaking = activeChannelMonoIds.includes(mono.id);
+                  return (
+                    <div
+                      key={mono.id}
+                      style={{ zIndex: memberMonos.length - index }}
+                      className="rounded-full bg-background-base/90 p-1 ring-1 ring-border/40 backdrop-blur-sm"
+                    >
+                      <PixelMascot
+                        name={look.mascot}
+                        color={look.color}
+                        status={speaking ? "working" : "idle"}
+                        className={empty ? "size-9" : "size-6"}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-lg font-bold text-accent">#</span>
+                <h2 className="text-base font-semibold text-content">
+                  {channel.name}
+                </h2>
+              </div>
             </div>
-            <div className="mono-pill -mt-1.5 flex h-8 items-center gap-1 rounded-full border px-3.5 backdrop-blur-md">
-              <span className="text-[13px] font-medium text-content/45">#</span>
-              <h2 className="text-[13px] font-semibold leading-none text-content">
-                {channel.name}
-              </h2>
-            </div>
-            <p className="mt-2.5 max-w-md text-[12.5px] leading-relaxed text-content/50">
+            <p className="mt-2 max-w-xl text-[12.5px] leading-relaxed text-content/55">
               {channel.topic ||
                 (memberMonos.length
-                  ? `Shared channel with ${memberMonos
+                  ? `This is the start of #${channel.name} with ${memberMonos
                       .map((mono) => monoLook(mono).name)
-                      .join(", ")}. Mention @Name to direct a turn, or message the room and each Mono will weigh in.`
-                  : "Add Monos to this channel so they can collaborate here.")}
+                      .join(", ")}. Mention @Name to pass a message to a specific Mono, or write to the room so each Mono weighs in.`
+                  : "Add Monos to this channel so they can pass messages and collaborate here.")}
             </p>
             {empty && memberMonos.length > 0 ? (
               <div className="mt-5 flex flex-wrap justify-center gap-2">
@@ -306,11 +489,13 @@ export function MonoChannelView({
             ) : null}
           </header>
 
-          {/* Messages */}
-          <div className="flex flex-col gap-5">
+          {/* Slack-style Message Stream */}
+          <div className="flex flex-col divide-y divide-border/25">
             {channel.messages.map((message) => (
               <ChannelMessageRow
                 key={message.id}
+                channelName={channel.name}
+                memberMonos={memberMonos}
                 message={message}
                 onOpenMono={onOpenMono}
                 onOpenArtifact={onOpenArtifact}
@@ -318,53 +503,56 @@ export function MonoChannelView({
                 onOpenFile={onOpenFile}
               />
             ))}
-
-            {/* Live speaker indicator */}
-            {activeSpeakerMonos.length > 0 ? (
-              <div
-                data-channel-active-speakers
-                className="flex items-center justify-between gap-3 rounded-xl border border-border/45 bg-surface-raised/45 px-3.5 py-2.5"
-              >
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <PixelMascot
-                    name={monoLook(activeSpeakerMonos[0]).mascot}
-                    color={monoLook(activeSpeakerMonos[0]).color}
-                    status="working"
-                    className="size-5 shrink-0"
-                  />
-                  <Shimmer
-                    as="span"
-                    duration={1.4}
-                    className="truncate text-[12.5px] font-medium text-content/80"
-                  >
-                    {activeSpeakerMonos.length === 1
-                      ? `${monoLook(activeSpeakerMonos[0]).name} is replying in #${channel.name}...`
-                      : `${monoLook(activeSpeakerMonos[0]).name} is replying (${activeSpeakerMonos.length - 1} more queued)...`}
-                  </Shimmer>
-                </div>
-                {onStopChannel ? (
-                  <button
-                    type="button"
-                    onClick={() => onStopChannel(channel.id)}
-                    className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border/60 px-2 text-[11px] font-medium text-content/65 transition-colors hover:border-content/25 hover:bg-content/[0.06] hover:text-content"
-                  >
-                    <Square className="size-2.5 fill-current" />
-                    <span>Stop</span>
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
           </div>
+
+          {/* Live speaker indicator in the feed */}
+          {activeSpeakerMonos.length > 0 ? (
+            <div
+              data-channel-active-speakers
+              className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-accent/30 bg-accent/[0.05] px-3.5 py-2.5"
+            >
+              <div className="flex min-w-0 items-center gap-2.5">
+                <PixelMascot
+                  name={monoLook(activeSpeakerMonos[0]).mascot}
+                  color={monoLook(activeSpeakerMonos[0]).color}
+                  status="working"
+                  className="size-5 shrink-0"
+                />
+                <Shimmer
+                  as="span"
+                  duration={1.4}
+                  className="truncate text-[12.5px] font-medium text-content/85"
+                >
+                  {activeSpeakerMonos.length === 1
+                    ? `${monoLook(activeSpeakerMonos[0]).name} is replying in #${channel.name}...`
+                    : `${monoLook(activeSpeakerMonos[0]).name} is replying (passing next to ${activeSpeakerMonos
+                        .slice(1)
+                        .map((m) => monoLook(m).name)
+                        .join(", ")})...`}
+                </Shimmer>
+              </div>
+              {onStopChannel ? (
+                <button
+                  type="button"
+                  onClick={() => onStopChannel(channel.id)}
+                  className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border/60 bg-surface-raised px-2 text-[11px] font-medium text-content/70 transition-colors hover:border-content/25 hover:bg-content/[0.06] hover:text-content"
+                >
+                  <Square className="size-2.5 fill-current" />
+                  <span>Stop</span>
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
 
-      {/* Channel Composer */}
+      {/* Slack-like Channel Composer */}
       <div className="shrink-0 px-6 pb-5 pt-2">
         <div className="mx-auto w-full max-w-3xl rounded-2xl border border-border/65 bg-surface-raised/85 p-3 shadow-sm backdrop-blur-md">
           {/* Quick @Mention chips */}
           {memberMonos.length > 0 ? (
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] text-content/40">Mention:</span>
+              <span className="text-[11px] text-content/45">Pass to:</span>
               <button
                 type="button"
                 onClick={() => insertMention("all")}
@@ -398,7 +586,7 @@ export function MonoChannelView({
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={`Message #${channel.name} — use @Name to direct a turn, or write to the whole room...`}
+              placeholder={`Message #${channel.name} — use @Name to pass a message to a Mono, or message the whole room...`}
               className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent text-[13.5px] leading-relaxed text-content placeholder:text-content/40 focus:outline-none"
             />
             <button
@@ -515,115 +703,150 @@ export function MonoChannelView({
 }
 
 function ChannelMessageRow({
+  channelName,
+  memberMonos,
   message,
   onOpenMono,
   onOpenArtifact,
   onOpenSession,
   onOpenFile,
 }: {
+  channelName: string;
+  memberMonos: readonly Mono[];
   message: MonoChannelMessage;
   onOpenMono: (monoId: string) => void;
   onOpenArtifact?: (artifactId: string) => void;
   onOpenSession?: (sessionId: string, cwd: string) => void;
   onOpenFile?: OpenFileFn;
 }) {
-  if (message.from.kind === "user") {
-    return (
-      <div
-        data-channel-message={message.id}
-        data-channel-sender="user"
-        className="flex flex-col items-end"
-      >
-        <div className="max-w-[min(34rem,85%)] rounded-2xl bg-content/[0.08] px-4 py-2.5 text-[13.5px] leading-relaxed text-content">
-          <div className="whitespace-pre-wrap break-words">{message.text}</div>
-        </div>
-        <div className="mt-1 flex items-center gap-2 px-1">
-          {message.reactions?.length ? (
-            <div className="flex items-center gap-1">
-              {message.reactions.map((reaction, idx) => (
-                <span
-                  key={`${reaction.monoId}-${idx}`}
-                  title={reaction.name}
-                  className="inline-flex h-5 items-center gap-1 rounded-full border border-border/55 bg-surface-raised px-1.5 text-[11px]"
-                >
-                  <span>{reaction.emoji}</span>
-                  <span className="text-[10px] text-content/55">
-                    {reaction.name}
-                  </span>
-                </span>
-              ))}
-            </div>
-          ) : null}
-          <span className="text-[11px] text-content/35">
-            {formatChannelTimestamp(message.createdAt)}
-          </span>
-        </div>
-      </div>
-    );
-  }
+  const fromMono = message.from.kind === "mono" ? message.from : undefined;
+  const isUser = !fromMono;
+  const senderMono = fromMono ? findMono(fromMono.monoId) : undefined;
+  const senderLook = fromMono
+    ? senderMono
+      ? monoLook(senderMono)
+      : {
+          name: fromMono.name,
+          mascot: fromMono.mascot,
+          color: fromMono.color,
+          projects: [],
+        }
+    : undefined;
 
-  const sender = message.from;
-  const liveMono = findMono(sender.monoId);
-  const look = liveMono
-    ? monoLook(liveMono)
-    : {
-        name: sender.name,
-        mascot: sender.mascot,
-        color: sender.color,
-        projects: [],
-      };
-  const cwd = liveMono?.projects[0];
+  const recipientMonos = useMemo(() => {
+    const ids = message.mentions.filter(
+      (id) => !(fromMono && fromMono.monoId === id),
+    );
+    return ids
+      .map((id) => findMono(id) ?? memberMonos.find((m) => m.id === id))
+      .filter((m): m is Mono => Boolean(m));
+  }, [fromMono, memberMonos, message.mentions]);
+
+  const cwd = senderMono?.projects[0];
 
   return (
     <div
       data-channel-message={message.id}
-      data-channel-sender={sender.monoId}
-      className="flex items-start gap-3"
+      data-channel-sender={fromMono ? fromMono.monoId : "user"}
+      className="-mx-3 flex items-start gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-content/[0.025]"
     >
-      <button
-        type="button"
-        onClick={() => onOpenMono(sender.monoId)}
-        title={`Open ${look.name}`}
-        className="mt-0.5 shrink-0 rounded-full p-0.5 transition-transform hover:scale-105"
-      >
-        <PixelMascot
-          name={look.mascot}
-          color={look.color}
-          className="size-6 shrink-0"
-        />
-      </button>
-      <div className="min-w-0 flex-1">
-        <div className="mb-1 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onOpenMono(sender.monoId)}
-            className="text-[13px] font-semibold text-content hover:underline"
-          >
-            {look.name}
-          </button>
-          <span
-            className="size-1.5 rounded-full"
-            style={{ backgroundColor: look.color }}
+      {/* Left Slack-style Avatar */}
+      {isUser ? (
+        <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border/60 bg-content/[0.07] text-[11px] font-bold uppercase tracking-wider text-content/75">
+          You
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() =>
+            message.from.kind === "mono" && onOpenMono(message.from.monoId)
+          }
+          title={`Open ${senderLook?.name ?? "Mono"}`}
+          className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border/55 bg-surface-raised/80 transition-transform hover:scale-105"
+        >
+          <PixelMascot
+            name={senderLook?.mascot ?? "invader"}
+            color={senderLook?.color ?? "hsl(215 85% 60%)"}
+            className="size-5 shrink-0"
           />
-          <span className="text-[11px] text-content/40">
-            {formatChannelTimestamp(message.createdAt)}
-          </span>
-          {message.hop > 1 ? (
-            <span
-              title="Autonomous Mono-to-Mono reply hop"
-              className="rounded-full bg-content/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-content/50"
+        </button>
+      )}
+
+      {/* Right Content Column */}
+      <div className="min-w-0 flex-1">
+        {/* Header: Sender + Routing / Message-Passing Target + Hop + Timestamp */}
+        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+          {isUser ? (
+            <span className="text-[13px] font-semibold text-content">You</span>
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                message.from.kind === "mono" && onOpenMono(message.from.monoId)
+              }
+              className="text-[13px] font-semibold text-content hover:underline"
             >
-              peer hop {message.hop}
+              {senderLook?.name}
+            </button>
+          )}
+
+          {/* Explicit Message-Passing Route Pill */}
+          {recipientMonos.length > 0 ? (
+            <span
+              data-message-route="targeted"
+              className="inline-flex items-center gap-1 rounded-md border border-accent/30 bg-accent/[0.08] px-1.5 py-0.5 text-[10.5px] font-medium text-content/85"
+            >
+              <ArrowRight className="size-2.5 text-accent" strokeWidth={2.2} />
+              <span>
+                {recipientMonos.map((m) => `@${monoLook(m).name}`).join(", ")}
+              </span>
+            </span>
+          ) : isUser ? (
+            <span
+              data-message-route="broadcast"
+              className="inline-flex items-center gap-1 rounded-md bg-content/[0.05] px-1.5 py-0.5 text-[10.5px] font-medium text-content/55"
+            >
+              <ArrowRight className="size-2.5 text-content/40" strokeWidth={2} />
+              <span>#{channelName} (all Monos)</span>
+            </span>
+          ) : (
+            <span
+              data-message-route="room"
+              className="inline-flex items-center gap-1 rounded-md bg-content/[0.04] px-1.5 py-0.5 text-[10.5px] text-content/45"
+            >
+              <ArrowRight className="size-2.5 text-content/35" strokeWidth={2} />
+              <span>#{channelName}</span>
+            </span>
+          )}
+
+          {!isUser && message.hop > 0 ? (
+            <span
+              title="Autonomous Mono-to-Mono turn hop"
+              className="rounded-md bg-content/[0.05] px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-content/45"
+            >
+              hop {message.hop}/{MAX_CHANNEL_AUTONOMOUS_HOPS}
             </span>
           ) : null}
+
+          <span className="ml-auto text-[11px] tabular-nums text-content/35">
+            {formatChannelTimestamp(message.createdAt)}
+          </span>
         </div>
+
+        {/* Message Body */}
         <div className="text-[13.5px] leading-relaxed text-content/90">
-          <AgentMarkdown
-            text={message.text}
-            cwd={cwd}
-            onOpenFile={onOpenFile}
-          />
+          {isUser ? (
+            <div className="whitespace-pre-wrap break-words">{message.text}</div>
+          ) : (
+            <AgentMarkdown
+              text={message.text}
+              cwd={cwd}
+              onOpenFile={onOpenFile}
+            />
+          )}
         </div>
+
+        {/* Attached Artifacts & Spawned Sessions */}
         {message.artifacts?.length || message.spawnedSessions?.length ? (
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
             {message.artifacts?.map((card) => (
@@ -646,16 +869,18 @@ function ChannelMessageRow({
             ))}
           </div>
         ) : null}
+
+        {/* Slack-style Emoji Reactions */}
         {message.reactions?.length ? (
-          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          <div className="mt-2 flex flex-wrap items-center gap-1">
             {message.reactions.map((reaction, idx) => (
               <span
                 key={`${reaction.monoId}-${idx}`}
-                title={reaction.name}
-                className="inline-flex h-5 items-center gap-1 rounded-full border border-border/55 bg-surface-raised px-1.5 text-[11px]"
+                title={`Reacted by ${reaction.name}`}
+                className="inline-flex h-5 items-center gap-1 rounded-full border border-border/55 bg-surface-raised px-2 text-[11px]"
               >
                 <span>{reaction.emoji}</span>
-                <span className="text-[10px] text-content/55">
+                <span className="text-[10px] font-medium text-content/60">
                   {reaction.name}
                 </span>
               </span>

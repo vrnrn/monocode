@@ -6,6 +6,7 @@ import {
   addChannelReaction,
   buildChannelTurnPrompt,
   cleanMonoCollaborativeReply,
+  clearChannelCursor,
   extractMonoTurnReply,
   findMonoChannel,
   markChannelCursor,
@@ -79,6 +80,9 @@ export function useMonoChannels(host: MonoChannelHost) {
           h.sessions().find((s) => s.id === existingId) ??
           (await h.openSession(existingId));
         if (existing) return existing;
+        // Backing session record was missing from storage; reset the cursor so
+        // the newly created backing session replays the channel context.
+        clearChannelCursor(channel.id, monoId);
       }
 
       const look = monoLook(mono);
@@ -87,11 +91,11 @@ export function useMonoChannels(host: MonoChannelHost) {
           monoSession.harness,
           mono.projects[0] ?? monoSession.cwd,
           monoSession.model,
-          "full-access",
+          monoSession.runtimeMode,
           monoSession.modelSettings,
         ),
         title: `${look.name} · #${channel.name}`,
-        ephemeral: true,
+        sidebarHidden: true,
       };
       setChannelMemberSession(channel.id, monoId, backing.id);
       h.addSession(backing);
@@ -105,13 +109,11 @@ export function useMonoChannels(host: MonoChannelHost) {
       if (hop > MAX_CHANNEL_AUTONOMOUS_HOPS || monoIds.length === 0) return;
       stoppedChannelsRef.current.delete(channelId);
       const queue = queuesRef.current.get(channelId) ?? [];
-      const currentSpeaker = runningSpeakerRef.current.get(channelId);
       for (const monoId of monoIds) {
         if (!findMono(monoId)) continue;
-        if (
-          currentSpeaker === monoId ||
-          queue.some((entry) => entry.monoId === monoId)
-        ) {
+        // Allow at most one pending follow-up in the queue even if monoId is
+        // currently the active speaker so concurrent messages are never lost.
+        if (queue.some((entry) => entry.monoId === monoId)) {
           continue;
         }
         queue.push({ monoId, hop });
@@ -122,142 +124,147 @@ export function useMonoChannels(host: MonoChannelHost) {
       if (runningSpeakerRef.current.has(channelId)) return;
 
       void (async () => {
-        while (true) {
-          const pending = queuesRef.current.get(channelId);
-          const next = pending?.shift();
-          if (!next) {
-            runningSpeakerRef.current.delete(channelId);
-            activeSessionByChannelRef.current.delete(channelId);
-            syncChannelActiveState(channelId);
-            break;
-          }
-          if (stoppedChannelsRef.current.has(channelId)) {
-            queuesRef.current.delete(channelId);
-            runningSpeakerRef.current.delete(channelId);
-            activeSessionByChannelRef.current.delete(channelId);
-            syncChannelActiveState(channelId);
-            break;
-          }
-
-          const channel = findMonoChannel(channelId);
-          const mono = findMono(next.monoId);
-          if (
-            !channel ||
-            !mono ||
-            !channel.memberIds.includes(next.monoId)
-          ) {
-            syncChannelActiveState(channelId);
-            continue;
-          }
-
-          runningSpeakerRef.current.set(channelId, next.monoId);
-          syncChannelActiveState(channelId);
-
-          const backing = await ensureBackingSession(channel, next.monoId);
-          if (!backing || stoppedChannelsRef.current.has(channelId)) {
-            syncChannelActiveState(channelId);
-            continue;
-          }
-
-          const freshChannel = findMonoChannel(channelId);
-          if (!freshChannel) break;
-          const { prompt, lastMessageId } = buildChannelTurnPrompt(
-            freshChannel,
-            next.monoId,
-            next.hop,
-          );
-          if (!lastMessageId) {
-            syncChannelActiveState(channelId);
-            continue;
-          }
-
-          activeSessionByChannelRef.current.set(channelId, backing.id);
-          activeHopBySessionRef.current.set(backing.id, next.hop);
-          cliPostedInTurnRef.current.delete(`${backing.id}:${channelId}`);
-
-          const beforeBlockCount =
-            hostRef.current
-              .sessions()
-              .find((s) => s.id === backing.id)?.blocks.length ?? 0;
-
-          let outcome: ControlOutcome;
-          try {
-            outcome = await hostRef.current.runTurn(backing.id, prompt);
-          } catch (error) {
-            outcome = {
-              status: "failed",
-              text: "",
-              error: error instanceof Error ? error.message : String(error),
-            };
-          } finally {
-            activeHopBySessionRef.current.delete(backing.id);
-            activeSessionByChannelRef.current.delete(channelId);
-          }
-
-          markChannelCursor(channelId, next.monoId, lastMessageId);
-
-          if (
-            stoppedChannelsRef.current.has(channelId) ||
-            outcome.status !== "completed" ||
-            cliPostedInTurnRef.current.has(`${backing.id}:${channelId}`)
-          ) {
-            cliPostedInTurnRef.current.delete(`${backing.id}:${channelId}`);
-            continue;
-          }
-
-          const latestBacking = hostRef.current
-            .sessions()
-            .find((s) => s.id === backing.id);
-          const rawReply =
-            extractMonoTurnReply(latestBacking) || outcome.text || "";
-          const reaction = parseMonoReaction(rawReply);
-          if (reaction) {
-            addChannelReaction(
-              channelId,
-              lastMessageId,
-              next.monoId,
-              reaction,
-            );
-            continue;
-          }
-
-          const cleaned = cleanMonoCollaborativeReply(rawReply);
-          if (!cleaned) continue;
-
-          const newBlocks =
-            latestBacking?.blocks.slice(beforeBlockCount) ?? [];
-          const newArtifacts = artifactCards(newBlocks);
-          const newLaunches = monoSpawnedSessions(newBlocks);
-
-          const postResult = postChannelMessage({
-            channelId,
-            from: { kind: "mono", monoId: next.monoId },
-            text: cleaned,
-            hop: next.hop,
-            turnSessionId: backing.id,
-            ...(newArtifacts.length ? { artifacts: newArtifacts } : {}),
-            ...(newLaunches.length ? { spawnedSessions: newLaunches } : {}),
-          });
-          markChannelCursor(channelId, next.monoId, postResult.message.id);
-
-          if (
-            postResult.wakeMonoIds.length > 0 &&
-            next.hop + 1 <= MAX_CHANNEL_AUTONOMOUS_HOPS
-          ) {
-            const currentQueue = queuesRef.current.get(channelId) ?? [];
-            for (const targetMonoId of postResult.wakeMonoIds) {
-              if (
-                !currentQueue.some((entry) => entry.monoId === targetMonoId)
-              ) {
-                currentQueue.push({
-                  monoId: targetMonoId,
-                  hop: next.hop + 1,
-                });
-              }
+        try {
+          while (true) {
+            const pending = queuesRef.current.get(channelId);
+            const next = pending?.shift();
+            if (!next) break;
+            if (stoppedChannelsRef.current.has(channelId)) {
+              queuesRef.current.delete(channelId);
+              break;
             }
-            queuesRef.current.set(channelId, currentQueue);
+
+            const channel = findMonoChannel(channelId);
+            const mono = findMono(next.monoId);
+            if (
+              !channel ||
+              !mono ||
+              !channel.memberIds.includes(next.monoId)
+            ) {
+              syncChannelActiveState(channelId);
+              continue;
+            }
+
+            runningSpeakerRef.current.set(channelId, next.monoId);
             syncChannelActiveState(channelId);
+
+            let backing: Session | undefined;
+            try {
+              backing = await ensureBackingSession(channel, next.monoId);
+            } catch {
+              backing = undefined;
+            }
+            if (!backing || stoppedChannelsRef.current.has(channelId)) {
+              syncChannelActiveState(channelId);
+              continue;
+            }
+
+            const freshChannel = findMonoChannel(channelId);
+            if (!freshChannel) break;
+            const { prompt, lastMessageId } = buildChannelTurnPrompt(
+              freshChannel,
+              next.monoId,
+              next.hop,
+            );
+            if (!lastMessageId) {
+              syncChannelActiveState(channelId);
+              continue;
+            }
+
+            activeSessionByChannelRef.current.set(channelId, backing.id);
+            activeHopBySessionRef.current.set(backing.id, next.hop);
+            cliPostedInTurnRef.current.delete(`${backing.id}:${channelId}`);
+
+            const beforeBlockCount =
+              hostRef.current
+                .sessions()
+                .find((s) => s.id === backing.id)?.blocks.length ?? 0;
+
+            let outcome: ControlOutcome;
+            try {
+              outcome = await hostRef.current.runTurn(backing.id, prompt);
+            } catch (error) {
+              outcome = {
+                status: "failed",
+                text: "",
+                error: error instanceof Error ? error.message : String(error),
+              };
+            } finally {
+              activeHopBySessionRef.current.delete(backing.id);
+              activeSessionByChannelRef.current.delete(channelId);
+            }
+
+            // Record the last message this turn actually saw before posting its
+            // reply; if new messages arrived concurrently, postChannelMessage
+            // preserves this cursor so the queued follow-up turn sees them.
+            markChannelCursor(channelId, next.monoId, lastMessageId);
+
+            if (
+              stoppedChannelsRef.current.has(channelId) ||
+              outcome.status !== "completed" ||
+              cliPostedInTurnRef.current.has(`${backing.id}:${channelId}`)
+            ) {
+              cliPostedInTurnRef.current.delete(`${backing.id}:${channelId}`);
+              continue;
+            }
+
+            const latestBacking = hostRef.current
+              .sessions()
+              .find((s) => s.id === backing.id);
+            const rawReply =
+              extractMonoTurnReply(latestBacking) || outcome.text || "";
+            const reaction = parseMonoReaction(rawReply);
+            if (reaction) {
+              addChannelReaction(
+                channelId,
+                lastMessageId,
+                next.monoId,
+                reaction,
+              );
+              continue;
+            }
+
+            const cleaned = cleanMonoCollaborativeReply(rawReply);
+            if (!cleaned) continue;
+
+            const newBlocks =
+              latestBacking?.blocks.slice(beforeBlockCount) ?? [];
+            const newArtifacts = artifactCards(newBlocks);
+            const newLaunches = monoSpawnedSessions(newBlocks);
+
+            const postResult = postChannelMessage({
+              channelId,
+              from: { kind: "mono", monoId: next.monoId },
+              text: cleaned,
+              hop: next.hop,
+              turnSessionId: backing.id,
+              ...(newArtifacts.length ? { artifacts: newArtifacts } : {}),
+              ...(newLaunches.length ? { spawnedSessions: newLaunches } : {}),
+            });
+
+            if (
+              postResult.wakeMonoIds.length > 0 &&
+              next.hop + 1 <= MAX_CHANNEL_AUTONOMOUS_HOPS
+            ) {
+              const currentQueue = queuesRef.current.get(channelId) ?? [];
+              for (const targetMonoId of postResult.wakeMonoIds) {
+                if (
+                  !currentQueue.some((entry) => entry.monoId === targetMonoId)
+                ) {
+                  currentQueue.push({
+                    monoId: targetMonoId,
+                    hop: next.hop + 1,
+                  });
+                }
+              }
+              queuesRef.current.set(channelId, currentQueue);
+              syncChannelActiveState(channelId);
+            }
           }
+        } finally {
+          runningSpeakerRef.current.delete(channelId);
+          activeSessionByChannelRef.current.delete(channelId);
+          syncChannelActiveState(channelId);
         }
       })();
     },

@@ -535,10 +535,10 @@ export function createMonoChannel(input: {
   now?: number;
 }): MonoChannel {
   const channels = listMonoChannels();
-  if (channels.length >= MAX_CHANNELS)
-    throw new Error(`At most ${MAX_CHANNELS} Mono channels can be created`);
   const name = normalizeChannelName(input.name);
   const existing = channels.find((c) => c.name === name);
+  if (!existing && channels.length >= MAX_CHANNELS)
+    throw new Error(`At most ${MAX_CHANNELS} Mono channels can be created`);
   const requested = input.memberIds ?? input.monoIds ?? [];
   const uniqueMembers = [...new Set(requested)].filter((id) =>
     Boolean(findMono(id)),
@@ -631,6 +631,19 @@ export function markChannelCursor(
 
 export const saveChannelMemberCursor = markChannelCursor;
 
+/** Clear a member Mono's unread cursor when its backing session must be recreated. */
+export function clearChannelCursor(channelId: string, monoId: string): void {
+  updateMonoChannel(channelId, (channel) => {
+    if (!(monoId in channel.memberCursors)) return channel;
+    const nextCursors = { ...channel.memberCursors };
+    delete nextCursors[monoId];
+    return {
+      ...channel,
+      memberCursors: nextCursors,
+    };
+  });
+}
+
 /** Whether a session is a Mono's backing session inside any shared channel. */
 export function channelForMemberSession(
   sessionId: string,
@@ -667,9 +680,14 @@ export function saveOpenMonoChannel(channelId: string | undefined): void {
   }
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
  * Extract mentioned member Mono IDs from `@MonoName` / `@Mascot` tokens in
- * `text` plus any explicit `to` targets. Also detects `@all` / `@channel`.
+ * `text` (including multi-word or punctuated display names like `@Build Bot`)
+ * plus any explicit `to` targets. Also detects `@all` / `@channel`.
  */
 export function parseChannelMentions(
   text: string,
@@ -682,7 +700,7 @@ export function parseChannelMentions(
       const found = roster.find((m) => m.id === entry);
       return found ? [found] : [];
     }
-    return [entry];
+    return [roster.find((m) => m.id === entry.id) ?? entry];
   });
 
   const mentioned = new Set<string>();
@@ -704,9 +722,37 @@ export function parseChannelMentions(
     }
   }
 
+  // Match full display names (including spaces or punctuation, e.g. "@Build Bot")
+  // longest-first before tokenizing single-word handles so "@Build Bot" matches
+  // "Build Bot" rather than a shorter prefix name like "Build".
+  const nameCandidates: { monoId: string; phrase: string }[] = [];
+  for (const mono of members) {
+    const look = monoLook(mono);
+    const defaultName = defaultMonoName(mono.mascot);
+    const shortDefault = defaultName.replace(/^Mono/i, "");
+    for (const raw of [look.name, defaultName, shortDefault, mono.mascot, mono.id]) {
+      const trimmed = raw.trim();
+      if (trimmed) nameCandidates.push({ monoId: mono.id, phrase: trimmed });
+    }
+  }
+  nameCandidates.sort((a, b) => b.phrase.length - a.phrase.length);
+
+  let remainingText = text;
+  for (const { monoId, phrase } of nameCandidates) {
+    const pattern = escapeRegExp(phrase).replace(/\s+/g, "\\s+");
+    const regex = new RegExp(
+      `(^|[\\s([{"'])@${pattern}(?=$|[\\s.,!?:;)\\]}"'])`,
+      "gi",
+    );
+    if (regex.test(remainingText)) {
+      mentioned.add(monoId);
+      remainingText = remainingText.replace(regex, "$1 ");
+    }
+  }
+
   const mentionRegex = /(?:^|[\s([{"'])@([A-Za-z0-9_-]+)/g;
   let match: RegExpExecArray | null;
-  while ((match = mentionRegex.exec(text)) !== null) {
+  while ((match = mentionRegex.exec(remainingText)) !== null) {
     const token = normalizeHandle(match[1]);
     if (token === "all" || token === "channel" || token === "everyone") {
       mentionAll = true;
@@ -814,13 +860,18 @@ export function postChannelMessage(input: {
     };
   }
 
+  const previousTailId = existing[existing.length - 1]?.id;
+
   const emoji =
     author.kind === "mono" ? monoReaction(input.text) : undefined;
   if (emoji && author.kind === "mono" && existing.length > 0) {
     const latest = existing[existing.length - 1];
     const updated =
       addChannelReaction(channel.id, latest.id, author.monoId, emoji) ?? latest;
-    markChannelCursor(channel.id, author.monoId, updated.id);
+    const currentCursor = channel.memberCursors[author.monoId];
+    if (!currentCursor || currentCursor === previousTailId) {
+      markChannelCursor(channel.id, author.monoId, updated.id);
+    }
     return {
       channel: findMonoChannel(channel.id) ?? channel,
       message: updated,
@@ -857,20 +908,29 @@ export function postChannelMessage(input: {
   };
 
   saveChannelMessages(channel.id, [...existing, message]);
-  updateMonoChannel(channel.id, (current) => ({
-    ...current,
-    memberIds,
-    monoIds: memberIds,
-    updatedAt: now,
-    ...(author.kind === "mono"
-      ? {
-          memberCursors: {
-            ...current.memberCursors,
-            [author.monoId]: message.id,
-          },
-        }
-      : {}),
-  }));
+  updateMonoChannel(channel.id, (current) => {
+    const prevCursor =
+      author.kind === "mono" ? current.memberCursors[author.monoId] : undefined;
+    // Only advance the speaker's cursor to its own newly posted message when
+    // no unseen messages arrived after its cursor while its turn was in flight.
+    const shouldAdvanceCursor =
+      author.kind === "mono" &&
+      (!prevCursor || !previousTailId || prevCursor === previousTailId);
+    return {
+      ...current,
+      memberIds,
+      monoIds: memberIds,
+      updatedAt: now,
+      ...(shouldAdvanceCursor && author.kind === "mono"
+        ? {
+            memberCursors: {
+              ...current.memberCursors,
+              [author.monoId]: message.id,
+            },
+          }
+        : {}),
+    };
+  });
 
   let candidateIds: string[];
   let nextHop: number;
@@ -979,16 +1039,24 @@ export function buildChannelTurnPrompt(
   const cursorIndex = cursorId
     ? messages.findIndex((m) => m.id === cursorId)
     : -1;
-  const unread =
-    cursorIndex >= 0 ? messages.slice(cursorIndex + 1) : messages.slice(-20);
-  const transcriptLines = (unread.length ? unread : messages.slice(-5)).map(
-    (msg) => {
-      const speaker =
-        msg.from.kind === "user" ? "User" : `@${msg.from.name}`;
-      return `[${new Date(msg.createdAt).toLocaleTimeString()}] ${speaker}: ${msg.text}`;
-    },
-  );
-  const lastMessageId = messages[messages.length - 1]?.id;
+  // Exclude the speaker's own messages that were appended while a follow-up
+  // message was already waiting after its previous cursor.
+  const unread = (
+    cursorIndex >= 0 ? messages.slice(cursorIndex + 1) : messages.slice(-20)
+  ).filter((m) => !(m.from.kind === "mono" && m.from.monoId === monoId));
+
+  if (cursorIndex >= 0 && unread.length === 0) {
+    return { prompt: "", lastMessageId: undefined };
+  }
+
+  const transcriptSource = unread.length ? unread : messages.slice(-5);
+  const transcriptLines = transcriptSource.map((msg) => {
+    const speaker =
+      msg.from.kind === "user" ? "User" : `@${msg.from.name}`;
+    return `[${new Date(msg.createdAt).toLocaleTimeString()}] ${speaker}: ${msg.text}`;
+  });
+  const lastMessageId =
+    unread[unread.length - 1]?.id ?? messages[messages.length - 1]?.id;
 
   const prompt = `<mono_channel_turn>
 You are speaking in the shared Mono channel #${channel.name}${channel.topic ? ` (Topic: ${channel.topic})` : ""}.
