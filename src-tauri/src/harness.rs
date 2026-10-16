@@ -2320,8 +2320,8 @@ mod tests {
 
     #[test]
     fn copilot_token_authorizes_only_omp() {
-        const SCENARIO: &str = "VORKSPACE_COPILOT_AUTH_SCENARIO";
-        const ROOT: &str = "VORKSPACE_COPILOT_AUTH_ROOT";
+        const SCENARIO: &str = "MONOCODE_COPILOT_AUTH_SCENARIO";
+        const ROOT: &str = "MONOCODE_COPILOT_AUTH_ROOT";
         const SHELL_TOKEN: &str = "fixture-shell-copilot-token";
         const INHERITED_TOKEN: &str = "fixture-inherited-copilot-token";
 
@@ -2355,7 +2355,7 @@ mod tests {
 
         use std::os::unix::fs::PermissionsExt;
         let root = FixtureDir(
-            std::env::temp_dir().join(format!("vorkspace-copilot-auth-{}", uuid::Uuid::new_v4())),
+            std::env::temp_dir().join(format!("monocode-copilot-auth-{}", uuid::Uuid::new_v4())),
         );
         std::fs::create_dir(&root.0).expect("create Copilot authorization fixture");
         let shell = root.0.join("fixture-shell");
