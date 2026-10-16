@@ -98,3 +98,45 @@ describe("InboxComments timeline", () => {
     act(() => root.unmount());
   });
 });
+
+describe("InboxComments avatars", () => {
+  it.each([
+    ["github", 1],
+    ["jira", 0],
+    ["gitlab", 0],
+  ] as const)("shows %s author avatars: %i", (provider, expected) => {
+    (
+      globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        createElement(InboxComments, {
+          thread: {
+            truncated: false,
+            comments: [
+              {
+                ...comment("hello", "2026-10-03T09:00:00Z"),
+                authorAvatarUrl: "https://example.com/maya.png",
+              },
+            ],
+          },
+          loading: false,
+          error: null,
+          cwd: "/tmp",
+          provider,
+        }),
+      ),
+    );
+    expect(container.querySelectorAll("img")).toHaveLength(expected);
+    expect(container.textContent).toContain("maya");
+    // No initial placeholder stands in for a hidden avatar.
+    expect(
+      [...container.querySelectorAll("[aria-hidden]")].some(
+        (node) => node.textContent === "M",
+      ),
+    ).toBe(false);
+    act(() => root.unmount());
+  });
+});

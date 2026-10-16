@@ -88,6 +88,9 @@ export type GithubWorkItemDetails = {
   baseRefName?: string;
   headRefName?: string;
   reviewDecision?: string;
+  /** GitLab merge requests only. */
+  pipelineStatus?: string;
+  pipelineUrl?: string;
 };
 
 export type GithubWorkItemComment = {
@@ -406,6 +409,11 @@ export function inboxPersonAvatarUrl(
   if (explicit) return explicit;
   if (provider === "github") return githubAvatarUrl(login);
   return "";
+}
+
+/** Jira and GitLab lists stay text-only; GitHub keeps its avatars. */
+export function inboxShowsAvatars(provider: InboxProvider): boolean {
+  return provider === "github";
 }
 
 export function formatRelativeTime(
@@ -1160,11 +1168,15 @@ export function filterInboxItems(
 
 export function inboxItemRef(item: {
   provider?: InboxProvider;
+  kind?: InboxKind;
   number: number;
   identifier?: string;
 }): string {
   if (item.provider === "jira") {
     return item.identifier?.trim() || `#${item.number}`;
+  }
+  if (item.provider === "gitlab" && item.kind === "pr") {
+    return `!${item.number}`;
   }
   return `#${item.number}`;
 }
@@ -1188,11 +1200,11 @@ export function inboxStartDraft(item: InboxItem, body?: string): string {
   const providerKind =
     item.provider === "gitlab" && item.kind === "pr" ? "merge request" : kind;
   const title =
-    item.title.trim() || `${provider} ${providerKind} #${item.number}`;
+    item.title.trim() || `${provider} ${providerKind} ${inboxItemRef(item)}`;
   const lines = [
     `Work on this ${provider} ${providerKind}:`,
     "",
-    `#${item.number} ${title}`,
+    `${inboxItemRef(item)} ${title}`,
   ];
   const url = item.url.trim();
   if (url) lines.push(url);

@@ -7,6 +7,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { SettingsView } from "./SettingsView";
 import { rememberNotificationProjects } from "../../notifications/model/notificationProjects";
 import { loadInboxConnectors } from "../../inbox/model/inboxConnectors";
+import { loadInboxAgents } from "../../inbox/model/inboxAgents";
 import { loadJiraInboxFilter } from "../../inbox/model/jira";
 import {
   SETTINGS_INDEX,
@@ -119,6 +120,34 @@ afterEach(async () => {
 });
 
 describe("settings pages", () => {
+  it("saves separate default agents for Jira and GitLab and can clear them", async () => {
+    await render("inbox");
+    const chooseAgent = async (source: string, label: string) => {
+      await act(async () =>
+        container
+          .querySelector<HTMLButtonElement>(
+            `button[aria-label^="${source} default agent:"]`,
+          )!
+          .click(),
+      );
+      await act(async () =>
+        [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+          .find((button) => button.textContent?.trim() === label)!
+          .click(),
+      );
+    };
+    await chooseAgent("GitLab", "Codex");
+    await chooseAgent("Jira", "Pi");
+    expect(loadInboxAgents()).toEqual({ gitlab: "codex", jira: "pi" });
+    await render("general");
+    await render("inbox");
+    expect(
+      container.querySelector('[aria-label^="GitLab default agent:"]')?.textContent,
+    ).toBe("Codex");
+    await chooseAgent("GitLab", "Project default");
+    expect(loadInboxAgents()).toEqual({ jira: "pi" });
+  });
+
   it("hides Jira notification rows immediately when the dropdown selects JQL", async () => {
     rememberNotificationProjects([
       {

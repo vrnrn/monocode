@@ -72,6 +72,7 @@ import {
   peekInboxList,
   formatRelativeTime,
   inboxPersonAvatarUrl,
+  inboxShowsAvatars,
   type GithubLabel,
   type GithubPrAction,
   type GithubPrDiff,
@@ -151,10 +152,12 @@ import {
   gitlabMrDiff,
   gitlabWorkItemComment,
   gitlabWorkItemDetails,
+  gitlabPipelineSummary,
   gitlabWorkItemThread,
   peekGitlabMrDiff,
   peekGitlabWorkItemDetails,
   peekGitlabWorkItemThread,
+  type GitlabPipelineSummary,
   type GitlabWorkItemThread,
 } from "../model/gitlab";
 
@@ -2009,6 +2012,7 @@ export function InboxDetail({
   const tracker = jira;
   const jiraKey = jira ? (item.identifier ?? "") : "";
   const gitlab = item.provider === "gitlab";
+  const showAvatars = inboxShowsAvatars(item.provider);
 
   const isPr = !tracker && item.kind === "pr";
   const githubKind =
@@ -2109,6 +2113,8 @@ export function InboxDetail({
       : reviewDecision.toUpperCase() === "CHANGES_REQUESTED"
         ? "text-rose-400/90"
         : "text-content/50";
+  const gitlabPipeline =
+    gitlabKind === "pr" ? gitlabPipelineSummary(details?.pipelineStatus) : null;
   const baseRef =
     details?.baseRefName?.trim() || thread?.baseRefName?.trim() || "";
   const headRef =
@@ -2516,6 +2522,7 @@ export function InboxDetail({
                 {authorName ? (
                   <InboxPerson
                     name={authorName}
+                    avatar={showAvatars}
                     avatarUrl={inboxPersonAvatarUrl(
                       item.provider,
                       authorName,
@@ -2533,6 +2540,7 @@ export function InboxDetail({
                           <InboxPerson
                             key={person.login}
                             name={person.login}
+                            avatar={showAvatars}
                             avatarUrl={inboxPersonAvatarUrl(
                               item.provider,
                               person.login,
@@ -2583,6 +2591,15 @@ export function InboxDetail({
                   <>
                     <span aria-hidden>·</span>
                     <span className={reviewClass}>{reviewLabel}</span>
+                  </>
+                ) : null}
+                {gitlabPipeline ? (
+                  <>
+                    <span aria-hidden>·</span>
+                    <GitlabPipelineBadge
+                      summary={gitlabPipeline}
+                      url={details?.pipelineUrl}
+                    />
                   </>
                 ) : null}
               </div>
@@ -2938,14 +2955,56 @@ function CopyBranchNameButton({ branch }: { branch: string }) {
   );
 }
 
+const GITLAB_PIPELINE_BADGE = {
+  passed: {
+    label: "Pipeline passed",
+    Icon: CheckCircle,
+    tone: "text-emerald-400/90",
+  },
+  failed: { label: "Pipeline failed", Icon: CircleX, tone: "text-rose-400/90" },
+  running: {
+    label: "Pipeline running",
+    Icon: LoaderCircle,
+    tone: "text-content/50",
+  },
+} as const;
+
+/** Pass or fail for the latest merge request pipeline; the link opens its stages on GitLab. */
+function GitlabPipelineBadge({
+  summary,
+  url,
+}: {
+  summary: GitlabPipelineSummary;
+  url?: string;
+}) {
+  const { label, Icon, tone } = GITLAB_PIPELINE_BADGE[summary];
+  return (
+    <button
+      type="button"
+      title={url ? `${label} · open on GitLab` : label}
+      disabled={!url}
+      onClick={() => void openUrl(url ?? "")}
+      className={`inline-flex shrink-0 items-center gap-1 ${tone} enabled:hover:text-content disabled:cursor-default`}
+    >
+      <Icon
+        className={`size-3 ${summary === "running" ? "animate-spin" : ""}`}
+        strokeWidth={1.75}
+      />
+      {label}
+    </button>
+  );
+}
+
 function InboxPerson({
   name,
   avatarUrl,
+  avatar = true,
   size = 20,
   className = "",
 }: {
   name: string;
   avatarUrl?: string;
+  avatar?: boolean;
   size?: number;
   className?: string;
 }) {
@@ -2955,6 +3014,9 @@ function InboxPerson({
   useEffect(() => {
     setFailed(!avatarUrl);
   }, [avatarUrl]);
+
+  if (!avatar)
+    return <span className={`min-w-0 truncate ${className}`}>{name}</span>;
 
   return (
     <span className={`inline-flex min-w-0 items-center gap-1.5 ${className}`}>

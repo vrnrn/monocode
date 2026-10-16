@@ -3,7 +3,9 @@ import { createRoot } from "react-dom/client";
 import type { InboxItem } from "../../src/features/inbox/model/githubTasks";
 import "../../src/styles/index.css";
 
-const provider = new URLSearchParams(location.search).get("provider") ?? "jira";
+const params = new URLSearchParams(location.search);
+const provider = params.get("provider") ?? "jira";
+const mergeRequest = provider === "gitlab" && params.get("kind") === "pr";
 const item: InboxItem = {
   provider: "jira",
   kind: "jira",
@@ -25,13 +27,13 @@ const item: InboxItem = {
 
 if (provider === "github" || provider === "gitlab") {
   item.provider = provider;
-  item.kind = "issue";
+  item.kind = mergeRequest ? "pr" : "issue";
   item.repo = "acme/demo";
-  item.identifier = "#42";
+  item.identifier = mergeRequest ? "!42" : "#42";
   item.url =
     provider === "github"
       ? "https://github.com/acme/demo/issues/42"
-      : "https://gitlab.example.com/acme/demo/-/issues/42";
+      : `https://gitlab.example.com/acme/demo/-/${mergeRequest ? "merge_requests" : "issues"}/42`;
 }
 let revision = 1;
 
@@ -65,6 +67,14 @@ Object.assign(window, {
           author: "Alex",
           title: item.title,
           state: item.state,
+          ...(mergeRequest
+            ? {
+                baseRefName: "main",
+                headRefName: "feature/context",
+                pipelineStatus: "success",
+                pipelineUrl: "https://gitlab.example.com/acme/demo/-/pipelines/7",
+              }
+            : {}),
         };
       if (
         [

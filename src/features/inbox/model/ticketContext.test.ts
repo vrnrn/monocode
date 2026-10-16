@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import {
   applyTicketContextToTurn,
   parseTicketContextLink,
+  supportsTicketContext,
   ticketContextLink,
   ticketComposerCard,
 } from "./ticketContext";
@@ -86,11 +87,71 @@ it.each([
   "monocode://context/jira?url=https%3A%2F%2Fuser%3Asecret%40demo.atlassian.net%2Fbrowse%2FDEMO-42",
   "monocode://context/github?url=https%3A%2F%2Fevil.example%2Facme%2Fdemo%2Fissues%2F42",
   "monocode://context/jira?url=http%3A%2F%2Fdemo.atlassian.net%2Fbrowse%2FDEMO-42",
-  "monocode://context/gitlab?url=https%3A%2F%2Fgitlab.example.com%2Facme%2Fdemo%2F-%2Fmerge_requests%2F42",
+  "monocode://context/github?url=https%3A%2F%2Fgithub.com%2Facme%2Fdemo%2Fpull%2F42",
+  "monocode://context/gitlab?url=https%3A%2F%2Fgitlab.example.com%2Facme%2Fdemo%2F-%2Fmerge_requests%2F42%2Fdiffs",
   "monocode://context/jira?url=https%3A%2F%2Fdemo.atlassian.net%2Fbrowse%2FDEMO-42%3Ftoken%3Dsecret",
 ])("rejects unsupported or credential-bearing references: %s", (value) =>
   expect(parseTicketContextLink(value)).toBeNull(),
 );
+const mergeRequestUrl =
+  "https://gitlab.example.com/acme/nested/demo/-/merge_requests/42";
+it("round trips a GitLab merge request reference", () => {
+  const mergeRequest = {
+    provider: "gitlab",
+    kind: "pr",
+    url: mergeRequestUrl,
+  } as const;
+  expect(parseTicketContextLink(ticketContextLink(mergeRequest))).toMatchObject(
+    {
+      provider: "gitlab",
+      kind: "pr",
+      key: "!42",
+      repo: "acme/nested/demo",
+      number: 42,
+    },
+  );
+  expect(supportsTicketContext(mergeRequest)).toBe(true);
+  expect(supportsTicketContext({ provider: "github", kind: "pr" })).toBe(false);
+});
+it("fetches a GitLab merge request with its branches", async () => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "gitlab_status")
+      return { connected: true, url: "https://gitlab.example.com" };
+    if (command === "gitlab_work_item_details")
+      return {
+        body: "Merge request body",
+        author: "Alex",
+        baseRefName: "main",
+        headRefName: "feature",
+      };
+    if (command === "gitlab_work_item_thread")
+      return { comments: [], truncated: false };
+    throw new Error(`Unexpected command: ${command} ${JSON.stringify(args)}`);
+  });
+  const resolved = await applyTicketContextToTurn(
+    ticketContextLink({ provider: "gitlab", url: mergeRequestUrl }),
+    "/tmp/demo",
+  );
+  expect(resolved).toContain("Merge request body");
+  expect(resolved).toContain('"sourceBranch":"feature"');
+  expect(resolved).toContain('"targetBranch":"main"');
+  expect(invoke).toHaveBeenCalledWith(
+    "gitlab_work_item_details",
+    expect.objectContaining({ kind: "pr", number: 42 }),
+  );
+});
+it("asks the agent to work on a GitLab merge request", () => {
+  const card = ticketComposerCard({
+    provider: "gitlab",
+    kind: "pr",
+    number: 42,
+    title: "Add retries",
+    url: mergeRequestUrl,
+    labels: [],
+  } as unknown as InboxItem);
+  expect(card.prompt).toContain("Work on this GitLab merge request:");
+  expect(card.prompt).toContain("monocode://context/gitlab?url=");
+});
 it("fails closed for a different Jira site", async () => {
   const other = ticketContextLink({
     provider: "jira",

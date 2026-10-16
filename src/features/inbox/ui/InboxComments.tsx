@@ -18,6 +18,7 @@ import {
   formatRelativeTime,
   githubReviewStateLabel,
   inboxPersonAvatarUrl,
+  inboxShowsAvatars,
   type InboxProvider,
 } from "../model/githubTasks";
 import { MOD } from "../../../platform/tauri/platform";
@@ -376,7 +377,7 @@ function InboxComment({
         } ${!nested && (hasBody || hasReplies) ? "border-b border-stroke" : ""}`}
       >
         <InboxCommentPerson
-          avatar={!timeline}
+          avatar={!timeline && inboxShowsAvatars(provider)}
           name={comment.author || "ghost"}
           avatarUrl={inboxPersonAvatarUrl(
             provider,

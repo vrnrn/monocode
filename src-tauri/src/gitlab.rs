@@ -65,6 +65,8 @@ pub struct GitlabWorkItemDetails {
     pub base_ref_name: String,
     pub head_ref_name: String,
     pub review_decision: String,
+    pub pipeline_status: String,
+    pub pipeline_url: String,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -517,6 +519,16 @@ fn parse_work_item_details(value: &Value, kind: &str) -> Result<GitlabWorkItemDe
         return Err("GitLab did not return that item".into());
     }
     let author = value.get("author");
+    // Only merge requests carry a pipeline. `head_pipeline` is the latest run;
+    // older GitLab versions only report `pipeline`.
+    let pipeline = if kind == "pr" {
+        ["head_pipeline", "pipeline"]
+            .into_iter()
+            .filter_map(|key| value.get(key))
+            .find(|pipeline| pipeline.is_object())
+    } else {
+        None
+    };
     Ok(GitlabWorkItemDetails {
         body: string_field(value, "description").unwrap_or_default(),
         author: author
@@ -537,6 +549,12 @@ fn parse_work_item_details(value: &Value, kind: &str) -> Result<GitlabWorkItemDe
             String::new()
         },
         review_decision: String::new(),
+        pipeline_status: pipeline
+            .and_then(|pipeline| string_field(pipeline, "status"))
+            .unwrap_or_default(),
+        pipeline_url: pipeline
+            .and_then(|pipeline| string_field(pipeline, "web_url"))
+            .unwrap_or_default(),
     })
 }
 
@@ -1396,6 +1414,7 @@ mod tests {
         assert_eq!(details.author, "maya");
         assert_eq!(details.base_ref_name, "main");
         assert_eq!(details.head_ref_name, "feature");
+        assert_eq!(details.pipeline_status, "");
 
         let thread = parse_work_item_thread(
             &json!([
@@ -1421,6 +1440,40 @@ mod tests {
         assert_eq!(
             thread.comments[0].url,
             "https://gitlab.example.com/acme/web/-/merge_requests/9#note_2"
+        );
+    }
+
+    #[test]
+    fn reads_merge_request_pipeline_status() {
+        let row = json!({
+            "head_pipeline": { "status": "failed", "web_url": "https://gitlab.example.com/acme/web/-/pipelines/7" },
+            "pipeline": { "status": "success", "web_url": "https://gitlab.example.com/acme/web/-/pipelines/6" }
+        });
+        let details = parse_work_item_details(&row, "pr").unwrap();
+        assert_eq!(details.pipeline_status, "failed");
+        assert_eq!(
+            details.pipeline_url,
+            "https://gitlab.example.com/acme/web/-/pipelines/7"
+        );
+
+        let older = parse_work_item_details(
+            &json!({ "head_pipeline": null, "pipeline": { "status": "success" } }),
+            "pr",
+        )
+        .unwrap();
+        assert_eq!(older.pipeline_status, "success");
+
+        assert_eq!(
+            parse_work_item_details(&row, "issue")
+                .unwrap()
+                .pipeline_status,
+            ""
+        );
+        assert_eq!(
+            parse_work_item_details(&json!({}), "pr")
+                .unwrap()
+                .pipeline_status,
+            ""
         );
     }
 

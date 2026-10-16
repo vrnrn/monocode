@@ -14,8 +14,10 @@ import {
   groupProjectsByRepo,
   inboxComposerCard,
   inboxItemKey,
+  inboxItemRef,
   inboxListCacheKey,
   inboxPersonAvatarUrl,
+  inboxShowsAvatars,
   inboxProjectsForRail,
   inboxStartDraft,
   prDiffCacheKey,
@@ -377,6 +379,20 @@ describe("filterInboxItems", () => {
   });
 });
 
+describe("inboxItemRef", () => {
+  it("uses ! for GitLab merge requests and # for everything else", () => {
+    expect(inboxItemRef({ provider: "gitlab", kind: "pr", number: 12 })).toBe(
+      "!12",
+    );
+    expect(inboxItemRef({ provider: "gitlab", kind: "issue", number: 9 })).toBe(
+      "#9",
+    );
+    expect(inboxItemRef({ provider: "github", kind: "pr", number: 12 })).toBe(
+      "#12",
+    );
+  });
+});
+
 describe("inboxStartDraft", () => {
   it("seeds the composer with the kind, title, and URL", () => {
     expect(
@@ -421,7 +437,7 @@ describe("inboxStartDraft", () => {
         }),
       ),
     ).toBe(
-      "Work on this GitLab merge request:\n\n#12 Fix checkout\nhttps://gitlab.example.com/acme/web/-/merge_requests/12\n",
+      "Work on this GitLab merge request:\n\n!12 Fix checkout\nhttps://gitlab.example.com/acme/web/-/merge_requests/12\n",
     );
   });
 });
@@ -519,5 +535,13 @@ describe("composeInboxMessage", () => {
 
   it("returns the typed text when there is no card", () => {
     expect(composeInboxMessage(undefined, " hello ")).toBe("hello");
+  });
+});
+
+describe("inboxShowsAvatars", () => {
+  it("keeps avatars for GitHub only", () => {
+    expect(inboxShowsAvatars("github")).toBe(true);
+    expect(inboxShowsAvatars("jira")).toBe(false);
+    expect(inboxShowsAvatars("gitlab")).toBe(false);
   });
 });
