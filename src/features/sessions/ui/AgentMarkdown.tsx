@@ -31,7 +31,7 @@ import {
   parseTicketContextLink,
   requestOpenTicketContext,
 } from "../../inbox/model/ticketContext";
-import type { Plugin, PluggableList } from "unified";
+import type { Plugin, Pluggable, PluggableList } from "unified";
 import { ExplorerMenu, type ExplorerMenuItem } from "../../files/ui/ExplorerMenu";
 import { FileActionError } from "../../files/ui/FileActionError";
 import { FileTypeIcon } from "../../files/ui/FileTypeIcon";
@@ -40,6 +40,7 @@ import { createLazyMermaidPlugin } from "../../files/editor/mermaidPlugin";
 import {
   displayPath,
   isExtensionlessFileName,
+  resolveDocumentImage,
   resolveWorkspaceFileReference,
 } from "../../../shared/lib/paths";
 import type { EditorNavigation, OpenFileFn } from "../../search/model/search";
@@ -53,7 +54,12 @@ import { INBOX_MEDIA_PREFIXES, isInboxMediaUrl } from "../../inbox/model/inboxMe
 import { isNoteImagePath } from "../../notes";
 import { IS_MAC, IS_WIN } from "../../../platform/tauri/platform";
 import { InboxMedia } from "../../inbox/ui/InboxMedia";
+import { DocumentImage, ImageAltText } from "./DocumentImage";
 import { isLocalMediaPath, LocalMedia } from "./LocalMedia";
+import {
+  rehypeHoldImageSources,
+  rehypeRestoreImageSources,
+} from "./documentImageSources";
 import { rehypeHardBreaks } from "./hardBreaks";
 import {
   pacedRevealPreferred,
@@ -99,21 +105,33 @@ const ticketLinkSanitize: PluggableList[number] = [
   },
 ];
 
+const MARKDOWN_HARDEN: Pluggable = [
+  harden,
+  {
+    // MarkdownImage remains the final allowlist. The wildcard lets app-owned
+    // relative note URLs reach that component without changing link parsing.
+    allowedImagePrefixes: ["*"],
+    allowedLinkPrefixes: ["*"],
+    allowedProtocols: ["monocode:"],
+    allowDataImages: true,
+    imageBlockPolicy: "remove" as const,
+  },
+];
+
 const MARKDOWN_REHYPE_PLUGINS: PluggableList = [
   defaultRehypePlugins.raw,
   ticketLinkSanitize,
-  [
-    harden,
-    {
-      // MarkdownImage remains the final allowlist. The wildcard lets app-owned
-      // relative note URLs reach that component without changing link parsing.
-      allowedImagePrefixes: ["*"],
-      allowedLinkPrefixes: ["*"],
-      allowedProtocols: ["monocode:"],
-      allowDataImages: true,
-      imageBlockPolicy: "remove" as const,
-    },
-  ],
+  MARKDOWN_HARDEN,
+];
+
+// A project document keeps its image paths as written for MarkdownImage, which
+// resolves them and keeps them inside the project.
+const DOCUMENT_REHYPE_PLUGINS: PluggableList = [
+  defaultRehypePlugins.raw,
+  ticketLinkSanitize,
+  rehypeHoldImageSources,
+  MARKDOWN_HARDEN,
+  rehypeRestoreImageSources,
 ];
 
 const INBOX_MEDIA_REHYPE_PLUGINS: PluggableList = [
@@ -143,6 +161,11 @@ const FADING_INBOX_MEDIA_REHYPE_PLUGINS: PluggableList = [
   rehypeWordFade,
 ];
 
+const FADING_DOCUMENT_REHYPE_PLUGINS: PluggableList = [
+  ...DOCUMENT_REHYPE_PLUGINS,
+  rehypeWordFade,
+];
+
 type FileLinkMenu = {
   x: number;
   y: number;
@@ -158,6 +181,11 @@ const FileOpenContext = createContext<{
     path: string,
     navigation?: EditorNavigation,
   ) => void;
+  /**
+   * The Markdown file a preview shows and the project it may load images
+   * from. Unset in chat, where images keep their own rules.
+   */
+  documentImages?: { documentPath: string; root: string };
 }>({});
 
 const RemoteMediaContext = createContext(false);
@@ -523,13 +551,33 @@ function MarkdownImage({
 }: MarkdownImageProps) {
   const allowRemoteMedia = useContext(RemoteMediaContext);
   const localMedia = useContext(LocalMediaContext);
-  const { cwd, onOpenFile } = useContext(FileOpenContext);
+  const { cwd, onOpenFile, documentImages } = useContext(FileOpenContext);
   const url = typeof src === "string" ? src.trim() : "";
   if (url.startsWith("data:image/")) {
     return <img {...props} src={url} alt={alt ?? ""} />;
   }
   if (isNoteImagePath(url)) {
     return <NoteAssetImage {...props} asset={url} alt={alt} />;
+  }
+  if (documentImages) {
+    const image = resolveDocumentImage(
+      url,
+      documentImages.documentPath,
+      documentImages.root,
+    );
+    if (!image) return <ImageAltText alt={alt} title={url || undefined} />;
+    return (
+      <DocumentImage
+        path={image.path}
+        root={documentImages.root}
+        relative={image.relative}
+        alt={alt}
+        title={props.title}
+        width={props.width}
+        height={props.height}
+        align={(props as { align?: string }).align}
+      />
+    );
   }
   const file =
     localMedia && url && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url)
@@ -549,10 +597,24 @@ function MarkdownImage({
   return <InboxMedia src={url} alt={alt} />;
 }
 
+/**
+ * A document's `<picture>` shows its `<img>`, which loads through
+ * MarkdownImage. A `<source>` would make the webview fetch its own URL
+ * instead, so documents drop them.
+ */
+function MarkdownPictureSource({
+  node: _node,
+  ...props
+}: ComponentProps<"source"> & { node?: unknown }) {
+  const { documentImages } = useContext(FileOpenContext);
+  return documentImages ? null : <source {...props} />;
+}
+
 const MARKDOWN_COMPONENTS = {
   a: MarkdownLink,
   code: MarkdownCode,
   img: MarkdownImage,
+  source: MarkdownPictureSource,
 } satisfies Components;
 
 /**
@@ -591,6 +653,7 @@ export const AgentMarkdown = memo(function AgentMarkdown({
   allowRemoteMedia,
   localMedia,
   hardBreaks,
+  documentPath,
 }: {
   text: string;
   streaming?: boolean;
@@ -604,6 +667,11 @@ export const AgentMarkdown = memo(function AgentMarkdown({
   localMedia?: boolean;
   /** Show a newline inside a block as a line break, as a document does (#591). */
   hardBreaks?: boolean;
+  /**
+   * The Markdown file this text is, which shows the images it refers to in its
+   * project, `cwd`.
+   */
+  documentPath?: string;
 }) {
   const [fileMenu, setFileMenu] = useState<FileLinkMenu | null>(null);
   const [fileActionError, setFileActionError] = useState<string | null>(null);
@@ -616,8 +684,14 @@ export const AgentMarkdown = memo(function AgentMarkdown({
     [],
   );
   const fileOpen = useMemo(
-    () => ({ cwd, onOpenFile, onFileContextMenu }),
-    [cwd, onOpenFile, onFileContextMenu],
+    () => ({
+      cwd,
+      onOpenFile,
+      onFileContextMenu,
+      documentImages:
+        documentPath && cwd ? { documentPath, root: cwd } : undefined,
+    }),
+    [cwd, onOpenFile, onFileContextMenu, documentPath],
   );
   const remarkPlugins = useMemo<PluggableList>(
     () => [
@@ -644,13 +718,18 @@ export const AgentMarkdown = memo(function AgentMarkdown({
   // element. Dropping one mid-fade would remount it and fade it again. Once
   // the fade is over they come off, or a finished reply would keep a span per
   // word for as long as this transcript stays mounted.
+  const isDocument = !!fileOpen.documentImages;
   const baseRehypePlugins = fading
     ? remoteMedia
       ? FADING_INBOX_MEDIA_REHYPE_PLUGINS
-      : FADING_MARKDOWN_REHYPE_PLUGINS
+      : isDocument
+        ? FADING_DOCUMENT_REHYPE_PLUGINS
+        : FADING_MARKDOWN_REHYPE_PLUGINS
     : remoteMedia
       ? INBOX_MEDIA_REHYPE_PLUGINS
-      : MARKDOWN_REHYPE_PLUGINS;
+      : isDocument
+        ? DOCUMENT_REHYPE_PLUGINS
+        : MARKDOWN_REHYPE_PLUGINS;
   // Hard breaks go last, so nothing after them undoes them, and after the word
   // fade, whose word spans would otherwise hide the newlines from them.
   const rehypePlugins = useMemo(
@@ -756,6 +835,7 @@ export const MarkdownPreview = memo(function MarkdownPreview({
   onOpenFile,
   header,
   hardBreaks,
+  documentPath,
 }: {
   text: string;
   streaming?: boolean;
@@ -763,6 +843,8 @@ export const MarkdownPreview = memo(function MarkdownPreview({
   onOpenFile?: OpenFileFn;
   header?: ReactNode;
   hardBreaks?: boolean;
+  /** The Markdown file shown, whose images load from the project, `cwd`. */
+  documentPath?: string;
 }) {
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
 
@@ -782,6 +864,7 @@ export const MarkdownPreview = memo(function MarkdownPreview({
           cwd={cwd}
           onOpenFile={onOpenFile}
           hardBreaks={hardBreaks}
+          documentPath={documentPath}
         />
       </div>
     </div>
