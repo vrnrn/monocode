@@ -82,7 +82,7 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 32] = [
+const APP_ACTIONS: [&str; 39] = [
     "models.list",
     "sessions.list",
     "sessions.read",
@@ -114,6 +114,13 @@ const APP_ACTIONS: [&str; 32] = [
     "habits.update",
     "habits.run",
     "habits.remove",
+    "monos.list",
+    "monos.read",
+    "monos.send",
+    "channels.list",
+    "channels.create",
+    "channels.read",
+    "channels.post",
     "chat.card",
 ];
 const APP_USAGE: &str = r#"MonoCode app access — use in a thread enabled by /operator.
@@ -251,6 +258,24 @@ Actions:
                   "schedule":{...},"enabled":false}  Change or pause one.
   habits.run     {"id":"..."}  Run one within a minute, to try it out.
   habits.remove  {"id":"..."}
+  monos.list     {}  Mono only. Other Monos in MonoCode with their IDs, names,
+                  providers, models, busy status and projects.
+  monos.read     {"mono":"<name or id>","before":"<turnId>","limit":3,"maxChars":1200}
+                  Read up to 3 recent exchanges from another Mono's chat.
+  monos.send     {"to":"<name or id>","message":"...","expectReply":true}
+                  Send a direct message to another Mono. Returns immediately
+                  once queued; when expectReply is true (default), that Mono's
+                  reply arrives in your chat as a new turn once both of you are
+                  idle. Set expectReply:false for a one-way handoff or update.
+  channels.list  {}  Mono only. Shared multi-Mono channels you belong to.
+  channels.create {"name":"...","members":["<name or id>"],"topic":"...","message":"..."}
+                  Create a shared multi-Mono channel (you are included
+                  automatically) and optionally post an opening message.
+  channels.read  {"channel":"<name or id>","limit":20,"before":"<messageId>"}
+                  Read recent messages from a shared multi-Mono channel.
+  channels.post  {"channel":"<name or id>","message":"...","to":["<name or id>"]}
+                  Post a message to a shared multi-Mono channel and wake any
+                  @mentioned Monos or explicit "to" recipients.
   chat.card      Mono or habit only. Post a card to the Mono's chat:
                   {"type":"pr","repo":"owner/repo","number":123,"note":"..."}
                   {"type":"session","sessionId":"...","note":"..."}

@@ -75,6 +75,21 @@ import {
   supersedeMemoryEntry,
   topicName,
 } from "../../monos/model/monoMemory";
+import { findMono, monoLook } from "../../monos/model/mono";
+import {
+  channelForMemberSession,
+  createMonoChannel,
+  findMonoChannel,
+  listMonoChannels,
+  listMonoPeerSummaries,
+  MAX_CHANNEL_AUTONOMOUS_HOPS,
+  MAX_PEER_AUTONOMOUS_HOPS,
+  postChannelMessage,
+  resolveMonoPeer,
+  type MonoChannel,
+  type MonoChannelMessage,
+  type MonoPeerSummary,
+} from "../../monos/model/monoChannels";
 
 export type AppSessionListing = {
   id: string;
@@ -152,6 +167,27 @@ export type AgentAppHost = {
       change: (habits: Habit[]) => { habits: Habit[]; result: T },
     ): Promise<T>;
   };
+  monos?: {
+    list?(excludeMonoId?: string): MonoPeerSummary[] | Promise<MonoPeerSummary[]>;
+    session?(monoId: string): Promise<Session | null>;
+    send?(input: {
+      fromMonoId: string;
+      toMonoId: string;
+      text: string;
+      requestId: string;
+      expectReply: boolean;
+      hop: number;
+    }): Promise<{ alreadyQueued: boolean }>;
+  };
+  channels?: {
+    currentHop?(sourceSessionId: string): number;
+    onPosted?(
+      channel: MonoChannel,
+      message: MonoChannelMessage,
+      wakeMonoIds: string[],
+      sourceSessionId: string,
+    ): void | Promise<void>;
+  };
   agentFiles(monoId: string): Promise<MonoFiles>;
   readAgentFile(
     monoId: string,
@@ -219,6 +255,13 @@ const FIELDS = new Map<string, readonly string[]>([
   ["habits.update", ["id", "name", "instructions", "schedule", "enabled"]],
   ["habits.run", ["id"]],
   ["habits.remove", ["id"]],
+  ["monos.list", []],
+  ["monos.read", ["mono", "before", "limit", "maxChars"]],
+  ["monos.send", ["to", "message", "expectReply"]],
+  ["channels.list", []],
+  ["channels.create", ["name", "members", "topic", "message"]],
+  ["channels.read", ["channel", "limit", "before"]],
+  ["channels.post", ["channel", "message", "to"]],
   ["chat.card", [...CARD_FIELDS]],
 ]);
 
@@ -937,6 +980,329 @@ async function handleArtifacts(
   return { ...card, saved: true, attached: true };
 }
 
+function sourcePeerHop(source: Session): number {
+  for (let index = source.blocks.length - 1; index >= 0; index -= 1) {
+    const block = source.blocks[index];
+    if (block.role === "user" && !block.draft) {
+      return block.monoPeerMessage?.hop ?? 0;
+    }
+  }
+  return 0;
+}
+
+async function handleMonos(
+  source: Session,
+  requestId: string,
+  action: string,
+  input: Record<string, unknown>,
+  host: AgentAppHost,
+): Promise<unknown> {
+  const callerMonoId = host.monoOf?.(source.id)?.id;
+  if (!callerMonoId)
+    throw new Error("Only a Mono can list, read or message peer Monos");
+  switch (action) {
+    case "monos.list": {
+      const peers = host.monos?.list
+        ? await host.monos.list(callerMonoId)
+        : listMonoPeerSummaries({ excludeMonoId: callerMonoId });
+      return { monos: peers };
+    }
+    case "monos.read": {
+      const query = requiredString(input.mono, "mono", 256);
+      const targetMono = resolveMonoPeer(query, callerMonoId);
+      if (!targetMono) {
+        if (resolveMonoPeer(query)?.id === callerMonoId)
+          throw new Error("Use your own conversation history rather than monos.read on yourself");
+        throw new Error("No Mono found matching that name or id; run monos.list");
+      }
+      const targetSession = host.monos?.session
+        ? await host.monos.session(targetMono.id)
+        : await host.session(targetMono.id);
+      if (!targetSession)
+        throw new Error("That Mono's conversation is unavailable");
+      const options = {
+        before: optionalString(input.before, "before", 256),
+        limit: input.limit as number | undefined,
+        maxChars: input.maxChars as number | undefined,
+      };
+      const page = host.readConversation
+        ? await host.readConversation(targetSession, options)
+        : sessionConversationPage(targetSession, options);
+      return {
+        mono: {
+          id: targetMono.id,
+          name: monoLook(targetMono).name,
+          harness: targetSession.harness,
+          model: targetSession.model,
+        },
+        ...page,
+      };
+    }
+    case "monos.send": {
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId))
+        throw new Error("Invalid request ID");
+      const query = requiredString(input.to, "to", 256);
+      const targetMono = resolveMonoPeer(query, callerMonoId);
+      if (!targetMono) {
+        if (resolveMonoPeer(query)?.id === callerMonoId)
+          throw new Error("Cannot send a peer message to yourself");
+        throw new Error("No Mono found matching that name or id; run monos.list");
+      }
+      const message = requiredString(input.message, "message", 60_000);
+      if (consumeOperatorCommand(message).matched)
+        throw new Error("Peer messages cannot include /operator");
+      const expectReply = input.expectReply ?? true;
+      if (typeof expectReply !== "boolean")
+        throw new Error("expectReply must be true or false");
+      const nextHop = sourcePeerHop(source) + 1;
+      if (nextHop > MAX_PEER_AUTONOMOUS_HOPS) {
+        throw new Error(
+          `Autonomous peer-to-peer hop limit (${MAX_PEER_AUTONOMOUS_HOPS}) reached; report back to the user before continuing.`,
+        );
+      }
+      if (!host.monos?.send)
+        throw new Error("Peer Mono messaging is unavailable");
+      const effectiveExpectReply =
+        expectReply && nextHop < MAX_PEER_AUTONOMOUS_HOPS;
+      const result = await host.monos.send({
+        fromMonoId: callerMonoId,
+        toMonoId: targetMono.id,
+        text: message,
+        requestId: `peer-${source.id}-${requestId}`,
+        expectReply: effectiveExpectReply,
+        hop: nextHop,
+      });
+      const targetName = monoLook(targetMono).name;
+      return {
+        to: {
+          id: targetMono.id,
+          name: targetName,
+        },
+        queued: true,
+        alreadyQueued: result.alreadyQueued,
+        expectReply: effectiveExpectReply,
+        hop: nextHop,
+        note: effectiveExpectReply
+          ? `Message queued for ${targetName}. Their reply will arrive in your chat as a new turn once both of you are idle. Finish any immediate steps and end your turn.`
+          : `One-way message queued for ${targetName}.`,
+      };
+    }
+  }
+  throw new Error(`Unknown app action: ${action}`);
+}
+
+function formatChannelSummary(channel: MonoChannel, callerMonoId?: string) {
+  return {
+    id: channel.id,
+    name: channel.name,
+    ...(channel.topic ? { topic: channel.topic } : {}),
+    joined: callerMonoId ? channel.memberIds.includes(callerMonoId) : true,
+    members: channel.memberIds.map((memberId) => {
+      const mono = findMono(memberId);
+      return mono
+        ? {
+            id: mono.id,
+            name: monoLook(mono).name,
+          }
+        : { id: memberId, name: memberId };
+    }),
+    messageCount: channel.messages.length,
+    updatedAt: channel.updatedAt,
+  };
+}
+
+function resolveMemberQueries(
+  raw: unknown,
+  fieldName: string,
+  callerMonoId?: string,
+): string[] {
+  if (raw === undefined) return callerMonoId ? [callerMonoId] : [];
+  if (!Array.isArray(raw))
+    throw new Error(`${fieldName} must be an array of Mono names or IDs`);
+  const ids: string[] = callerMonoId ? [callerMonoId] : [];
+  for (const item of raw) {
+    const query = requiredString(item, fieldName, 256);
+    const mono = resolveMonoPeer(query);
+    if (!mono)
+      throw new Error(`No Mono found matching "${query}"; run monos.list`);
+    if (!ids.includes(mono.id)) ids.push(mono.id);
+  }
+  return ids;
+}
+
+async function handleChannels(
+  source: Session,
+  requestId: string,
+  action: string,
+  input: Record<string, unknown>,
+  host: AgentAppHost,
+): Promise<unknown> {
+  const callerMonoId = host.monoOf?.(source.id)?.id;
+  if (!callerMonoId)
+    throw new Error("Only a Mono can list, read or post in Mono channels");
+  switch (action) {
+    case "channels.list": {
+      const channels = listMonoChannels().map((channel) =>
+        formatChannelSummary(channel, callerMonoId),
+      );
+      return { channels };
+    }
+    case "channels.create": {
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId))
+        throw new Error("Invalid request ID");
+      const name = requiredString(input.name, "name", 80);
+      const topic = optionalString(input.topic, "topic", 280);
+      const memberIds = resolveMemberQueries(
+        input.members,
+        "members",
+        callerMonoId,
+      );
+      const openingMessage = optionalString(input.message, "message", 60_000);
+      const existing = findMonoChannel(name);
+      const channel =
+        existing ??
+        createMonoChannel({
+          name,
+          topic,
+          memberIds,
+        });
+      let posted: Record<string, unknown> | undefined;
+      if (openingMessage) {
+        const postResult = postChannelMessage({
+          channelId: channel.id,
+          from: { kind: "mono", monoId: callerMonoId },
+          text: openingMessage,
+          hop: 1,
+          requestId: `chan-init-${source.id}-${requestId}`,
+        });
+        await host.channels?.onPosted?.(
+          postResult.channel,
+          postResult.message,
+          postResult.wakeMonoIds,
+          source.id,
+        );
+        posted = {
+          messageId: postResult.message.id,
+          wokeMonos: postResult.wakeMonoIds.map((id) => {
+            const peer = findMono(id);
+            return peer ? { id: peer.id, name: monoLook(peer).name } : { id, name: id };
+          }),
+        };
+      }
+      return {
+        channel: formatChannelSummary(
+          findMonoChannel(channel.id) ?? channel,
+          callerMonoId,
+        ),
+        alreadyExisted: Boolean(existing),
+        ...(posted ? { posted } : {}),
+      };
+    }
+    case "channels.read": {
+      const query = requiredString(input.channel, "channel", 256);
+      const channel = findMonoChannel(query);
+      if (!channel)
+        throw new Error(
+          "No channel found matching that name or id; run channels.list",
+        );
+      const limit = input.limit ?? 20;
+      if (
+        !Number.isInteger(limit) ||
+        (limit as number) < 1 ||
+        (limit as number) > 50
+      )
+        throw new Error("limit must be an integer from 1 to 50");
+      const before = optionalString(input.before, "before", 256);
+      let endIndex = channel.messages.length;
+      if (before) {
+        const foundIndex = channel.messages.findIndex((m) => m.id === before);
+        if (foundIndex < 0)
+          throw new Error("before message ID was not found in this channel");
+        endIndex = foundIndex;
+      }
+      const startIndex = Math.max(0, endIndex - (limit as number));
+      const slice = channel.messages.slice(startIndex, endIndex);
+      return {
+        channel: formatChannelSummary(channel, callerMonoId),
+        messages: slice.map((m) => ({
+          id: m.id,
+          from:
+            m.from.kind === "user"
+              ? { kind: "user", name: "User" }
+              : {
+                  kind: "mono",
+                  monoId: m.from.monoId,
+                  name: m.from.name,
+                },
+          text: m.text,
+          mentions: m.mentions,
+          hop: m.hop,
+          createdAt: m.createdAt,
+          ...(m.reactions?.length ? { reactions: m.reactions } : {}),
+        })),
+        nextBefore: startIndex > 0 ? channel.messages[startIndex]?.id ?? null : null,
+      };
+    }
+    case "channels.post": {
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId))
+        throw new Error("Invalid request ID");
+      const query = requiredString(input.channel, "channel", 256);
+      const channel = findMonoChannel(query);
+      if (!channel)
+        throw new Error(
+          "No channel found matching that name or id; run channels.list",
+        );
+      const message = requiredString(input.message, "message", 60_000);
+      if (consumeOperatorCommand(message).matched)
+        throw new Error("Channel messages cannot include /operator");
+      const explicitTargetIds =
+        input.to === undefined
+          ? undefined
+          : resolveMemberQueries(input.to, "to").filter(
+              (id) => id !== callerMonoId,
+            );
+      const memberTurn = channelForMemberSession(source.id);
+      const currentHop =
+        host.channels?.currentHop?.(source.id) ?? (memberTurn ? 1 : 0);
+      const nextHop = currentHop + 1;
+      if (nextHop > MAX_CHANNEL_AUTONOMOUS_HOPS) {
+        throw new Error(
+          `Channel autonomous hop limit (${MAX_CHANNEL_AUTONOMOUS_HOPS}) reached; pause and let the user weigh in.`,
+        );
+      }
+      const postResult = postChannelMessage({
+        channelId: channel.id,
+        from: { kind: "mono", monoId: callerMonoId },
+        text: message,
+        explicitTargetIds,
+        hop: nextHop,
+        requestId: `chan-${source.id}-${requestId}`,
+        turnSessionId: source.id,
+      });
+      await host.channels?.onPosted?.(
+        postResult.channel,
+        postResult.message,
+        postResult.wakeMonoIds,
+        source.id,
+      );
+      return {
+        channelId: postResult.channel.id,
+        channelName: postResult.channel.name,
+        messageId: postResult.message.id,
+        alreadyPosted: postResult.alreadyPosted,
+        hop: nextHop,
+        wokeMonos: postResult.wakeMonoIds.map((id) => {
+          const peer = findMono(id);
+          return peer
+            ? { id: peer.id, name: monoLook(peer).name }
+            : { id, name: id };
+        }),
+      };
+    }
+  }
+  throw new Error(`Unknown app action: ${action}`);
+}
+
 export async function handleAgentApp(
   source: Session,
   requestId: string,
@@ -953,6 +1319,10 @@ export async function handleAgentApp(
     return handleMemory(source, action, input, host);
   if (action.startsWith("habits."))
     return handleHabits(source, action, input, host);
+  if (action.startsWith("monos."))
+    return handleMonos(source, requestId, action, input, host);
+  if (action.startsWith("channels."))
+    return handleChannels(source, requestId, action, input, host);
   if (action === "chat.card") {
     if (
       !host.postCard ||

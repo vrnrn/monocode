@@ -33,7 +33,9 @@ export function sessionConversationPage(
   for (const block of session.blocks) {
     if (
       block.role === "user" &&
-      (!block.internal || block.monoSessionCompletion) &&
+      (!block.internal ||
+        block.monoSessionCompletion ||
+        block.monoPeerMessage) &&
       !block.draft
     ) {
       exchanges.push({ user: block, assistants: [] });
@@ -67,7 +69,9 @@ export function sessionConversationPage(
           ? user.monoSessionCompletion.sessionCount
             ? `MonoCode: results from ${user.monoSessionCompletion.sessionCount} sessions`
             : `MonoCode: session ${user.monoSessionCompletion.status}: ${user.monoSessionCompletion.title}`
-          : operatorUserPrompt(user),
+          : user.monoPeerMessage
+            ? `MonoCode peer message from ${user.monoPeerMessage.fromName}: ${user.monoPeerMessage.text}`
+            : operatorUserPrompt(user),
         maxChars,
       ),
       assistant: assistants.length

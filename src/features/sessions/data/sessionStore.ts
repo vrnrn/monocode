@@ -214,6 +214,48 @@ function sanitizeMonoSessionCompletion(
   };
 }
 
+function sanitizeMonoPeerMessage(
+  value: unknown,
+): Block["monoPeerMessage"] {
+  if (!value || typeof value !== "object") return undefined;
+  const peer = value as NonNullable<Block["monoPeerMessage"]>;
+  if (
+    typeof peer.id !== "string" ||
+    !isPersistableId(peer.id) ||
+    typeof peer.fromMonoId !== "string" ||
+    !isPersistableId(peer.fromMonoId) ||
+    typeof peer.fromName !== "string" ||
+    typeof peer.fromMascot !== "string" ||
+    typeof peer.fromColor !== "string" ||
+    typeof peer.toMonoId !== "string" ||
+    !isPersistableId(peer.toMonoId) ||
+    typeof peer.toName !== "string" ||
+    typeof peer.text !== "string" ||
+    typeof peer.expectReply !== "boolean" ||
+    typeof peer.hop !== "number" ||
+    !Number.isFinite(peer.hop) ||
+    typeof peer.maxHops !== "number" ||
+    !Number.isFinite(peer.maxHops) ||
+    typeof peer.sentAt !== "number" ||
+    !Number.isFinite(peer.sentAt)
+  )
+    return undefined;
+  return {
+    id: peer.id,
+    fromMonoId: peer.fromMonoId,
+    fromName: peer.fromName,
+    fromMascot: peer.fromMascot,
+    fromColor: peer.fromColor,
+    toMonoId: peer.toMonoId,
+    toName: peer.toName,
+    text: peer.text,
+    expectReply: peer.expectReply,
+    hop: peer.hop,
+    maxHops: peer.maxHops,
+    sentAt: peer.sentAt,
+  };
+}
+
 /** Pending images need their bytes until delivery; object URLs never survive reloads. */
 function sanitizeQueuedMessages(value: unknown): QueuedMessage[] {
   if (!Array.isArray(value)) return [];
@@ -258,6 +300,7 @@ function sanitizeQueuedMessages(value: unknown): QueuedMessage[] {
     const completion = sanitizeMonoSessionCompletion(
       message.monoSessionCompletion,
     );
+    const peerMessage = sanitizeMonoPeerMessage(message.monoPeerMessage);
     const noteCard =
       noteMeta && typeof message.noteCard?.body === "string"
         ? { ...noteMeta, body: message.noteCard.body }
@@ -289,6 +332,7 @@ function sanitizeQueuedMessages(value: unknown): QueuedMessage[] {
         ...(noteCard ? { noteCard } : {}),
         ...(handoffCard ? { handoffCard } : {}),
         ...(completion ? { monoSessionCompletion: completion } : {}),
+        ...(peerMessage ? { monoPeerMessage: peerMessage } : {}),
         ...(["default", "plan", "build", "orchestrate"].includes(
           message.intent ?? "",
         )
@@ -943,6 +987,9 @@ function sanitizeBlock(
   const completion = sanitizeMonoSessionCompletion(block.monoSessionCompletion);
   if (block.role === "user" && block.internal && completion)
     next.monoSessionCompletion = completion;
+  const peerMessage = sanitizeMonoPeerMessage(block.monoPeerMessage);
+  if (block.role === "user" && block.internal && peerMessage)
+    next.monoPeerMessage = peerMessage;
   const spawned = sanitizeMonoSpawnedSessions(block.monoSpawnedSessions);
   if (block.role === "user" && spawned.length)
     next.monoSpawnedSessions = spawned;
