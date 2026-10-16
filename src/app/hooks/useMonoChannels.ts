@@ -97,6 +97,7 @@ export function useMonoChannels(host: MonoChannelHost) {
           monoSession.runtimeMode,
           monoSession.modelSettings,
         ),
+        providerAccountId: monoSession.providerAccountId,
         title: `${look.name} · #${channel.name}`,
         sidebarHidden: true,
       };
@@ -206,13 +207,17 @@ export function useMonoChannels(host: MonoChannelHost) {
               continue;
             }
 
+            if (outcome.status !== "completed") {
+              cliPostedInTurnRef.current.delete(`${backing.id}:${channelId}`);
+              continue;
+            }
+
             // Record the last message this turn actually saw before posting its
             // reply; if new messages arrived concurrently, postChannelMessage
             // preserves this cursor so the queued follow-up turn sees them.
             markChannelCursor(channelId, next.monoId, lastMessageId);
 
             if (
-              outcome.status !== "completed" ||
               cliPostedInTurnRef.current.has(`${backing.id}:${channelId}`)
             ) {
               cliPostedInTurnRef.current.delete(`${backing.id}:${channelId}`);

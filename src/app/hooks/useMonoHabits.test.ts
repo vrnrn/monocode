@@ -119,6 +119,7 @@ function makeHost(reply: string, approve?: { wait: Promise<void> }) {
     cwd: "/code/app",
     harness: "claude",
     model: "claude:x",
+    providerAccountId: "account-work",
     blocks: [],
   } as unknown as Session;
   const sessions: Session[] = [mono];
@@ -237,6 +238,7 @@ it("runs a due habit in a hidden session and posts what it found", async () => {
   const runId = host.add.mock.calls[0][0].id;
   // Nobody watches a habit's run, so it never stops to ask before each step.
   expect(host.add.mock.calls[0][0].runtimeMode).toBe("full-access");
+  expect(host.add.mock.calls[0][0].providerAccountId).toBe("account-work");
   // Never saved, so it can never show up with the project's chats.
   expect(host.add.mock.calls[0][0].ephemeral).toBe(true);
   expect(shouldPersistSession(host.add.mock.calls[0][0])).toBe(false);

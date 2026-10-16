@@ -186,6 +186,7 @@ export function useMonoHabits(host: MonoHabitHost, enabled = true) {
           "full-access",
           mono.modelSettings,
         ),
+        providerAccountId: mono.providerAccountId,
         title: `${look.name} · ${habit.name}`,
         ephemeral: true,
       };

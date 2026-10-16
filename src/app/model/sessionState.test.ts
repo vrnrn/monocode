@@ -6,7 +6,16 @@ import {
   newSession,
   type Session,
 } from "../../features/sessions/model/session";
-import { applyHarnessEvents } from "../../integrations/harness/core/apply";
+import {
+  applyHarnessEvents,
+  stopStreaming,
+} from "../../integrations/harness/core/apply";
+import {
+  createMonoPeerQueuedMessage,
+  enqueueMonoPeerMessage,
+} from "../../features/monos/model/monoChannels";
+import { monoState } from "../../features/monos/model/mono";
+import { canDispatchQueuedHead } from "../../features/sessions/model/messageQueue";
 import { HarnessEventQueue } from "./harnessFlush";
 import { updateSessionState } from "./sessionState";
 
@@ -173,3 +182,67 @@ it("preserves the account and a single copy of streamed output in Strict Mode", 
   expect(state().sessions[1].blocks).toHaveLength(1);
   expect(state().sessions[1].blocks[0].text).toBe("Still working");
 });
+
+it.each([false, true])(
+  "settles a DM recipient before delivering its reply in the same React batch (strict=%s)",
+  (strict) => {
+    const state = mountSessions(strict);
+    const reply = createMonoPeerQueuedMessage({
+      fromMonoId: "recipient",
+      toMonoId: "sender",
+      text: "Here is the answer",
+      requestId: "peer-reply-request",
+      expectReply: false,
+      hop: 2,
+    });
+    const followUp = createMonoPeerQueuedMessage({
+      fromMonoId: "sender",
+      toMonoId: "recipient",
+      text: "One more question",
+      requestId: "next-request",
+    });
+
+    act(() => {
+      flushBackground(state().queue);
+      state().update((sessions) =>
+        sessions.map((session) =>
+          session.id === "background" ? stopStreaming(session) : session,
+        ),
+      );
+      // The onSettled callback runs before React renders. Its snapshot must
+      // already contain the finished reply and idle recipient.
+      const recipient = state().current()[1];
+      expect(monoState(recipient).status).toBe("idle");
+      expect(recipient.blocks[0]).toMatchObject({
+        text: "Still working",
+        streaming: false,
+      });
+
+      // A pending UI change must also survive the automatic reply delivery.
+      state().rename("Sender conversation");
+      state().update((sessions) =>
+        sessions.map((session) =>
+          session.id === "blank"
+            ? enqueueMonoPeerMessage(session, reply).session
+            : session,
+        ),
+      );
+      state().update((sessions) =>
+        sessions.map((session) =>
+          session.id === "background"
+            ? enqueueMonoPeerMessage(session, followUp).session
+            : session,
+        ),
+      );
+    });
+
+    const [sender, recipient] = state().sessions;
+    expect(sender.title).toBe("Sender conversation");
+    expect(sender.queuedMessages).toEqual([reply]);
+    expect(canDispatchQueuedHead(sender)).toBe(true);
+    expect(monoState(recipient).status).toBe("idle");
+    expect(recipient.blocks[0].streaming).toBe(false);
+    expect(recipient.queuedMessages).toEqual([followUp]);
+    expect(canDispatchQueuedHead(recipient)).toBe(true);
+  },
+);
