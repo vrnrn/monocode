@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  HARNESSES,
-  newDefaultSession,
-  newSession,
-  type HarnessId,
-} from "./session";
+import { newSession, type HarnessId } from "./session";
 import {
   MODELS,
   coerceModelPickerTab,
@@ -25,7 +20,6 @@ import {
   nativeModelId,
   preferredModelId,
   preferredModelSettings,
-  preferredSessionChoice,
   resetHarnessModelOverlays,
   resolveModel,
   saveDefaultModel,
@@ -281,40 +275,6 @@ describe("provider defaults", () => {
       harness: "claude",
       model: "claude:opus-5",
     });
-  });
-
-  it("starts with a preferred provider only while the project shows it", () => {
-    expect(preferredSessionChoice(undefined, "/repo/a")).toBeNull();
-    expect(preferredSessionChoice("codex", "/repo/a")).toEqual({
-      harness: "codex",
-      model: defaultModelId("codex"),
-    });
-    setProjectProviderHidden("/repo/a", "codex", true);
-    expect(preferredSessionChoice("codex", "/repo/a")).toBeNull();
-  });
-
-  it("falls back to the normal default when every provider is hidden", () => {
-    for (const harness of HARNESSES) {
-      setProjectProviderHidden("/repo/a", harness, true);
-    }
-    expect(preferredSessionChoice("codex", "/repo/a")).toBeNull();
-    expect(newDefaultSession("/repo/a", undefined, "codex").harness).toBe(
-      defaultSessionChoice("/repo/a").harness,
-    );
-  });
-
-  it("uses the preferred provider's project model without changing project defaults", () => {
-    setHarnessModels("codex", [
-      { id: "codex:test", name: "Test model", harness: "codex" },
-    ]);
-    setProjectDefaultProvider("/repo/a", "codex", "codex:test");
-    setProjectDefaultProvider("/repo/a", "pi", "pi:composer-2.5");
-    expect(newDefaultSession("/repo/a", "supervised", "codex")).toMatchObject({
-      harness: "codex",
-      model: "codex:test",
-      runtimeMode: "supervised",
-    });
-    expect(defaultSessionChoice("/repo/a").harness).toBe("pi");
   });
 
   it("uses a project's own provider and model when set", () => {

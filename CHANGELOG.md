@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Jira and GitLab have a **Default agent** in Settings → Integrations. New project chats for their items start with that provider when it is available and visible in the project. Choose **Project default** to use the normal project and provider defaults.
+- Jira and GitLab have a **Default Mono** in Settings → Integrations. **Send to chat** preselects that Mono for their items. You can choose another destination before sending, or choose **No default Mono** to use the usual destination picker.
 - GitLab merge requests in the Inbox have **Send to chat** and **Copy context**, the same as Jira tickets. The context link loads the current description, comments, and branch names.
 - A GitLab merge request in the Inbox shows whether its latest pipeline passed or failed. A running pipeline shows a muted label. Click the label to open the pipeline on GitLab.
 - Remote hosts can run on **Linux without systemd**, such as containers and Firecracker microVMs. Setup starts the host as a detached background process there instead of a systemd user service, so it keeps running after SSH disconnects, and the next connect starts it again if it has stopped. Machines with systemd keep the user service and lingering.

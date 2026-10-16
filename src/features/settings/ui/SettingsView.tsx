@@ -51,10 +51,10 @@ import {
   useInboxConnectors,
 } from "../../inbox/model/inboxConnectors";
 import {
-  setInboxAgent,
-  useInboxAgents,
-  type InboxAgentSource,
-} from "../../inbox/model/inboxAgents";
+  setInboxMono,
+  useInboxMonos,
+  type InboxMonoSource,
+} from "../../inbox/model/inboxMonos";
 import {
   INBOX_SOURCE_LABELS,
   type InboxSource,
@@ -221,7 +221,6 @@ import {
 import {
   HARNESSES,
   HARNESS_TITLE,
-  isHarnessId,
   sessionDisplayTitle,
   type HarnessId,
 } from "../../sessions/model/session";
@@ -1233,7 +1232,7 @@ function InboxPage({
         enabled={connectors.gitlab}
         description="Merge requests from GitLab.com or a self-managed instance."
       >
-        <InboxAgentRow source="gitlab" />
+        <InboxMonoRow source="gitlab" />
         <GitlabSettings />
       </InboxConnectorGroup>
 
@@ -1242,35 +1241,40 @@ function InboxPage({
         enabled={connectors.jira}
         description="Jira Cloud issues filtered by project or a JQL query."
       >
-        <InboxAgentRow source="jira" />
+        <InboxMonoRow source="jira" />
         <JiraSettings onFilterModeChange={setJiraFilterMode} />
       </InboxConnectorGroup>
     </>
   );
 }
 
-/** The provider that new sessions for one inbox source start with. */
-function InboxAgentRow({ source }: { source: InboxAgentSource }) {
-  const agents = useInboxAgents();
+/** The Mono preselected when sending an integration item to chat. */
+function InboxMonoRow({ source }: { source: InboxMonoSource }) {
+  const defaults = useInboxMonos();
+  const snapshot = useSyncExternalStore(subscribeMonos, monosSnapshot);
+  const monos = useMemo(() => listMonos(), [snapshot]);
+  const selected = monos.find((mono) => mono.id === defaults[source]);
   const name = INBOX_SOURCE_LABELS[source];
   return (
     <Row
-      label="Default agent"
-      description={`New project chats for ${name} items start with this provider when available and visible in the project.`}
+      label="Default Mono"
+      description={
+        monos.length
+          ? `Preselected when you send ${name} items to chat. You can choose another destination before sending.`
+          : "Create a Mono in Monos settings to choose a default destination."
+      }
     >
       <Select
-        label={`${name} default agent`}
-        value={agents[source] ?? ""}
+        label={`${name} default Mono`}
+        value={selected?.id ?? ""}
         options={[
-          { value: "", label: "Project default" },
-          ...HARNESSES.map((harness) => ({
-            value: harness,
-            label: HARNESS_TITLE[harness],
+          { value: "", label: "No default Mono" },
+          ...monos.map((mono) => ({
+            value: mono.id,
+            label: monoLook(mono).name,
           })),
         ]}
-        onChange={(value) =>
-          setInboxAgent(source, isHarnessId(value) ? value : null)
-        }
+        onChange={(value) => setInboxMono(source, value || null)}
       />
     </Row>
   );

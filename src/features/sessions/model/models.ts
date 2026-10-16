@@ -809,30 +809,17 @@ export function firstEnabledHarness(
   cwd: string | undefined,
   preferred: HarnessId,
 ): HarnessId {
-  if (harnessEnabled(preferred, cwd)) return preferred;
-  return HARNESSES.find((id) => harnessEnabled(id, cwd)) ?? preferred;
-}
-
-function harnessEnabled(id: HarnessId, cwd?: string): boolean {
-  return (
-    !(loadProjectProviderSettings(cwd).hidden ?? []).includes(id) &&
+  const hidden = new Set(loadProjectProviderSettings(cwd).hidden ?? []);
+  const enabled = (id: HarnessId) =>
+    !hidden.has(id) &&
     (modelsFor(id).length === 0 || pickerModelsFor(id, cwd).length > 0) &&
     showProviderInModelPicker(
       id,
       isHarnessAvailable(id),
       hasProbedHarnessAvailability(),
-    )
-  );
-}
-
-/** Model a provider starts with in `cwd`, from the project, then the global default. */
-function harnessModelChoice(harness: HarnessId, cwd?: string): LastModelChoice {
-  const project = loadProjectProviderSettings(cwd);
-  const model =
-    project.models?.[harness] ??
-    (project.defaultHarness === harness ? project.defaultModel : undefined) ??
-    preferredModelId(harness);
-  return { harness, model: visibleModelId(harness, model, cwd) };
+    );
+  if (enabled(preferred)) return preferred;
+  return HARNESSES.find(enabled) ?? preferred;
 }
 
 /** Provider + model new conversations should start with. */
@@ -843,20 +830,11 @@ export function defaultSessionChoice(cwd?: string): LastModelChoice {
     cwd,
     project.defaultHarness ?? last?.harness ?? "claude",
   );
-  return harnessModelChoice(harness, cwd);
-}
-
-/**
- * Provider + model for a conversation that prefers `preferred`. Returns null
- * when no preference is set or the project hides that provider, so the
- * caller falls back to `defaultSessionChoice`.
- */
-export function preferredSessionChoice(
-  preferred: HarnessId | undefined,
-  cwd?: string,
-): LastModelChoice | null {
-  if (!preferred || !harnessEnabled(preferred, cwd)) return null;
-  return harnessModelChoice(preferred, cwd);
+  const model =
+    project.models?.[harness] ??
+    (project.defaultHarness === harness ? project.defaultModel : undefined) ??
+    preferredModelId(harness);
+  return { harness, model: visibleModelId(harness, model, cwd) };
 }
 
 export function loadLastModelChoice(): LastModelChoice | null {

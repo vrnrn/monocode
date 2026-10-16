@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TicketContextActions } from "./TicketContextActions";
 import { copyText } from "../../../platform/tauri/clipboard";
 import type { InboxItem } from "../model/githubTasks";
+import { loadInboxMonos, setInboxMono } from "../model/inboxMonos";
 
 vi.mock("../../../platform/tauri/clipboard", () => ({
   copyText: vi.fn(async () => {}),
@@ -47,6 +48,11 @@ const monos = [
 const onStart = vi.fn();
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const store = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, value),
+  });
   vi.clearAllMocks();
   container = document.createElement("div");
   document.body.append(container);
@@ -88,6 +94,91 @@ async function choose(text: string) {
   );
   await act(async () => button(text).click());
 }
+
+it.each(["jira", "gitlab"] as const)(
+  "preselects the saved %s Mono and sends to it",
+  async (provider) => {
+    setInboxMono(provider, "mono-demo");
+    const item = { ...ticket, provider };
+    render({ item });
+    expect(
+      container.querySelector('[aria-label="Choose chat destination"]')
+        ?.textContent,
+    ).toContain("Demo Mono");
+    await act(async () => button("Send to chat").click());
+    expect(onStart).toHaveBeenCalledWith(item, undefined, "mono-demo");
+  },
+);
+
+it("keeps separate defaults and leaves GitHub's destination alone", async () => {
+  setInboxMono("jira", "mono-demo");
+  setInboxMono("gitlab", "mono-review");
+  const reviewMono = { ...monos[0], id: "mono-review", name: "Review Mono" };
+  render({
+    item: { ...ticket, provider: "gitlab" },
+    monos: [...monos, reviewMono],
+  });
+  expect(
+    container.querySelector('[aria-label="Choose chat destination"]')
+      ?.textContent,
+  ).toContain("Review Mono");
+  render({ item: { ...ticket, provider: "github" } });
+  expect(
+    container.querySelector('[aria-label="Choose chat destination"]')
+      ?.textContent,
+  ).toContain("Demo project");
+});
+
+it("allows a project override without replacing the saved default", async () => {
+  setInboxMono("jira", "mono-demo");
+  render();
+  await choose("Demo project");
+  render();
+  await act(async () => button("Send to chat").click());
+  expect(onStart).toHaveBeenCalledWith(
+    expect.objectContaining({ projectPath: "/tmp/demo" }),
+    undefined,
+    undefined,
+  );
+  expect(loadInboxMonos()).toEqual({ jira: "mono-demo" });
+});
+
+it("falls back when the saved Mono has been removed", async () => {
+  setInboxMono("jira", "mono-deleted");
+  render();
+  expect(
+    container.querySelector('[aria-label="Choose chat destination"]')
+      ?.textContent,
+  ).toContain("Demo project");
+  expect(button("Send to chat").disabled).toBe(false);
+});
+
+it("follows defaults and Mono availability updates until manually overridden", async () => {
+  render({ monos: [] });
+  act(() => setInboxMono("jira", "mono-demo"));
+  render();
+  expect(
+    container.querySelector('[aria-label="Choose chat destination"]')
+      ?.textContent,
+  ).toContain("Demo Mono");
+  act(() => setInboxMono("jira", null));
+  expect(
+    container.querySelector('[aria-label="Choose chat destination"]')
+      ?.textContent,
+  ).toContain("Demo project");
+});
+
+it("resets a manual destination when switching to a different item", async () => {
+  render();
+  await choose("Demo Mono");
+  render({
+    item: { ...ticket, url: "https://demo.atlassian.net/browse/DEMO-43" },
+  });
+  expect(
+    container.querySelector('[aria-label="Choose chat destination"]')
+      ?.textContent,
+  ).toContain("Demo project");
+});
 it("offers both kinds of destination and sends to the selected project", async () => {
   render();
   await act(async () => button("Send to chat").click());

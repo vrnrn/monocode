@@ -458,14 +458,14 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     id: "gitlab",
     section: "inbox",
     label: "GitLab",
-    keywords: "token self-managed merge request connect",
+    keywords: "token self-managed merge request connect default mono send chat destination",
   },
   {
     id: "jira",
     section: "inbox",
     label: "Jira",
     keywords:
-      "atlassian cloud site email api token issues projects connect jql query filter mode",
+      "atlassian cloud site email api token issues projects connect jql query filter mode default mono send chat destination",
   },
   {
     id: "show-archived",
