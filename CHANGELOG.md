@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Monos return to idle after answering a direct message, and background replies preserve pending session updates. Stale turn completion cannot stop a replacement turn.
 - Failed or cancelled channel turns retain unread messages for retry. New channel and habit sessions inherit the Mono's selected provider account.
 - Switching between direct messages and channels preserves the automatic-message hop limit.
-- omp sessions now receive `COPILOT_GITHUB_TOKEN` from the interactive login shell after desktop launches. Existing environment values take precedence.
+- All provider sessions now receive `COPILOT_GITHUB_TOKEN` from the interactive login shell after desktop launches. Existing environment values take precedence.
 
 - Git LFS repositories no longer fail with "git-lfs: command not found" when MonoCode is opened from Finder. Status, diffs, staging, discards, and worktree checks run Git with Homebrew and other common install directories on its PATH, plus the terminal's PATH once it has been read, so filters resolve without waiting on the login shell.
 
