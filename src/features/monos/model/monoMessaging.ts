@@ -89,7 +89,9 @@ export function monoMessageDeliveries(
 ): ReadonlyMap<string, MessageDelivery> {
   return new Map(
     (session.queuedMessages ?? [])
-      .filter((message) => !message.monoSessionCompletion)
+      .filter(
+        (message) => !message.monoSessionCompletion && !message.monoPeerMessage,
+      )
       .map((message) => [
         message.blockId ?? message.id,
         {
@@ -110,7 +112,9 @@ export function visibleMonoCompletionMessages(
 ): QueuedMessage[] {
   const ready = canDispatchQueuedHead(session);
   return (session.queuedMessages ?? []).filter(
-    (message) => !!message.monoSessionCompletion && (!ready || !!message.error),
+    (message) =>
+      (!!message.monoSessionCompletion || !!message.monoPeerMessage) &&
+      (!ready || !!message.error),
   );
 }
 
@@ -121,7 +125,7 @@ export function monoPendingTranscriptBlocks(
   blocks: Block[],
 ): Block[] {
   const messages = session.queuedMessages?.filter(
-    (message) => !message.monoSessionCompletion,
+    (message) => !message.monoSessionCompletion && !message.monoPeerMessage,
   );
   if (!messages?.length) return blocks;
   const byBlock = new Map(

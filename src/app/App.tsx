@@ -608,6 +608,22 @@ import {
   resetMonoSession,
 } from "../features/monos/model/monoWorkspace";
 import {
+  channelForMemberSession,
+  cleanMonoCollaborativeReply,
+  enqueueMonoPeerMessage,
+  extractMonoTurnReply,
+  findMonoChannel,
+  isMonoChannelSession,
+  listMonoPeerSummaries,
+  MAX_PEER_AUTONOMOUS_HOPS,
+  monoChannelsSnapshot,
+  removeMonoChannel,
+  subscribeMonoChannels,
+} from "../features/monos/model/monoChannels";
+import { MonoChannelView } from "../features/monos/ui/MonoChannelView";
+import { useMonoChannels } from "./hooks/useMonoChannels";
+import { monoReaction as parseMonoReaction } from "../features/monos/model/monoReaction";
+import {
   warmNativeSkills,
   isNativeCommandPrompt,
 } from "../features/skills/model/skills";
@@ -855,6 +871,7 @@ type SubmitOptions = ComposerTurnOptions & {
   orchestrationRetry?: OrchestrationProposal;
   appRequestId?: string;
   monoSessionCompletion?: Block["monoSessionCompletion"];
+  monoPeerMessage?: Block["monoPeerMessage"];
   onSettled?: (outcome: ControlOutcome) => void;
   /** Generate a fresh title even when this is not the session's first turn. */
   refreshTitle?: boolean;
@@ -6999,7 +7016,8 @@ function Workspace({
         return false;
       }
       // The Mono has app access in every turn, without the command.
-      const mono = isMonoSession(sessionId);
+      const monoChannelMember = channelForMemberSession(sessionId);
+      const mono = isMonoSession(sessionId) || Boolean(monoChannelMember);
       const queuedMonoMessage =
         mono && options?.queuedMessageId
           ? current.queuedMessages?.find(
@@ -7395,11 +7413,16 @@ function Workspace({
           ? { appRequestId: options.appRequestId }
           : {}),
         // The orchestrator writes these turns, not the user; hide them.
-        ...(options?.managed || options?.monoSessionCompletion
+        ...(options?.managed ||
+        options?.monoSessionCompletion ||
+        options?.monoPeerMessage
           ? { internal: true }
           : {}),
         ...(options?.monoSessionCompletion
           ? { monoSessionCompletion: options.monoSessionCompletion }
+          : {}),
+        ...(options?.monoPeerMessage
+          ? { monoPeerMessage: options.monoPeerMessage }
           : {}),
       };
       const live = isLiveHarness(current.harness);
@@ -8003,7 +8026,12 @@ function Workspace({
           }
           // The agent's soul and memory live in its folder. A native session
           // is handed them once, and memory again only when it changes.
-          const monoRecord = mono ? monoForSession(sessionId) : undefined;
+          const monoRecord = mono
+            ? (monoForSession(sessionId) ??
+              (monoChannelMember
+                ? findMono(monoChannelMember.monoId)
+                : undefined))
+            : undefined;
           const agentLook = monoRecord ? monoLook(monoRecord) : undefined;
           const agentFiles = monoRecord
             ? await loadMonoFiles(monoRecord.id).catch(() => undefined)
@@ -8413,6 +8441,85 @@ function Workspace({
         decideMonoBlock(relay.monoId, relay.blockId, "cancelled");
     },
   });
+
+  const peerSentInTurnRef = useRef(new Set<string>());
+  const sendPeerMessageToMono = useCallback(
+    async (input: {
+      fromMonoId: string;
+      toMonoId: string;
+      text: string;
+      requestId: string;
+      expectReply: boolean;
+      hop: number;
+    }): Promise<{ alreadyQueued: boolean }> => {
+      const targetSession = await ensureMonoSession(input.toMonoId, {
+        home: homeDir,
+        load: ensureOpenSession,
+        create: newDefaultSession,
+        add: (created) => {
+          sessionsRef.current = [...sessionsRef.current, created];
+          setSessions(sessionsRef.current);
+        },
+      });
+      if (!targetSession)
+        throw new Error("Target Mono conversation is unavailable");
+      const currentTarget =
+        sessionsRef.current.find((s) => s.id === targetSession.id) ??
+        targetSession;
+      const enqueued = enqueueMonoPeerMessage(currentTarget, input);
+      if (!enqueued.alreadyQueued) {
+        const senderMono = findMono(input.fromMonoId);
+        const senderSessionId = senderMono?.sessionId;
+        if (senderSessionId) {
+          const gen = turnGen.current.get(senderSessionId) ?? 0;
+          peerSentInTurnRef.current.add(
+            `${input.fromMonoId}->${input.toMonoId}:${gen}`,
+          );
+        }
+        sessionsRef.current = sessionsRef.current.map((s) =>
+          s.id === currentTarget.id ? enqueued.session : s,
+        );
+        setSessions(sessionsRef.current);
+        persistSession(enqueued.session);
+      }
+      return { alreadyQueued: enqueued.alreadyQueued };
+    },
+    [ensureOpenSession, persistSession],
+  );
+  const sendPeerMessageToMonoRef = useRef(sendPeerMessageToMono);
+  sendPeerMessageToMonoRef.current = sendPeerMessageToMono;
+
+  const monoChannels = useMonoChannels({
+    sessions: () => sessionsRef.current,
+    ensureMono: (monoId) =>
+      ensureMonoSession(monoId, {
+        home: homeDir,
+        load: ensureOpenSession,
+        create: newDefaultSession,
+        add: (created) => {
+          sessionsRef.current = [...sessionsRef.current, created];
+          setSessions(sessionsRef.current);
+        },
+      }),
+    openSession: async (id) => (await ensureOpenSession(id)) ?? undefined,
+    addSession: (session) => {
+      sessionsRef.current = [...sessionsRef.current, session];
+      setSessions(sessionsRef.current);
+    },
+    runTurn: (id, prompt) =>
+      new Promise((resolve) => {
+        void submitWithSettlement({
+          submit: (onSettled) => submitSession(id, prompt, [], { onSettled }),
+          onSettled: resolve,
+          rejectionMessage: "The channel turn could not start.",
+        });
+      }),
+    stopSession: async (id) => {
+      await stopSessionRef.current(id);
+    },
+  });
+  const monoChannelsRef = useRef(monoChannels);
+  monoChannelsRef.current = monoChannels;
 
   const automationSessionReservations = useRef(new Set<string>());
   const automationRecoveryRef = useRef<Promise<void> | null>(null);
@@ -8938,6 +9045,57 @@ function Workspace({
                   ? {
                       monoSessionCompletion: head.monoSessionCompletion,
                       appRequestId: head.id,
+                    }
+                  : {}),
+                ...(head.monoPeerMessage
+                  ? {
+                      monoPeerMessage: head.monoPeerMessage,
+                      appRequestId: head.id,
+                      ...(head.monoPeerMessage.expectReply
+                        ? {
+                            onSettled: (outcome: ControlOutcome) => {
+                              if (outcome.status !== "completed") return;
+                              const responderMono = monoForSession(session.id);
+                              const peerMeta = head.monoPeerMessage!;
+                              const nextHop = peerMeta.hop + 1;
+                              if (
+                                !responderMono ||
+                                nextHop > MAX_PEER_AUTONOMOUS_HOPS
+                              )
+                                return;
+                              const gen =
+                                turnGen.current.get(session.id) ?? 0;
+                              if (
+                                peerSentInTurnRef.current.has(
+                                  `${responderMono.id}->${peerMeta.fromMonoId}:${gen}`,
+                                )
+                              ) {
+                                return;
+                              }
+                              const latestTarget = sessionsRef.current.find(
+                                (s) => s.id === session.id,
+                              );
+                              const rawReply =
+                                extractMonoTurnReply(latestTarget) ||
+                                outcome.text ||
+                                "";
+                              if (parseMonoReaction(rawReply)) return;
+                              const cleaned =
+                                cleanMonoCollaborativeReply(rawReply);
+                              if (!cleaned) return;
+                              void sendPeerMessageToMonoRef
+                                .current({
+                                  fromMonoId: responderMono.id,
+                                  toMonoId: peerMeta.fromMonoId,
+                                  text: cleaned,
+                                  requestId: `peer-reply-${head.id}`,
+                                  expectReply: false,
+                                  hop: nextHop,
+                                })
+                                .catch(() => undefined);
+                            },
+                          }
+                        : {}),
                     }
                   : {}),
               },
@@ -10719,14 +10877,18 @@ function Workspace({
             throw new Error("Request ID was already used with different input");
           return previous.promise;
         }
+        const sourceChannelMember = channelForMemberSession(source.id);
         const sourceMono =
-          monoForSession(source.id) ?? findMono(habitRunMono(source.id) ?? "");
+          monoForSession(source.id) ??
+          findMono(habitRunMono(source.id) ?? "") ??
+          (sourceChannelMember ? findMono(sourceChannelMember.monoId) : undefined);
         const canAccessProject = (cwd: string) =>
           canAccessAgentAppProject(source, cwd, sourceMono?.projects);
         const sourceTurn = turnGen.current.get(source.id) ?? 0;
-        const sourceTurns = isMonoSession(source.id)
-          ? groupMonoTurns(source.blocks)
-          : [];
+        const sourceTurns =
+          isMonoSession(source.id) || Boolean(sourceChannelMember)
+            ? groupMonoTurns(source.blocks)
+            : [];
         const sourceTurnId = sourceTurns[sourceTurns.length - 1]?.[0]?.id;
         const rememberSession = (entry: MonoSpawnedSession) => {
           // A habit run is thrown away when it ends; its launches go on the
@@ -11105,11 +11267,14 @@ function Workspace({
               setSessions(sessionsRef.current);
               if (!isHabitRun(sessionId)) await upsertSession(updated);
             },
-            isMono: (id) => isMonoSession(id),
+            isMono: (id) => isMonoSession(id) || isMonoChannelSession(id),
             isHabitRun: (id) => isHabitRun(id),
             monoOf: (id) => {
+              const member = channelForMemberSession(id);
               const mono =
-                monoForSession(id) ?? findMono(habitRunMono(id) ?? "");
+                monoForSession(id) ??
+                findMono(habitRunMono(id) ?? "") ??
+                (member ? findMono(member.monoId) : undefined);
               return (
                 mono && {
                   id: mono.id,
@@ -11126,6 +11291,42 @@ function Workspace({
                     : {}),
                 }
               );
+            },
+            monos: {
+              list: (excludeMonoId) =>
+                listMonoPeerSummaries({
+                  excludeMonoId,
+                  isBusy: (_monoId, sessionId) => {
+                    if (!sessionId) return false;
+                    return Boolean(
+                      sessionsRef.current.find((s) => s.id === sessionId)?.busy,
+                    );
+                  },
+                }),
+              session: async (monoId) => {
+                const mono = findMono(monoId);
+                if (!mono) return null;
+                if (mono.sessionId) {
+                  const open = sessionsRef.current.find(
+                    (s) => s.id === mono.sessionId,
+                  );
+                  if (open) return open;
+                  return await getSession(mono.sessionId);
+                }
+                return null;
+              },
+              send: (input) => sendPeerMessageToMonoRef.current(input),
+            },
+            channels: {
+              currentHop: (sourceSessionId) =>
+                monoChannelsRef.current.currentHop(sourceSessionId),
+              onPosted: (channel, message, wakeMonoIds, sourceSessionId) =>
+                monoChannelsRef.current.onCliChannelPosted(
+                  channel,
+                  message,
+                  wakeMonoIds,
+                  sourceSessionId,
+                ),
             },
             habits: { load: loadHabits, update: updateHabits },
             agentFiles: (monoId) => loadMonoFiles(monoId),
@@ -12782,13 +12983,42 @@ function Workspace({
       session.busy && session.cwd ? [session.cwd] : [],
     ),
   );
+  const monoChannelsSnap = useSyncExternalStore(
+    subscribeMonoChannels,
+    monoChannelsSnapshot,
+  );
+  const monoViewChannel = useMemo(
+    () => (monoViewId ? findMonoChannel(monoViewId) : undefined),
+    [monoViewId, monoChannelsSnap],
+  );
   const onOpenRailMono = useCallback(
     (monoId: string) => void onOpenMono(monoId),
     [onOpenMono],
   );
+  const onOpenRailChannel = useCallback((channelId: string) => {
+    const channel = findMonoChannel(channelId);
+    if (!channel) return;
+    monoViewRequest.current += 1;
+    monoViewIdRef.current = channel.id;
+    setMonoShownSession(null);
+    setMonoShownSessionFocused(false);
+    setMonoOverviewDocument(null);
+    setMonoViewId(channel.id);
+    setProjectTerminalFocused(false);
+  }, []);
   const onDeleteRailMono = useCallback(
     (monoId: string) => void onDeleteMono(monoId),
     [onDeleteMono],
+  );
+  const onDeleteRailChannel = useCallback(
+    (channelId: string) => {
+      void monoChannels.stopChannel(channelId);
+      if (monoViewIdRef.current === channelId) {
+        closeMonoView();
+      }
+      removeMonoChannel(channelId);
+    },
+    [closeMonoView, monoChannels],
   );
   // The memoized sidebar only skips a streamed batch if this keeps identity.
   const sidebarMonos = useMemo(
@@ -12796,20 +13026,28 @@ function Workspace({
       monosEnabled
         ? {
             activeId: monoViewMono?.id,
+            activeChannelId: monoViewChannel?.id,
+            busyChannelIds: monoChannels.busyChannelIds,
             states: monoRail.states,
             unseenCounts: monoRail.unseen,
             onOpen: onOpenRailMono,
+            onOpenChannel: onOpenRailChannel,
             onCreate: onCreateMono,
             onDelete: onDeleteRailMono,
+            onDeleteChannel: onDeleteRailChannel,
           }
         : undefined,
     [
       monosEnabled,
       monoViewMono?.id,
+      monoViewChannel?.id,
+      monoChannels.busyChannelIds,
       monoRail,
       onOpenRailMono,
+      onOpenRailChannel,
       onCreateMono,
       onDeleteRailMono,
+      onDeleteRailChannel,
     ],
   );
   const onDismissUpdate = useCallback(() => setUpdateNotice(null), []);
@@ -13232,6 +13470,39 @@ function Workspace({
                                   </div>
                                 );
                               })}
+                            {monoViewChannel ? (
+                              <div
+                                key={monoViewChannel.id}
+                                data-mono-channel={monoViewChannel.id}
+                                className="absolute inset-0 flex h-full min-h-0 flex-col"
+                              >
+                                <MonoChannelView
+                                  channel={monoViewChannel}
+                                  monoStates={monoRail.states}
+                                  activeChannelMonoIds={monoChannels.activeMonoIdsForChannel(
+                                    monoViewChannel.id,
+                                  )}
+                                  onSendMessage={
+                                    monoChannels.sendUserChannelMessage
+                                  }
+                                  onStopChannel={(id) =>
+                                    void monoChannels.stopChannel(id)
+                                  }
+                                  onOpenMono={onOpenRailMono}
+                                  onDeleteChannel={onDeleteRailChannel}
+                                  onOpenArtifact={(artifactId) =>
+                                    onOpenMonoArtifact(
+                                      monoViewChannel.id,
+                                      artifactId,
+                                    )
+                                  }
+                                  onOpenSession={(sessionId) =>
+                                    void onOpenMonoLaunchedSession(sessionId)
+                                  }
+                                  onOpenFile={onOpenFile}
+                                />
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                       </div>

@@ -1453,6 +1453,18 @@ function AgentTranscriptComponent({
               }`}
             >
               {stampAt != null ? <DaySeparator at={stampAt} /> : null}
+              {turn
+                .flatMap((block) =>
+                  block.monoPeerMessage ? [block.monoPeerMessage] : [],
+                )
+                .map((peer) => (
+                  <MonoPeerMessageCard
+                    key={peer.id}
+                    peer={peer}
+                    cwd={cwd}
+                    onOpenFile={onOpenFile}
+                  />
+                ))}
               {items
                 .flatMap((item, itemIndex) => {
                   // The header carries the process; only approvals need a row
@@ -5240,4 +5252,51 @@ function syncTranscriptViewport(el: HTMLElement | null) {
   const next = `${Math.max(0, el.clientHeight - pad)}px`;
   if (el.style.getPropertyValue("--transcript-viewport") === next) return;
   el.style.setProperty("--transcript-viewport", next);
+}
+
+function MonoPeerMessageCard({
+  peer,
+  cwd,
+  onOpenFile,
+}: {
+  peer: NonNullable<Block["monoPeerMessage"]>;
+  cwd?: string;
+  onOpenFile?: (path: string) => void;
+}) {
+  return (
+    <div
+      data-mono-peer-message={peer.id}
+      className="mx-4 my-1.5 rounded-xl border border-stroke bg-surface/65 px-3.5 py-2.5 font-sans"
+    >
+      <div className="mb-1.5 flex items-center gap-2 text-xs text-content/65">
+        <PixelMascot
+          name={peer.fromMascot}
+          color={peer.fromColor}
+          still
+          className="size-3.5 shrink-0"
+        />
+        <span className="font-medium text-content/90">{peer.fromName}</span>
+        <span className="text-content/40">→</span>
+        <span className="font-medium text-content/75">{peer.toName}</span>
+        {peer.hop > 1 ? (
+          <span className="rounded-full bg-content/8 px-1.5 py-0.5 text-[10px] tabular-nums text-content/55">
+            Hop {peer.hop}/{peer.maxHops}
+          </span>
+        ) : null}
+        <span className="ml-auto text-[11px] tabular-nums text-content/45">
+          {new Date(peer.sentAt).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
+      </div>
+      <div className="text-[13px] leading-relaxed text-content/90">
+        <AgentMarkdown
+          text={peer.text}
+          cwd={cwd}
+          onOpenFile={onOpenFile}
+        />
+      </div>
+    </div>
+  );
 }

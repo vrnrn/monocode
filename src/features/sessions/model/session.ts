@@ -246,6 +246,22 @@ export type MonoSessionCompletion = {
   sessionCount?: number;
 };
 
+export type MonoPeerMessageMeta = {
+  id: string;
+  requestId?: string;
+  fromMonoId: string;
+  fromName: string;
+  fromMascot: string;
+  fromColor: string;
+  toMonoId: string;
+  toName: string;
+  text: string;
+  expectReply: boolean;
+  hop: number;
+  maxHops: number;
+  sentAt: number;
+};
+
 export type QueuedMessage = {
   id: string;
   /** User bubble already shown optimistically in a Mono's conversation. */
@@ -257,6 +273,8 @@ export type QueuedMessage = {
   intent?: TurnIntent;
   /** An app notification that must wait for an idle Mono, never steer its work. */
   monoSessionCompletion?: MonoSessionCompletion;
+  /** Direct message from another Mono; waits for an idle turn, never steers. */
+  monoPeerMessage?: MonoPeerMessageMeta;
   /** Delivery failed; the message remains available to retry or edit. */
   error?: string;
 };
@@ -346,6 +364,8 @@ export type Block = {
   internal?: boolean;
   /** Hidden app prompt that starts a separate completion report in a Mono chat. */
   monoSessionCompletion?: MonoSessionCompletion;
+  /** Direct message from another Mono that started this turn. */
+  monoPeerMessage?: MonoPeerMessageMeta;
   /** Accepted session launches, kept on the originating user turn. */
   monoSpawnedSessions?: MonoSpawnedSession[];
   handoff?: HandoffMeta;
