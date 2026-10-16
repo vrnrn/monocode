@@ -7,6 +7,7 @@ import {
 import {
   execChild,
   killChild,
+  listCopilotClaudeModels,
   resolveClaudeBinary,
   spawnChild,
   unwatchChild,
@@ -236,14 +237,58 @@ export function refreshClaudeCatalog(): Promise<void> {
 export async function discoverClaudeModels(
   workingDirectory?: string,
 ): Promise<AgentModel[]> {
+  const copilot = listCopilotClaudeModels().catch(() => []);
   const listed = await discoverViaListModels(workingDirectory).catch(
     (error: unknown) => {
       console.debug("[monocode] claude list_models catalog failed", error);
       return [];
     },
   );
-  if (listed.length > 0) return listed;
-  return discoverViaVersion(workingDirectory);
+  const claude =
+    listed.length > 0 ? listed : await discoverViaVersion(workingDirectory);
+  const rows = await copilot;
+  if (!Array.isArray(rows)) return claude;
+  return claude.concat(
+    rows.flatMap((row): AgentModel[] => {
+      const rec = asRecord(row);
+      const id = stringField(rec, "id");
+      const name = stringField(rec, "name");
+      const levels = advertisedEffortLevels(rec ?? {});
+      return id && name
+        ? [
+            {
+              id: `claude:copilot/${id}`,
+              harness: "claude" as const,
+              name,
+              nativeId: `copilot/${id}`,
+              provider: { id: "github-copilot", name: "GitHub Copilot" },
+              contextWindow:
+                typeof rec?.contextWindow === "number"
+                  ? rec.contextWindow
+                  : undefined,
+              settings:
+                levels.length > 0
+                  ? [
+                      {
+                        id: "effort",
+                        label: "Reasoning",
+                        kind: "select",
+                        value: levels.includes("medium") ? "medium" : levels[0],
+                        options: levels.map((value) => ({
+                          value,
+                          label:
+                            value === "none"
+                              ? "None"
+                              : (EFFORT_LABELS[value] ?? value),
+                        })),
+                      },
+                    ]
+                  : undefined,
+            },
+          ]
+        : [];
+    }),
+  );
 }
 
 async function discoverViaListModels(
@@ -540,7 +585,12 @@ function claudeCatalogId(nativeId: string): string {
 function claudeLaunchId(valueId: string, resolvedId: string): string {
   const nativeId = valueId || resolvedId;
   if (!nativeId) return "";
-  if (nativeId.startsWith("claude-") || !/\d/.test(nativeId)) return nativeId;
+  if (
+    nativeId.startsWith("claude-") ||
+    nativeId.includes("/") ||
+    !/\d/.test(nativeId)
+  )
+    return nativeId;
   return resolvedId.startsWith("claude-") ? resolvedId : `claude-${nativeId}`;
 }
 

@@ -629,6 +629,17 @@ describe("list_models catalog", () => {
     });
   });
 
+  it("preserves provider-qualified IDs from the CLI catalog", () => {
+    const models = modelsFromClaudeListModels([{
+      value: "copilot/gpt-6.1-sol",
+      displayName: "GPT-6.1 Sol",
+    }]);
+    expect(models[0]).toMatchObject({
+      id: "claude:copilot/gpt-6.1-sol",
+      nativeId: "copilot/gpt-6.1-sol",
+    });
+  });
+
   it("parses success and error control responses", () => {
     expect(
       parseControlResponse({

@@ -305,10 +305,13 @@ export function resolveModel(harness: HarnessId, id?: string): AgentModel {
       return withAliasSettings(bundled, available);
     }
 
-    // A saved concrete Claude version may be absent from both catalogs.
-    // Keep the requested id so a new session does not silently switch models.
+    // A saved Claude version or provider-qualified ID can be absent from both catalogs.
+    // Preserve the requested ID until discovery supplies its model metadata.
     const requested = id.trim();
-    if (harness === "claude" && /^claude:[a-z][a-z0-9-]*-\d/.test(requested)) {
+    if (
+      harness === "claude" &&
+      /^claude:[a-z][a-z0-9-]*(?:-\d|\/)/.test(requested)
+    ) {
       const nativeId = nativeIdForUnknownKey(requested);
       return withAliasSettings(
         { id: requested, harness, name: nativeId, nativeId },
@@ -393,10 +396,8 @@ export function nativeModelId(model: AgentModel | string): string {
 /**
  * Last-resort native id for a saved key no catalog knows.
  *
- * Every concrete Claude model is `claude-` plus a digit-bearing slug
- * (`claude:opus-5-5` → `claude-opus-5-5`); only family aliases (`opus`,
- * `sonnet`) reach the CLI bare. Reconstructing from that convention keeps the
- * provider prefix instead of emitting `opus-5-5`, which the CLI rejects.
+ * Short Claude version keys need the `claude-` prefix.
+ * Provider-qualified IDs are opaque and retain their spelling.
  */
 function nativeIdForUnknownKey(id: string): string {
   const trimmed = id.trim();
@@ -405,7 +406,7 @@ function nativeIdForUnknownKey(id: string): string {
   const harness = colon >= 0 ? trimmed.slice(0, colon).toLowerCase() : "";
   // Picker keys can use dotted versions (`opus-4.8`), while Claude's CLI
   // expects hyphenated native ids (`claude-opus-4-8`).
-  return harness === "claude"
+  return harness === "claude" && !slug.includes("/")
     ? claudeNativeId("claude", slug.replace(/\.(?=\d)/g, "-"))
     : slug;
 }
@@ -416,7 +417,7 @@ function nativeIdForUnknownKey(id: string): string {
  * Live `list_models` can still advertise the short form as `value`.
  */
 function claudeNativeId(harness: HarnessId, native: string): string {
-  if (harness !== "claude" || !native || native.startsWith("claude-")) {
+  if (harness !== "claude" || !native || native.startsWith("claude-") || native.includes("/")) {
     return native;
   }
   return /\d/.test(native) ? `claude-${native}` : native;
@@ -436,7 +437,11 @@ export function mergeModelSettings(
   model: AgentModel,
   current?: Record<string, string>,
 ): Record<string, string> {
-  if (modelsFor(model.harness).length === 0) return { ...current };
+  // Preserve saved settings until provider-qualified model metadata arrives.
+  if (
+    modelsFor(model.harness).length === 0 ||
+    (!model.settings && model.nativeId?.includes("/") && !hasLiveCatalog(model.harness))
+  ) return { ...current };
   const next = defaultModelSettings(model);
   if (!current) return next;
   for (const setting of model.settings ?? []) {

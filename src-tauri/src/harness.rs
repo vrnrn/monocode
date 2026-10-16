@@ -347,6 +347,59 @@ pub fn harness_resolve_claude() -> Result<HarnessBinary, String> {
         })
 }
 
+fn claude_copilot_script(app: &AppHandle) -> Result<PathBuf, String> {
+    if cfg!(debug_assertions) {
+        return Ok(Path::new(env!("CARGO_MANIFEST_DIR")).join("../host/claude-copilot.mjs"));
+    }
+    app.path()
+        .resource_dir()
+        .map(|dir| dir.join("claude-copilot.mjs"))
+        .map_err(|e| e.to_string())
+}
+
+fn copilot_node() -> Result<PathBuf, String> {
+    which_in_path(&gui_search_path(), "node")
+        .ok_or_else(|| "Copilot models in Claude Code require Node.js 20 or later.".into())
+}
+
+#[tauri::command(async)]
+pub fn harness_copilot_models(app: AppHandle) -> Result<serde_json::Value, String> {
+    let node = copilot_node()?;
+    let args = vec![
+        claude_copilot_script(&app)?.to_string_lossy().into_owned(),
+        "--list-models".into(),
+    ];
+    let output = exec_capture(&node.to_string_lossy(), &args, None)?;
+    serde_json::from_str(&output).map_err(|e| e.to_string())
+}
+
+/// Ask Claude for its effective API provider without exposing its auth details.
+pub(crate) fn claude_auth_provider(
+    config_dir: Option<&Path>,
+    binary_path: Option<&str>,
+) -> Option<String> {
+    let binary = match binary_path {
+        Some(path) => resolve_harness_binary_override("claude", path).ok()?,
+        None => resolve_harness_binary_default("claude")?,
+    };
+    claude_auth_provider_for(&binary, config_dir)
+}
+
+fn claude_auth_provider_for(binary: &Path, config_dir: Option<&Path>) -> Option<String> {
+    let mut cmd = Command::new(binary);
+    cmd.args(["auth", "status", "--json"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(dir) = config_dir {
+        cmd.env("CLAUDE_CONFIG_DIR", dir);
+    }
+    prepare_child(&mut cmd);
+    let output = capture_command(cmd, "Claude auth status", Duration::from_secs(5)).ok()?;
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    status.get("apiProvider")?.as_str().map(String::from)
+}
+
 fn resolve_mcp_binary(provider: &str, binary_path: Option<&str>) -> Result<PathBuf, String> {
     if !matches!(provider, "claude" | "codex") {
         return Err("Unsupported MCP provider".into());
@@ -754,7 +807,17 @@ pub fn harness_spawn(
         terminate(prev.pid);
     }
 
-    let mut cmd = Command::new(&command);
+    let copilot = binary_provider.as_deref() == Some("claude")
+        && args
+            .windows(2)
+            .any(|pair| pair[0] == "--model" && pair[1].starts_with("copilot/"));
+    let mut cmd = if copilot {
+        let mut cmd = Command::new(copilot_node()?);
+        cmd.arg(claude_copilot_script(&app)?).arg(&command);
+        cmd
+    } else {
+        Command::new(&command)
+    };
     cmd.args(&args)
         .current_dir(&workdir)
         .stdin(Stdio::piped())
@@ -1139,6 +1202,14 @@ pub(crate) fn exec_output(
         }
     }
 
+    capture_command(cmd, command, timeout)
+}
+
+fn capture_command(
+    mut cmd: Command,
+    command: &str,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
     let child = spawn_managed(&mut cmd).map_err(|e| format!("Failed to run {command}: {e}"))?;
     let pid = child.id();
     let (tx, rx) = mpsc::channel();
@@ -2336,6 +2407,22 @@ fn load_unix_login_shell_env() -> HashMap<String, String> {
 mod tests {
     use super::*;
     use std::os::unix::process::CommandExt;
+
+    #[test]
+    fn reads_effective_claude_provider_for_the_selected_account() {
+        use std::os::unix::fs::PermissionsExt;
+        let root =
+            std::env::temp_dir().join(format!("monocode-auth-provider-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let script = root.join("claude");
+        std::fs::write(&script, b"#!/bin/sh\n[ \"$1 $2 $3\" = 'auth status --json' ] || exit 2\n[ -n \"$CLAUDE_CONFIG_DIR\" ] || exit 3\nprintf '%s' '{\"apiProvider\":\"bedrock\",\"email\":\"fixture@example.invalid\"}'\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            claude_auth_provider_for(&script, Some(&root)).as_deref(),
+            Some("bedrock")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn copilot_token_reaches_all_providers() {

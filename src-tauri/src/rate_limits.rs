@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::Value;
 #[cfg(target_os = "macos")]
 use sha2::{Digest, Sha256};
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 #[cfg(target_os = "macos")]
 use unicode_normalization::UnicodeNormalization;
 
@@ -30,6 +30,8 @@ pub struct ClaudeUsageFetch {
     pub http_status: Option<u16>,
     pub body: Option<String>,
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_provider: Option<String>,
 }
 
 struct ClaudeCredentials {
@@ -48,6 +50,7 @@ fn usage_result(
         http_status,
         body,
         error,
+        auth_provider: None,
     }
 }
 
@@ -56,15 +59,28 @@ fn usage_result(
 #[tauri::command]
 pub async fn fetch_claude_usage(
     app: AppHandle,
+    host: State<'_, crate::harness::HarnessHost>,
     account_id: Option<String>,
 ) -> Result<ClaudeUsageFetch, String> {
     let config_dir = crate::harness::provider_account_dir(&app, "claude", account_id.as_deref())?;
-    tauri::async_runtime::spawn_blocking(move || fetch_claude_usage_sync(config_dir))
+    let binary_path = host.runtime_binary_path("claude");
+    tauri::async_runtime::spawn_blocking(move || fetch_claude_usage_sync(config_dir, binary_path))
         .await
         .map_err(|e| e.to_string())?
 }
 
-fn fetch_claude_usage_sync(config_dir: Option<PathBuf>) -> Result<ClaudeUsageFetch, String> {
+fn fetch_claude_usage_sync(
+    config_dir: Option<PathBuf>,
+    binary_path: Option<String>,
+) -> Result<ClaudeUsageFetch, String> {
+    if crate::harness::claude_auth_provider(config_dir.as_deref(), binary_path.as_deref())
+        .as_deref()
+        == Some("bedrock")
+    {
+        let mut result = usage_result("ok", None, None, None);
+        result.auth_provider = Some("bedrock".into());
+        return Ok(result);
+    }
     let Some(creds) = read_claude_credentials(config_dir.as_deref()) else {
         return Ok(usage_result(
             "unavailable",

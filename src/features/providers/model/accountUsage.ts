@@ -61,6 +61,8 @@ export function accountStatus(
   limits: ProviderRateLimits | undefined,
   now: number,
 ): AccountStatus {
+  if (limits?.provider === "claude" && limits.authProvider === "bedrock")
+    return { tone: "unknown", label: "AWS Bedrock", detail: null };
   const headroom = accountHeadroom(limits, now);
   if (!limits || headroom == null) {
     if (!limits || limits.status === "idle" || limits.status === "fetching") {

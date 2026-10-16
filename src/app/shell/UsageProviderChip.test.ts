@@ -91,6 +91,24 @@ function button(label: string): HTMLButtonElement {
 }
 
 describe("UsageProviderChip", () => {
+  it("shows AWS Bedrock and does not offer Claude sign-in", async () => {
+    const limits: ProviderRateLimits = {
+      provider: "claude", authProvider: "bedrock", status: "ok",
+      session: null, weekly: null, monthly: null, resetCredits: null,
+      updatedAt: now, error: null,
+    };
+    const onReconnect = vi.fn();
+    await act(async () => root.render(createElement(UsageProviderChip, { limits, now, onReconnect })));
+    expect(container.textContent).toContain("AWS Bedrock");
+    expect(container.textContent).not.toContain("not connected");
+    expect(needsProviderLogin(limits)).toBe(false);
+    await act(async () => button("Claude Code usage details").click());
+    expect(document.body.textContent).toContain("AWS Bedrock");
+    expect(document.body.textContent).not.toContain("Authentication required");
+    expect(document.body.textContent).not.toContain("Sign in to Claude Code");
+    expect(onReconnect).not.toHaveBeenCalled();
+  });
+
   it("offers the provider-owned login flow for an expired Claude session", async () => {
     const limits: ProviderRateLimits = {
       provider: "claude",

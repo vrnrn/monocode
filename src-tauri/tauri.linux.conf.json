@@ -29,6 +29,8 @@
         "bundleMediaFramework": false
       }
     },
-    "resources": null
+    "resources": {
+      "../host/claude-copilot.mjs": "claude-copilot.mjs"
+    }
   }
 }

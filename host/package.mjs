@@ -125,6 +125,7 @@ for (const target of targets) {
     ]);
   await copyFile("build/host/monocode-host.mjs", join(folder, "host.mjs"));
   await copyFile("host/provider-guard.mjs", join(folder, "provider-guard.mjs"));
+  await copyFile("host/claude-copilot.mjs", join(folder, "claude-copilot.mjs"));
   await copyFile("LICENSE", join(folder, "MONOCODE-LICENSE"));
   await writeFile(
     join(folder, "version.json"),

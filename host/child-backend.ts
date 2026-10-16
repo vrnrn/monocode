@@ -82,6 +82,17 @@ export class HostChildBackend implements ChildBackend {
       } as T;
     }
     switch (command) {
+      case "harness_copilot_models": {
+        const { stdout } = await exec(
+          process.execPath,
+          [
+            fileURLToPath(new URL("./claude-copilot.mjs", import.meta.url)),
+            "--list-models",
+          ],
+          { timeout: 15_000, maxBuffer: 1024 * 1024, windowsHide: true },
+        );
+        return JSON.parse(stdout) as T;
+      }
       case "harness_exec": {
         const provider = args.binaryProvider;
         if (!isRemoteProvider(provider))
@@ -157,7 +168,23 @@ export class HostChildBackend implements ChildBackend {
       );
     const commandArgs = args.args as string[];
 
-    const launch = await providerLaunch(String(args.command), commandArgs);
+    let launch = await providerLaunch(String(args.command), commandArgs);
+    if (
+      args.binaryProvider === "claude" &&
+      commandArgs.some(
+        (arg, index) =>
+          arg === "--model" && commandArgs[index + 1]?.startsWith("copilot/"),
+      )
+    ) {
+      launch = {
+        command: process.execPath,
+        args: [
+          fileURLToPath(new URL("./claude-copilot.mjs", import.meta.url)),
+          launch.command,
+          ...launch.args,
+        ],
+      };
+    }
     if (this.closing) throw new Error("Host is stopping");
     const child = spawn(
       process.execPath,

@@ -58,6 +58,11 @@ function account(id: string): ProviderAccount {
 }
 
 describe("accountHeadroom", () => {
+  it("labels Bedrock accounts without claiming missing usage is a login error", () => {
+    expect(accountStatus(limits(null, null, { authProvider: "bedrock" }), now)).toMatchObject({
+      label: "AWS Bedrock", tone: "unknown",
+    });
+  });
   it("uses the tightest window", () => {
     expect(accountHeadroom(limits(window(30), window(75)), now)).toBe(25);
   });

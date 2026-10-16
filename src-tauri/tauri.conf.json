@@ -49,6 +49,7 @@
       "icons/icon.ico"
     ],
     "resources": {
+      "../host/claude-copilot.mjs": "claude-copilot.mjs",
       "macos/Assets.car": "Assets.car"
     },
     "macOS": {

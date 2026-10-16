@@ -585,6 +585,28 @@ describe("live catalog overlays", () => {
     ).toBe("claude-opus-5-5");
   });
 
+  it.each(["gpt-6.1-sol", "gpt-6-luna"])(
+    "preserves %s and its effort through a cold-start session before discovery",
+    (id) => {
+      mockLocalStorage();
+      const model = {
+        id: `claude:copilot/${id}`,
+        harness: "claude" as const,
+        name: id,
+        nativeId: `copilot/${id}`,
+      };
+      setHarnessModels("claude", [model]);
+      expect(nativeModelId(model.id)).toBe(model.nativeId);
+      resetHarnessModelOverlays();
+      const session = newSession("claude", "/repo", model.id, "supervised", {
+        effort: "xhigh",
+      });
+      expect(session.model).toBe(model.id);
+      expect(nativeModelId(session.model)).toBe(model.nativeId);
+      expect(session.modelSettings).toEqual({ effort: "xhigh" });
+    },
+  );
+
   it("rebuilds a Claude native id for a key no list knows", () => {
     expect(nativeModelId("claude:opus-4-8")).toBe("claude-opus-4-8");
     expect(nativeModelId("claude:opus-4-7")).toBe("claude-opus-4-7");

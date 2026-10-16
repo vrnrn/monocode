@@ -374,6 +374,10 @@ export function resolveClaudeBinary(
   return resolveHarnessBinary("claude", binaryPath);
 }
 
+export function listCopilotClaudeModels(): Promise<unknown> {
+  return invoke("harness_copilot_models");
+}
+
 export function resolvePiBinary(
   binaryPath?: string | null,
 ): Promise<{ path: string }> {

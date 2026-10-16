@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Claude Code sessions can use the **1M-context GPT-6.1 Sol** and **GPT-6 Luna** variants through GitHub Copilot. A session-local adapter preserves ordinary Claude provider settings.
+- Copilot GPT models expose their supported reasoning levels in the effort selector. The adapter applies the selected level to every request.
 - Jira and GitLab have a **Default Mono** in Settings → Integrations. **Send to chat** preselects that Mono for their items. You can choose another destination before sending, or choose **No default Mono** to use the usual destination picker.
 - GitLab merge requests in the Inbox have **Send to chat** and **Copy context**, the same as Jira tickets. The context link loads the current description, comments, and branch names.
 - A GitLab merge request in the Inbox shows whether its latest pipeline passed or failed. A running pipeline shows a muted label. Click the label to open the pipeline on GitLab.
@@ -21,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Claude usage shows **AWS Bedrock** when Claude reports that provider, instead of a disconnected label or a Claude sign-in prompt.
+- Saved Copilot model selections and effort settings survive cold startup before Claude Code model discovery finishes.
+- Selecting **None** for Copilot reasoning disables reasoning instead of inheriting Claude's effort setting.
 - Monos return to idle after answering a direct message, and background replies preserve pending session updates. Stale turn completion cannot stop a replacement turn.
 - Failed or cancelled channel turns retain unread messages for retry. New channel and habit sessions inherit the Mono's selected provider account.
 - Switching between direct messages and channels preserves the automatic-message hop limit.
