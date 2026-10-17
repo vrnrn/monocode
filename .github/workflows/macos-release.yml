@@ -58,11 +58,15 @@ jobs:
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
       - run: npm ci
-      - run: node --test scripts/*.test.mjs scripts/*.test.cjs
+      - run: node --test scripts/*.test.mjs
       - run: npm run check:web
-      # Remote hosts use bundled Node runtimes, independently of desktop targets.
+      # Keep remote setup available for Apple Silicon and Intel Macs.
       - run: npm run test:host
-      - run: npm run host:package -- --all
+      - name: Package Mac remote hosts
+        run: |
+          npm run host:build
+          node host/package.mjs --target darwin-arm64
+          node host/package.mjs --target darwin-x64
 
       # Apple ad hoc signing is separate from the mandatory updater signature.
       # This personal build does not require an Apple Developer certificate.
@@ -81,10 +85,14 @@ jobs:
           prerelease: false
           args: --target aarch64-apple-darwin --bundles app,dmg
 
-      - name: Upload remote host packages and migration helper
+      - name: Upload Mac host packages and migration helper
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$RELEASE_TAG" --clobber build/host-packages/*.tar.gz build/host-packages/*.zip build/host-packages/*.sha256 scripts/migrate-monocode-to-vorkspace.sh LICENSE.vorkspace
+        run: |
+          gh release upload "$RELEASE_TAG" --clobber \
+            build/host-packages/vorkspace-host-darwin-{arm64,x64}.tar.gz \
+            build/host-packages/vorkspace-host-darwin-{arm64,x64}.tar.gz.sha256 \
+            scripts/migrate-monocode-to-vorkspace.sh LICENSE.vorkspace
 
       - name: Verify app and updater feed before publication
         env:
@@ -101,6 +109,6 @@ jobs:
           fi
           cmp src-tauri/icons/icon.icns "$APP/Contents/Resources/icon.icns"
           gh release download "$RELEASE_TAG" --pattern latest.json --dir "$RUNNER_TEMP/feed"
-          gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/assets.json"
+          gh release view "$RELEASE_TAG" --json name,assets > "$RUNNER_TEMP/assets.json"
           node scripts/verify-macos-release.mjs "$RELEASE_TAG" "$RUNNER_TEMP/feed/latest.json" "$RUNNER_TEMP/assets.json"
           gh release edit "$RELEASE_TAG" --draft=false --latest

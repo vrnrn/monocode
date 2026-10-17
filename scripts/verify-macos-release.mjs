@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-export function verifyMacRelease(tag, feed, assets, version) {
+export function verifyMacRelease(tag, feed, release, version) {
   assert.match(version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
   assert.equal(
     tag,
@@ -14,12 +14,39 @@ export function verifyMacRelease(tag, feed, assets, version) {
     version,
     "Updater feed must match the app version",
   );
-  const names = new Set(assets.map(({ name }) => name));
+  assert.equal(
+    release.name,
+    `vorkspace ${version} (Mac)`,
+    "Release title must identify the Mac build",
+  );
+  const allowed = new Set([
+    "latest.json",
+    `vorkspace_${version}_aarch64.dmg`,
+    "vorkspace_aarch64.app.tar.gz",
+    "vorkspace_aarch64.app.tar.gz.sig",
+    "LICENSE.vorkspace",
+    "migrate-monocode-to-vorkspace.sh",
+    ...["arm64", "x64"].flatMap((arch) => [
+      `vorkspace-host-darwin-${arch}.tar.gz`,
+      `vorkspace-host-darwin-${arch}.tar.gz.sha256`,
+    ]),
+  ]);
+  const names = new Set(release.assets.map(({ name }) => name));
+  for (const name of names)
+    assert(allowed.has(name), `Unexpected Mac release asset: ${name}`);
   assert(names.has("latest.json"), "Release must include the updater feed");
   assert(
-    [...names].some((name) => name.endsWith("_aarch64.dmg")),
+    names.has(`vorkspace_${version}_aarch64.dmg`),
     "Apple Silicon DMG is missing",
   );
+  for (const arch of ["arm64", "x64"]) {
+    const name = `vorkspace-host-darwin-${arch}.tar.gz`;
+    assert(names.has(name), `Mac remote host archive is missing: ${name}`);
+    assert(
+      names.has(`${name}.sha256`),
+      `Mac host checksum is missing: ${name}`,
+    );
+  }
   assert(
     Object.keys(feed.platforms ?? {}).every((target) =>
       ["darwin-aarch64", "darwin-aarch64-app"].includes(target),
@@ -63,8 +90,10 @@ if (
   verifyMacRelease(
     tag,
     readJson(feedPath),
-    readJson(assetsPath).assets,
+    readJson(assetsPath),
     readJson("package.json").version,
   );
-  console.log("Verified Apple Silicon updater assets and fork download URLs.");
+  console.log(
+    "Verified Mac release title, assets, updater feed, and fork download URLs.",
+  );
 }
