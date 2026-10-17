@@ -647,14 +647,6 @@ html.has-chat-background.chat-background-effect-ready.chat-background-gradient-b
   flex-shrink: 0;
 }
 
-::highlight(monocode-transcript-search-match) {
-  background-color: color-mix(in srgb, #e2c08d 46%, transparent);
-}
-
-::highlight(monocode-transcript-search-current) {
-  background-color: color-mix(in srgb, var(--color-accent) 62%, transparent);
-}
-
 /* Match the Mono transcript's soft edge fade on overflowing tab text. */
 .tab-label[data-overflow="true"] {
   --tab-label-mask: linear-gradient(

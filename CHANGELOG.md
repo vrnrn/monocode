@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Startup restores saved conversations before optional log repairs and probes, and loads editor support, release notes, and occasional Mono screens when needed.
 - Remote hosts use a size-bounded conversation cache and briefly share file lists between searches.
 - Releases build only the Apple Silicon app and Mac remote hosts. Release titles use the app name and version without a platform suffix.
+- Production builds reject compiler and bundler warnings and enforce measured JavaScript size budgets.
 
 ### Fixed
 
