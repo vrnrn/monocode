@@ -1,0 +1,92 @@
+name: Mac release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "mac-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'vrnrn/monocode'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Validate release version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="mac-v$VERSION"
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "$TAG" ]]; then
+            echo "Tag must match the app version: $TAG" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_TYPE" != tag && "$GITHUB_REF_NAME" != main ]]; then
+            echo "Dispatch releases from main." >&2
+            exit 1
+          fi
+          if gh release view "$TAG" --json isDraft,targetCommitish > "$RUNNER_TEMP/release.json" 2>/dev/null; then
+            node - "$RUNNER_TEMP/release.json" <<'NODE'
+          const release = require(process.argv[2]);
+          if (!release.isDraft) throw new Error("Published releases cannot be overwritten");
+          if (release.targetCommitish !== process.env.GITHUB_SHA) {
+            throw new Error("An existing draft must belong to the same commit");
+          }
+          NODE
+          fi
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+
+      - run: npm ci
+      - run: node --test scripts/verify-macos-release.test.mjs
+      - run: npm run check:web
+
+      # Apple ad hoc signing is separate from the mandatory updater signature.
+      # This personal build does not require an Apple Developer certificate.
+      - name: Build Apple Silicon app and upload draft
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.MACOS_UPDATER_SIGNING_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          APPLE_SIGNING_IDENTITY: "-"
+        with:
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: "MonoCode __VERSION__ (Mac)"
+          releaseBody: "Personal Apple Silicon Mac build from vrnrn/monocode. Uses ad hoc Apple signing and signed in-app updates. See CHANGELOG.md for changes."
+          releaseDraft: true
+          prerelease: false
+          args: --target aarch64-apple-darwin --bundles app,dmg
+
+      - name: Verify app and updater feed before publication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          APP="target/aarch64-apple-darwin/release/bundle/macos/MonoCode.app"
+          codesign --verify --deep --strict "$APP"
+          test "$(lipo -archs "$APP/Contents/MacOS/monocode")" = arm64
+          gh release download "$RELEASE_TAG" --pattern latest.json --dir "$RUNNER_TEMP/feed"
+          gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/assets.json"
+          node scripts/verify-macos-release.mjs "$RELEASE_TAG" "$RUNNER_TEMP/feed/latest.json" "$RUNNER_TEMP/assets.json"
+          gh release edit "$RELEASE_TAG" --draft=false --latest
