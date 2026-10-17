@@ -4,9 +4,9 @@
 
 This repository intentionally keeps its detached source history. Import applicable bug fixes and features from [hardbeat920/monocode](https://github.com/hardbeat920/monocode) as reviewed patches. Preserve the fork's provider choices/authentication, automation guards, model visibility, Mono collaboration/lifecycle, ticket handling, branding, release versions/updater trust, recovery contracts, and Impeccable configuration. Do not merge unrelated histories or add an ancestry bridge.
 
-**Reviewed upstream baseline:** `777f1b707d957e1c530cc2e6054e5ffb198706c6`.
+**Reviewed upstream baseline:** `399c303360686e804c8657d98db91d93f6ae99b6`.
 
-Advance this baseline only in the same reviewed change as the corresponding implementation and explicit skips. For the next import, fetch fresh refs and review `git log --reverse 777f1b707d957e1c530cc2e6054e5ffb198706c6..upstream/main` plus the incremental tree diff. Account for every intervening commit, including reversions and merge commits, then adapt the final behavior to the fork. Check open import PRs/issues first. If this baseline is no longer an upstream ancestor, inspect the rewrite before choosing another baseline. A skipped release-only commit is reviewed and should not be imported again.
+Advance this baseline only in the same reviewed change as the corresponding implementation and explicit skips. For the next import, fetch fresh refs and review `git log --reverse 399c303360686e804c8657d98db91d93f6ae99b6..upstream/main` plus the incremental tree diff. Account for every intervening commit, including reversions and merge commits, then adapt the final behavior to the fork. Check open import PRs/issues first. If this baseline is no longer an upstream ancestor, inspect the rewrite before choosing another baseline. A skipped release-only commit is reviewed and should not be imported again.
 
 ## 2026-10-17 — performance and reader-position fixes
 
@@ -14,14 +14,14 @@ Advance this baseline only in the same reviewed change as the corresponding impl
 - Target starting main: `577828a9220d7a411345d722aaa0127b2b0dfab2`.
 - Previously included upstream baseline: `e49a5ae4de854e44cac7892a87cd32fc9cded415`, from PR #13 (old merge `fb63899356e53b17936fb3bc2d05e84fad42b40a`).
 - Source import root `b33e6e6b09b5202f0d945015386aecdef118a42f` has the same tree (`f79c09c73bd3e93fdba3e6ec77b80bb68d6422f5`) as documented source `d3410213efe0153ebe0124453af214721e23c26f`, which contains the previous baseline. This establishes the content baseline without restoring ancestry.
-- Reviewed through `777f1b707d957e1c530cc2e6054e5ffb198706c6` ([upstream PR #1045](https://github.com/hardbeat920/monocode/pull/1045)).
+- Reviewed through `399c303360686e804c8657d98db91d93f6ae99b6`: [upstream PR #1045](https://github.com/hardbeat920/monocode/pull/1045) and its tab-animation replay follow-up.
 - Outcome: the final runtime/test delta from `b653a397d180d98097a5f214e9bbdae68d837239` through the reviewed head is adapted on this branch. Implementation commit: `1d1d66f4b7fa65c06d9fd2864e696a3342aa29f6`; import [PR #26](https://github.com/vrnrn/vorkspace/pull/26). [Issue #25](https://github.com/vrnrn/vorkspace/issues/25) records the user's resolved patch-import direction.
 
 ### Applied behavior and fork adaptations
 
 Import worker-based code highlighting and large-diff preparation; per-session streaming subscriptions; progressive saved-session repairs; deferred large tool output with storage-preserving saves; measured history retention; completion/reflow/scroll bookmarks; bounded transcript retention under resource pressure; resource process controls; lower-priority background work; configurable smooth text reveal; and audio-context suspension after notification sounds.
 
-Five textual conflicts were resolved: keep native ticket modules and the removed Azure integration choice while adding new native modules; check local send receipts before exposing a progressively restored session; retain both receipt-ownership and upstream restore regressions; retain ticket-link plugins/protocols in Markdown; and retain the standalone startup splash while adding worker/benchmark build support. New resource UI/native error strings use vorkspace branding. Combined restore tests verify that uncertainty/replay fences survive deferred provider-log repairs.
+The five initial textual conflicts were resolved: keep native ticket modules and the removed Azure integration choice while adding new native modules; check local send receipts before exposing a progressively restored session; retain both receipt-ownership and upstream restore regressions; retain ticket-link plugins/protocols in Markdown; and retain the standalone startup splash while adding worker/benchmark build support. New resource UI/native error strings use vorkspace branding. Combined restore tests verify that uncertainty/replay fences survive deferred provider-log repairs. Review also identified that saved worker tabs needed the local session ID to fetch deferred tool output; `AgentTabView` now supplies it for local sessions, with an expansion regression. A final ref refresh added the animation replay fix at `399c303360686e804c8657d98db91d93f6ae99b6`; its import conflict retains the fork’s removal of decorative transcript components. The workspace browser fixture uses the fork’s checked editor-read and durable-draft contracts.
 
 The fork's concurrent 0.13.6 release (`7f944b3a483c9ac15b0eae2b4f6a328dd7fdd104`) is retained. Upstream 0.14.0 version bumps, release metadata and wholesale changelog reorganization are deliberately skipped. Fork release/updater configuration and `.impeccable/config.json` remain unchanged. The earlier 397 add/add diagnostics describe an unrelated-history merge and are not incremental patch conflicts.
 
@@ -54,6 +54,7 @@ The fork's concurrent 0.13.6 release (`7f944b3a483c9ac15b0eae2b4f6a328dd7fdd104`
 | `182bd345863dfec0154dcee310765427fd754e93` | Anchor visible characters and warm the changes review surface | Applied/adapted — included in the final PR #1045 performance, resource, or regression-test patch. |
 | `3e400e68fa95a3fe4cfe48a422e0325fa4464c53` | Distinguish animation handoffs from native reader scrolling | Applied/adapted — included in the final PR #1045 performance, resource, or regression-test patch. |
 | `777f1b707d957e1c530cc2e6054e5ffb198706c6` | Merge pull request #1045 from hardbeat920/release/0.14.0 | Adapted — import the final PR #1045 tree delta on the target, without upstream parents. |
+| `399c303360686e804c8657d98db91d93f6ae99b6` | Avoid replaying transcript animations when revisiting tabs | Adapted — preserve portal arrival order, settle tab catch-up fades, and avoid replaying prompt/step entrances; retain removed decorative UI choices. |
 
 ### Validation and target outcome
 

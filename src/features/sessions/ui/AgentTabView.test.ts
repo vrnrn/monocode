@@ -282,7 +282,7 @@ it("loads a saved worker's deferred tool output when expanded", async () => {
         text: "Build",
         tool: {
           kind: "execute",
-          status: "completed",
+          status: "error",
           detailOmitted: true,
         },
       },
@@ -302,7 +302,7 @@ it("loads a saved worker's deferred tool output when expanded", async () => {
       expect.anything(),
     );
     const output = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Accepted tool call: Build"]',
+      'button[aria-label="Show error details for Build"]',
     );
     expect(output).not.toBeNull();
     await act(async () => output!.click());
