@@ -14,6 +14,7 @@ use crate::fs::{
     expand_home, git_checked, git_diff_files_for, path_to_js, resolve_repo_path, GitChangedFile,
     GitDiffIndex, MAX_TEXT_FILE_BYTES,
 };
+use crate::session_store::validate_id;
 
 const MAX_SNAPSHOT_FILES: usize = 500;
 
@@ -1444,17 +1445,6 @@ fn relative_to_root(root: &Path, path: &str) -> Result<String, String> {
         return resolve_repo_path(root, &relative);
     }
     resolve_repo_path(root, trimmed)
-}
-
-fn validate_id(value: &str, label: &str) -> Result<(), String> {
-    if value.is_empty()
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
-        return Err(format!("Invalid {label} id"));
-    }
-    Ok(())
 }
 
 #[cfg(test)]
