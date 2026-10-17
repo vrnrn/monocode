@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "vorkspace",
-  "version": "0.13.3",
+  "version": "0.13.4",
   "identifier": "com.monocode.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -49,8 +49,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../host/claude-copilot.mjs": "claude-copilot.mjs",
-      "macos/Assets.car": "Assets.car"
+      "../host/claude-copilot.mjs": "claude-copilot.mjs"
     },
     "macOS": {
       "entitlements": "Entitlements.plist",

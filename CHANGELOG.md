@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.4] - 2026-10-16
+
+### Fixed
+
+- Use the supplied macOS icon unchanged, removing the asset-catalog override that added an outer frame.
+
 ## [0.13.3] - 2026-10-16
 
 ### Changed

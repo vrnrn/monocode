@@ -94,6 +94,12 @@ jobs:
           APP="target/aarch64-apple-darwin/release/bundle/macos/vorkspace.app"
           codesign --verify --deep --strict "$APP"
           test "$(lipo -archs "$APP/Contents/MacOS/vorkspace")" = arm64
+          test ! -e "$APP/Contents/Resources/Assets.car"
+          if plutil -extract CFBundleIconName raw "$APP/Contents/Info.plist" >/dev/null 2>&1; then
+            echo "App must use the original ICNS without a catalog override." >&2
+            exit 1
+          fi
+          cmp src-tauri/icons/icon.icns "$APP/Contents/Resources/icon.icns"
           gh release download "$RELEASE_TAG" --pattern latest.json --dir "$RUNNER_TEMP/feed"
           gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/assets.json"
           node scripts/verify-macos-release.mjs "$RELEASE_TAG" "$RUNNER_TEMP/feed/latest.json" "$RUNNER_TEMP/assets.json"

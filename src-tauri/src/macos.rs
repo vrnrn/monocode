@@ -694,7 +694,7 @@ pub(crate) fn install_dock_menu(app: &AppHandle) {
 
 /// `tauri dev` launches a raw binary. The Dock then skips Icon Services and
 /// paints Tauri's embedded icns edge-to-edge. Wrap that binary in a real
-/// `.app` so macOS applies the plate, mask, and padding.
+/// `.app` so macOS uses the supplied ICNS, which already has its own padding.
 #[cfg(debug_assertions)]
 pub(crate) fn ensure_dev_bundle(version: &str, bundle_version: &str) {
     if let Err(err) = relaunch_from_dev_bundle(version, bundle_version) {
@@ -716,7 +716,7 @@ pub(crate) fn prefer_bundle_dock_icon() {
     unsafe { app.setApplicationIconImage(None) };
     app.dockTile().display();
     // Tauri assigns the embedded bitmap after Ready. Clear again so Icon
-    // Services keeps the composed AppIcon (squircle fill + artwork).
+    // Services keeps the supplied ICNS instead of Tauri's embedded bitmap.
     unsafe {
         let _: () = msg_send![
             &app,
@@ -810,7 +810,8 @@ fn write_dev_bundle_icons(
     )
     .map_err(|e| e.to_string())?;
     std::fs::write(resources.join("AppIcon.icns"), DEV_ICNS).map_err(|e| e.to_string())?;
-    std::fs::write(resources.join("Assets.car"), DEV_ASSETS_CAR).map_err(|e| e.to_string())?;
+    // Remove the old icon catalog when reusing a development bundle.
+    let _ = std::fs::remove_file(resources.join("Assets.car"));
     let _ = std::process::Command::new("/usr/bin/touch")
         .arg(app)
         .status();
@@ -826,8 +827,6 @@ const DEV_BUNDLE_NAME_ENV: &str = "MONOCODE_DEV_APP_NAME";
 const DEV_BUNDLE_ID: &str = "com.monocode.desktop";
 #[cfg(debug_assertions)]
 const DEV_ICNS: &[u8] = include_bytes!("../icons/icon.icns");
-#[cfg(debug_assertions)]
-const DEV_ASSETS_CAR: &[u8] = include_bytes!("../macos/Assets.car");
 #[cfg(debug_assertions)]
 fn dev_bundle_dir_name(app_name: &str) -> String {
     format!("{app_name}.app")
@@ -888,8 +887,6 @@ fn dev_bundle_plist(app_name: &str, version: &str, bundle_version: &str) -> Vec<
 	<key>CFBundleExecutable</key>
 	<string>vorkspace</string>
 	<key>CFBundleIconFile</key>
-	<string>AppIcon</string>
-	<key>CFBundleIconName</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.monocode.desktop</string>
