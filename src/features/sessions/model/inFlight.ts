@@ -126,8 +126,18 @@ export function canAutoContinue(session: Session): boolean {
     !session.localSubmissionReplayBlocked &&
     !!session.providerSessionId &&
     !session.busy &&
-    lastBlockIsInterrupt(session)
+    lastBlockIsInterrupt(session) &&
+    !latestUserOwnsLocalSubmission(session)
   );
+}
+
+function latestUserOwnsLocalSubmission(session: Session): boolean {
+  for (let index = session.blocks.length - 1; index >= 0; index -= 1) {
+    const block = session.blocks[index];
+    if (block.role === "user" && !block.draft)
+      return block.localSubmissionOwned === true;
+  }
+  return false;
 }
 
 function lastBlockIsInterrupt(session: Session): boolean {

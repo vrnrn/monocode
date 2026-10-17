@@ -321,6 +321,9 @@ export type Block = {
   sentAt?: number;
   /** Stable model label for this turn. Present on newly created user blocks. */
   turnModel?: TurnModel;
+  /** Local admission owns this user turn, including before a receipt exists.
+   * Persisted permanently so interrupted restores require an explicit send. */
+  localSubmissionOwned?: boolean;
   /** Provider turn boundary used to replace this user message, when known. */
   providerTurnId?: string;
   /** User turn saved to the session but not submitted to the harness yet. */

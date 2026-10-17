@@ -445,6 +445,7 @@ function lastMatchingBlock(
 
 type UserTurnExtra = {
   id?: string;
+  localSubmissionOwned?: boolean;
   secondOpinion?: Block["secondOpinion"];
   noteCard?: Block["noteCard"];
   ciContext?: string;
@@ -459,6 +460,7 @@ type UserTurnExtra = {
 function userTurnFields(extra?: UserTurnExtra) {
   return {
     ...(extra?.id ? { id: extra.id } : {}),
+    ...(extra?.localSubmissionOwned ? { localSubmissionOwned: true } : {}),
     ...(extra?.secondOpinion ? { secondOpinion: extra.secondOpinion } : {}),
     ...(extra?.noteCard ? { noteCard: extra.noteCard } : {}),
     ...(extra?.ciContext ? { ciContext: extra.ciContext } : {}),

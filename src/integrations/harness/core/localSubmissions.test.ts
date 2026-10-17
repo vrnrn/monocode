@@ -1,12 +1,16 @@
+import { sanitizeSessionForPersist } from "../../../features/sessions/data/sessionStore";
+import { createEditedResendAttempt } from "../../../features/sessions/model/editLastTurn";
 import { describe, expect, it, vi } from "vitest";
 import type { Session } from "../../../features/sessions/model/session";
 import {
   canAutoContinue,
+  markTurnInterrupted,
   INTERRUPT_MESSAGE,
 } from "../../../features/sessions/model/inFlight";
 import { appendUser } from "./apply";
 import {
   restoreLocalSubmissions,
+  ownLocalSubmissionTurn,
   runLocalSubmission,
   submissionPayload,
   submissionUserTurn,
@@ -240,3 +244,100 @@ it.each(["completed", "failed"] as const)(
     expect(restored.localSubmissionUncertain).not.toBe(true);
   },
 );
+
+it("blocks interrupted pre-admission follow-ups with only an older settled receipt while allowing manual send", async () => {
+  const { store, records } = ledger();
+  const previous = attempt("previous-turn");
+  await store.reserve(previous);
+  await store.dispatch(previous.attemptId);
+  await store.settle(previous.attemptId, "completed");
+  const prior = {
+    ...session(),
+    blocks: [
+      previous.userTurn!,
+      { id: "previous-reply", role: "assistant" as const, text: "Done" },
+    ],
+  };
+  const live = appendUser(prior, "New request not yet reserved", [], {
+    id: "new-request",
+    localSubmissionOwned: true,
+  });
+  const saved = sanitizeSessionForPersist(live);
+  expect(records.has("new-request")).toBe(false);
+  const restored = markTurnInterrupted(
+    restoreLocalSubmissions(
+      {
+        ...live,
+        busy: false,
+        blocks: JSON.parse(JSON.stringify(saved.blocks)),
+      },
+      [...records.values()],
+    ),
+  );
+  expect(canAutoContinue(restored)).toBe(false);
+  expect(restored.blocks.filter((block) => block.role === "user")).toHaveLength(
+    2,
+  );
+  // The persisted row itself blocks replay even if the receipt overlay has
+  // never run (for example, no receipts existed when this process stopped).
+  expect(
+    canAutoContinue({ ...restored, localSubmissionReplayBlocked: undefined }),
+  ).toBe(false);
+  const manual = attempt("explicit-manual-turn");
+  const dispatch = vi.fn(async () => undefined);
+  await runLocalSubmission(manual, dispatch, store);
+  expect(dispatch).toHaveBeenCalledOnce();
+});
+
+it("keeps edited resend ownership on the old visible row until the replacement is accepted", () => {
+  const previous = {
+    ...session(),
+    blocks: [
+      { id: "old-turn", role: "user" as const, text: "Original request" },
+      { id: "reply", role: "assistant" as const, text: "Done" },
+    ],
+  };
+  const edit = createEditedResendAttempt(previous)!;
+  expect(edit).not.toBeNull();
+  const owned = ownLocalSubmissionTurn(previous, "edited-turn");
+  expect(owned.blocks[0]).toMatchObject({
+    id: "old-turn",
+    text: "Original request",
+    localSubmissionOwned: true,
+  });
+  expect(owned.blocks).toHaveLength(2);
+  expect(canAutoContinue(markTurnInterrupted(owned))).toBe(false);
+  const accepted = appendUser(edit.replace(owned), "Edited request", [], {
+    id: "edited-turn",
+    localSubmissionOwned: true,
+  });
+  expect(accepted.blocks.filter((block) => block.role === "user")).toEqual([
+    expect.objectContaining({ id: "edited-turn", localSubmissionOwned: true }),
+  ]);
+  expect(submissionUserTurn(accepted.blocks[0]).localSubmissionOwned).toBe(
+    true,
+  );
+});
+
+it("retains one owned visible row through handoff and repair admissions", () => {
+  let owned = appendUser(session(), "Plan the work", [], {
+    id: "visible-turn",
+    localSubmissionOwned: true,
+  });
+  for (const _phase of [
+    "visible-turn:handoff",
+    "visible-turn",
+    "visible-turn:repair:1",
+  ]) {
+    owned = ownLocalSubmissionTurn(owned, "visible-turn");
+    expect(
+      sanitizeSessionForPersist(owned).blocks.find(
+        (block) => block.id === "visible-turn",
+      )?.localSubmissionOwned,
+    ).toBe(true);
+  }
+  expect(owned.blocks.filter((block) => block.role === "user")).toHaveLength(1);
+  expect(
+    canAutoContinue(markTurnInterrupted(restoreLocalSubmissions(owned, []))),
+  ).toBe(false);
+});

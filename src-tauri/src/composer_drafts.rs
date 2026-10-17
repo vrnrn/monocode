@@ -161,10 +161,8 @@ pub(crate) fn ensure_table(conn: &Connection) -> rusqlite::Result<()> {
 /// Only lease admission runs on startup's first-paint path. The background
 /// scan defers until a later cold start if foreground writes begin, another
 /// owner appears, any read fails, or its 250ms collection budget is exhausted.
-pub(crate) fn initialize_attachment_cache(
-    conn: &Connection,
-    database: &Path,
-) -> rusqlite::Result<()> {
+pub(crate) fn admit_attachment_cache(conn: &Connection) -> rusqlite::Result<Option<String>> {
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS composer_attachment_processes (owner_instance TEXT PRIMARY KEY, owner_pid INTEGER NOT NULL);")?;
     let instance = uuid::Uuid::new_v4().to_string();
     if !register_attachment_process(
         conn,
@@ -172,8 +170,19 @@ pub(crate) fn initialize_attachment_cache(
         std::process::id(),
         crate::local_submissions::pid_alive,
     )? {
-        return Ok(());
+        return Ok(None);
     }
+    Ok(Some(instance))
+}
+
+pub(crate) fn initialize_attachment_cache(
+    conn: &Connection,
+    database: &Path,
+    instance: Option<String>,
+) -> rusqlite::Result<()> {
+    let Some(instance) = instance else {
+        return Ok(());
+    };
     let activity = Arc::new(AtomicBool::new(false));
     let changed = Arc::clone(&activity);
     conn.update_hook(Some(
@@ -252,53 +261,101 @@ fn collect_cached_attachments(
     activity: &AtomicBool,
     alive: impl Fn(u32) -> bool,
 ) -> rusqlite::Result<usize> {
+    if activity.load(Ordering::SeqCst) {
+        return Ok(0);
+    }
+    let before: i64 = conn.query_row("PRAGMA data_version", [], |row| row.get(0))?;
+    // A WAL read snapshot does not reserve the writer during history scanning.
+    let read = Transaction::new_unchecked(conn, TransactionBehavior::Deferred)?;
+    let other_owners = read
+        .prepare("SELECT owner_pid FROM composer_attachment_processes WHERE owner_instance != ?1")?
+        .query_map([instance], |row| row.get::<_, u32>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if activity.load(Ordering::SeqCst) || other_owners.into_iter().any(&alive) {
+        read.commit()?;
+        return Ok(0);
+    }
+    let collection =
+        match scan_attachment_collection(&read, root, cutoff, ATTACHMENT_COLLECTION_BUDGET) {
+            Ok(collection) => collection,
+            Err(error) => {
+                eprintln!("Composer attachment cleanup deferred: {error}");
+                None
+            }
+        };
+    read.commit()?;
+    let Some(collection) = collection else {
+        return Ok(0);
+    };
+    if activity.load(Ordering::SeqCst) || Instant::now() >= collection.deadline {
+        return Ok(0);
+    }
+    // Only the final recheck/unlink phase reserves the writer. Startup lease
+    // admission precedes every other startup transaction, so concurrent opens
+    // either finish before this gate or are detected here before recovery runs.
     let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let after: i64 = tx.query_row("PRAGMA data_version", [], |row| row.get(0))?;
     let other_owners = tx
         .prepare("SELECT owner_pid FROM composer_attachment_processes WHERE owner_instance != ?1")?
         .query_map([instance], |row| row.get::<_, u32>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let removed = if activity.load(Ordering::SeqCst) || other_owners.into_iter().any(alive) {
+    let removed = if before != after
+        || activity.load(Ordering::SeqCst)
+        || other_owners.into_iter().any(alive)
+    {
         0
     } else {
-        match sweep_unreferenced_attachments(&tx, root, cutoff, activity) {
-            Ok(removed) => removed,
-            Err(error) => {
-                eprintln!("Composer attachment cleanup deferred: {error}");
-                0
-            }
-        }
+        collection.remove_unreferenced(activity)
     };
     tx.commit()?;
     Ok(removed)
 }
 
+#[derive(Debug)]
 struct AttachmentCandidate {
     path: PathBuf,
     uuid: String,
 }
 
-fn sweep_unreferenced_attachments(
-    conn: &Connection,
-    root: &Path,
-    now: SystemTime,
-    activity: &AtomicBool,
-) -> Result<usize, String> {
-    sweep_unreferenced_attachments_with_budget(
-        conn,
-        root,
-        now,
-        activity,
-        ATTACHMENT_COLLECTION_BUDGET,
-    )
+#[derive(Debug)]
+struct AttachmentCollection {
+    directory: PathBuf,
+    candidates: Vec<AttachmentCandidate>,
+    deadline: Instant,
 }
 
-fn sweep_unreferenced_attachments_with_budget(
+impl AttachmentCollection {
+    fn remove_unreferenced(self, activity: &AtomicBool) -> usize {
+        let Ok(metadata) = std::fs::symlink_metadata(&self.directory) else {
+            return 0;
+        };
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return 0;
+        }
+        let mut removed = 0;
+        for candidate in self.candidates {
+            if activity.load(Ordering::SeqCst) || Instant::now() >= self.deadline {
+                break;
+            }
+            match std::fs::remove_file(&candidate.path) {
+                Ok(()) => removed += 1,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => eprintln!(
+                    "Composer attachment cleanup deferred for {}: {error}",
+                    candidate.path.display()
+                ),
+            }
+        }
+        removed
+    }
+}
+
+fn scan_attachment_collection(
     conn: &Connection,
     root: &Path,
     now: SystemTime,
-    activity: &AtomicBool,
     budget: Duration,
-) -> Result<usize, String> {
+) -> Result<Option<AttachmentCollection>, String> {
     let deadline = Instant::now() + budget;
     struct ProgressBudget<'a>(&'a Connection);
     impl Drop for ProgressBudget<'_> {
@@ -311,14 +368,14 @@ fn sweep_unreferenced_attachments_with_budget(
     let _progress = ProgressBudget(conn);
     let directory = root.join(ATTACHMENT_DIRECTORY);
     match std::fs::symlink_metadata(&directory) {
-        Ok(metadata) if !metadata.is_dir() || metadata.file_type().is_symlink() => return Ok(0),
+        Ok(metadata) if !metadata.is_dir() || metadata.file_type().is_symlink() => return Ok(None),
         Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.to_string()),
     }
     let entries = match std::fs::read_dir(&directory) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.to_string()),
     };
     let mut candidates = Vec::new();
@@ -358,7 +415,7 @@ fn sweep_unreferenced_attachments_with_budget(
         });
     }
     if candidates.is_empty() {
-        return Ok(0);
+        return Ok(None);
     }
     let ids = candidates
         .iter()
@@ -421,28 +478,12 @@ fn sweep_unreferenced_attachments_with_budget(
     }
     // No files are removed until every reference source has been inspected.
     check_collection_budget(deadline)?;
-    let metadata = std::fs::symlink_metadata(&directory).map_err(|error| error.to_string())?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Ok(0);
-    }
-    let mut removed = 0;
-    for candidate in candidates {
-        if activity.load(Ordering::SeqCst) || Instant::now() >= deadline {
-            break;
-        }
-        if referenced.contains(&candidate.uuid) {
-            continue;
-        }
-        match std::fs::remove_file(&candidate.path) {
-            Ok(()) => removed += 1,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => eprintln!(
-                "Composer attachment cleanup deferred for {}: {error}",
-                candidate.path.display()
-            ),
-        }
-    }
-    Ok(removed)
+    candidates.retain(|candidate| !referenced.contains(&candidate.uuid));
+    Ok((!candidates.is_empty()).then_some(AttachmentCollection {
+        directory,
+        candidates,
+        deadline,
+    }))
 }
 
 fn quote_identifier(name: &str) -> String {
@@ -1242,16 +1283,74 @@ mod tests {
         let directory = CacheDirectory::new();
         let first = directory.file("first", Duration::from_secs(7200));
         let second = directory.file("second", Duration::from_secs(7200));
-        let result = sweep_unreferenced_attachments_with_budget(
-            &conn,
-            &directory.0,
-            SystemTime::now(),
-            &AtomicBool::new(false),
-            Duration::ZERO,
-        );
+        let result =
+            scan_attachment_collection(&conn, &directory.0, SystemTime::now(), Duration::ZERO);
         assert!(result.unwrap_err().contains("budget exceeded"));
         assert!(first.exists());
         assert!(second.exists());
+    }
+
+    #[test]
+    fn composer_attachment_gc_read_scan_allows_publication_and_rechecks_data_version() {
+        use rusqlite::hooks::{AuthAction, Authorization};
+        let directory = CacheDirectory::new();
+        let database = directory.0.join("publication.db");
+        let conn = Connection::open(&database).unwrap();
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL; CREATE TABLE durable_roots(reference TEXT);",
+        )
+        .unwrap();
+        conn.busy_timeout(Duration::from_millis(100)).unwrap();
+        ensure_table(&conn).unwrap();
+        assert!(register_attachment_process(&conn, "collector", 1, |_| false).unwrap());
+        let file = directory.file("publishing", Duration::from_secs(7200));
+        let (entered, scanning) = std::sync::mpsc::sync_channel(0);
+        let (resume, resumed) = std::sync::mpsc::sync_channel(0);
+        let root = directory.0.clone();
+        let worker = std::thread::spawn(move || {
+            let conn = Connection::open(database).unwrap();
+            let mut paused = false;
+            conn.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                if !paused
+                    && matches!(
+                        context.action,
+                        AuthAction::Read {
+                            table_name: "durable_roots",
+                            column_name: "reference"
+                        }
+                    )
+                {
+                    paused = true;
+                    entered.send(()).unwrap();
+                    resumed.recv().unwrap();
+                }
+                Authorization::Allow
+            }))
+            .unwrap();
+            collect_cached_attachments(
+                &conn,
+                &root,
+                SystemTime::now(),
+                "collector",
+                &AtomicBool::new(false),
+                |_| false,
+            )
+            .unwrap()
+        });
+        scanning.recv_timeout(Duration::from_secs(5)).unwrap();
+        let published = conn.execute(
+            "INSERT INTO durable_roots(reference) VALUES (?1)",
+            [file.to_string_lossy().as_ref()],
+        );
+        // Always release the scanner before asserting, including on a regression.
+        resume.send(()).unwrap();
+        let removed = worker.join().unwrap();
+        assert!(
+            published.is_ok(),
+            "A background reference scan reserved the writer: {published:?}"
+        );
+        assert_eq!(removed, 0);
+        assert!(file.exists());
     }
 
     #[cfg(unix)]

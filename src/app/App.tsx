@@ -1,4 +1,7 @@
-import { submissionUserTurn } from "../integrations/harness/core/localSubmissions";
+import {
+  ownLocalSubmissionTurn,
+  submissionUserTurn,
+} from "../integrations/harness/core/localSubmissions";
 import { sessionConversationPage } from "../features/agent-app/model/sessionConversation";
 import { readMonoConversation } from "../features/monos/model/monoConversation";
 import {
@@ -7431,6 +7434,9 @@ function Workspace({
         crypto.randomUUID();
       const cards = {
         id: userTurnId,
+        ...(!current.ephemeral && !current.inboxAsk
+          ? { localSubmissionOwned: true }
+          : {}),
         ...(rawCommand ? undefined : userTurnCards(noteCard, card)),
         ...(ciContext ? { ciContext } : {}),
         ...(operatorCommand.matched ? { monocode: true } : {}),
@@ -7600,6 +7606,17 @@ function Workspace({
           throw new Error(
             "Local send was cancelled before its session could be saved",
           );
+        if (!current.ephemeral && !current.inboxAsk) {
+          // Publish ownership into the live state before its checkpoint, so
+          // later ordinary auto-persists cannot erase the admission marker.
+          updateSessionState(sessionsRef, setSessions, (sessions) =>
+            sessions.map((session) =>
+              session.id === sessionId
+                ? ownLocalSubmissionTurn(session, userTurnId)
+                : session,
+            ),
+          );
+        }
         const snapshot = sessionsRef.current.find(
           (session) => session.id === sessionId,
         );

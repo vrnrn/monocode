@@ -195,7 +195,7 @@ fn sanitize_user_turn(
         return Err("Local submission recovery row is too large".into());
     }
     let mut clean = serde_json::json!({"id":user_turn_id,"role":"user","text":text});
-    for key in ["internal", "monocode"] {
+    for key in ["internal", "monocode", "localSubmissionOwned"] {
         if value[key] == true {
             clean[key] = serde_json::Value::Bool(true);
         }

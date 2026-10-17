@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -39,12 +39,18 @@ impl SessionStore {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+        conn.busy_timeout(Duration::from_secs(5))
+            .map_err(|e| e.to_string())?;
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")
             .map_err(|e| e.to_string())?;
+        // Announce this opener before migrations/recovery start read-then-write
+        // transactions, so a previous attachment collector yields to startup.
+        let attachment_cache =
+            crate::composer_drafts::admit_attachment_cache(&conn).map_err(|e| e.to_string())?;
         migrate(&conn).map_err(|e| e.to_string())?;
         crate::local_submissions::recover_unresolved(&conn).map_err(|e| e.to_string())?;
         crate::worktrees::reconcile_removals(&conn)?;
-        crate::composer_drafts::initialize_attachment_cache(&conn, &path)
+        crate::composer_drafts::initialize_attachment_cache(&conn, &path, attachment_cache)
             .map_err(|e| e.to_string())?;
         let read_conn = Connection::open(&path).map_err(|e| e.to_string())?;
         read_conn

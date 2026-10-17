@@ -1,8 +1,12 @@
+import { sanitizeSessionForPersist } from "./sessionStore";
+import { canAutoContinue, markTurnInterrupted } from "../model/inFlight";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionRecord } from "./sessionStore";
 
 const invoke = vi.fn();
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invoke(...args) }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => invoke(...args),
+}));
 
 const { getSession } = await import("./sessionStore");
 
@@ -47,7 +51,9 @@ describe("restoring a session whose repair cannot be persisted", () => {
     const session = await getSession(record.id);
     expect(session?.sidebarHidden).toBe(true);
     expect(session?.blocks[0].text).toBe("list the agents");
-    const repaired = invoke.mock.calls.find(([cmd]) => cmd === "session_upsert");
+    const repaired = invoke.mock.calls.find(
+      ([cmd]) => cmd === "session_upsert",
+    );
     expect(repaired?.[1].session.sidebarHidden).toBe(true);
   });
 
@@ -72,7 +78,8 @@ describe("restoring a session whose repair cannot be persisted", () => {
   it("still returns the repaired session when the write fails", async () => {
     invoke.mockImplementation((cmd: string) => {
       if (cmd === "session_get") return Promise.resolve(codexRecord());
-      if (cmd === "session_upsert") return Promise.reject(new Error("db locked"));
+      if (cmd === "session_upsert")
+        return Promise.reject(new Error("db locked"));
       return Promise.resolve(null);
     });
 
@@ -91,8 +98,33 @@ describe("restoring a session whose repair cannot be persisted", () => {
 
     const session = await getSession("s1");
     expect(session?.blocks[1].text).toBe("Find files");
-    expect(
-      invoke.mock.calls.some(([cmd]) => cmd === "session_upsert"),
-    ).toBe(true);
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "session_upsert")).toBe(
+      true,
+    );
   });
+});
+
+it("retains local admission ownership through hydrate and later ordinary persistence without a receipt", async () => {
+  const record = codexRecord();
+  record.blocks = [
+    { id: "previous-turn", role: "user", text: "Earlier request" },
+    { id: "previous-reply", role: "assistant", text: "Done" },
+    {
+      id: "pending-turn",
+      role: "user",
+      text: "New request",
+      localSubmissionOwned: true,
+    },
+  ];
+  invoke.mockImplementation((cmd: string) =>
+    Promise.resolve(cmd === "session_get" ? record : null),
+  );
+  const restored = await getSession(record.id);
+  expect(restored?.blocks[2].localSubmissionOwned).toBe(true);
+  const savedAgain = sanitizeSessionForPersist({
+    ...restored!,
+    title: "Changed after restore",
+  });
+  expect(savedAgain.blocks[2].localSubmissionOwned).toBe(true);
+  expect(canAutoContinue(markTurnInterrupted(restored!))).toBe(false);
 });

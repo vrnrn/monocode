@@ -45,6 +45,7 @@ export function submissionUserTurn(block: Block): Block {
     id: block.id,
     role: "user",
     text: block.text,
+    ...(block.localSubmissionOwned ? { localSubmissionOwned: true } : {}),
     ...(block.internal ? { internal: true } : {}),
     ...(block.monocode ? { monocode: true } : {}),
     ...(block.intent ? { intent: block.intent } : {}),
@@ -62,6 +63,38 @@ export function submissionUserTurn(block: Block): Block {
           }),
         }
       : {}),
+  };
+}
+
+/** Mark the live row as well as its checkpoint before receipt admission.
+ * An edited resend keeps its original visible row until the provider accepts
+ * the replacement, so it owns that current row during the admission gap. */
+export function ownLocalSubmissionTurn(
+  session: Session,
+  userTurnId: string,
+): Session {
+  if (session.ephemeral || session.inboxAsk) return session;
+  const intended = session.blocks.findIndex(
+    (block) => block.id === userTurnId && block.role === "user" && !block.draft,
+  );
+  let latest = intended;
+  if (latest < 0) {
+    for (let index = session.blocks.length - 1; index >= 0; index -= 1) {
+      if (
+        session.blocks[index].role === "user" &&
+        !session.blocks[index].draft
+      ) {
+        latest = index;
+        break;
+      }
+    }
+  }
+  if (latest < 0 || session.blocks[latest].localSubmissionOwned) return session;
+  return {
+    ...session,
+    blocks: session.blocks.map((block, index) =>
+      index === latest ? { ...block, localSubmissionOwned: true } : block,
+    ),
   };
 }
 
@@ -168,16 +201,17 @@ export function restoreLocalSubmissions(
   session: Session,
   receipts: LocalSubmissionReceipt[],
 ): Session {
-  if (!receipts.length) return session;
   // Even a settled receipt can outlive a stale in-flight workspace marker.
   // Such a marker must never turn into another automatic provider send.
   const latestUser = [...session.blocks]
     .reverse()
     .find((block) => block.role === "user" && !block.draft);
+  if (!receipts.length && !latestUser?.localSubmissionOwned) return session;
   const unresolved = receipts.filter((receipt) => receipt.phase !== "settled");
   const blocked = {
     ...session,
     localSubmissionReplayBlocked:
+      latestUser?.localSubmissionOwned === true ||
       unresolved.length > 0 ||
       receipts.some((receipt) => receipt.userTurnId === latestUser?.id),
   };
