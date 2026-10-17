@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.8] - 2026-10-17
+
+### Fixed
+
+- macOS Activity Monitor identifies the app's renderers as **vorkspace Web Content** instead of **tauri://localhost**, including additional workspace windows and popovers.
+
+### Changed
+
+- Simplified build tooling and removed unused code, duplicate helpers, outdated documentation, and redundant remote-host build steps.
+
 ## [0.13.7] - 2026-10-17
 
 ### Added
