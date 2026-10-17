@@ -2,7 +2,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { newSession, type Block } from "../model/session";
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
-afterEach(() => mocks.invoke.mockReset());
+afterEach(() => {
+  mocks.invoke.mockReset();
+  vi.unstubAllGlobals();
+});
 
 it("sanitizes and sends only changed block payloads, preserving order separately", async () => {
   const { upsertSession } = await import("./sessionStore");
@@ -71,4 +74,34 @@ it("keeps its last successful baseline after a failed save and never retries a s
     expect(args.expectedRevision).toBe(7);
     expect(args.session.blocks[0].text).toBe("new");
   }
+});
+
+it("keeps revision fences and resends correct payloads when WeakRef is unavailable", async () => {
+  vi.stubGlobal("WeakRef", undefined);
+  const { upsertSession } = await import("./sessionStore");
+  const value = {
+    ...newSession("codex", "/tmp/without-weakref"),
+    blocks: [
+      { id: "u", role: "user" as const, text: "request" },
+      { id: "a", role: "assistant" as const, text: "first reply" },
+    ],
+  };
+  const summary = { ...value, createdAt: 1, updatedAt: 1 };
+  mocks.invoke
+    .mockResolvedValueOnce([summary, 41])
+    .mockResolvedValueOnce([summary, 42]);
+  await upsertSession(value);
+  await upsertSession({
+    ...value,
+    blocks: [value.blocks[0], { ...value.blocks[1], text: "edited reply" }],
+  });
+  const [, first] = mocks.invoke.mock.calls[0];
+  const [, second] = mocks.invoke.mock.calls[1];
+  expect(first.expectedRevision).toBeNull();
+  expect(second.expectedRevision).toBe(41);
+  expect(second.blockIds).toEqual(["u", "a"]);
+  expect(second.session.blocks).toEqual([
+    expect.objectContaining({ id: "u", text: "request" }),
+    expect.objectContaining({ id: "a", text: "edited reply" }),
+  ]);
 });

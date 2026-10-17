@@ -1,4 +1,3 @@
-/// <reference lib="es2021.weakref" />
 import {
   listLocalSubmissions,
   restoreLocalSubmissions,
@@ -402,13 +401,28 @@ export function sanitizeSessionForPersist(
  * overwrite a newer one. Chain them per session; different sessions still
  * write concurrently.
  */
+type BlockSnapshot = { deref(): Block[] | undefined };
+const unavailableBlockSnapshot: BlockSnapshot = { deref: () => undefined };
+
+/** Older webviews keep the revision fence and safely resend all block payloads. */
+function weakBlockSnapshot(blocks: Block[]): BlockSnapshot {
+  const WeakSnapshot = (
+    globalThis as unknown as {
+      WeakRef?: new (value: Block[]) => BlockSnapshot;
+    }
+  ).WeakRef;
+  return typeof WeakSnapshot === "function"
+    ? new WeakSnapshot(blocks)
+    : unavailableBlockSnapshot;
+}
+
 // Revisions fence other windows/native full writers. Weak snapshots avoid keeping
 // every conversation alive merely because it has been saved in this process.
 const ordinarySaved = new Map<
   string,
   {
     revision: number;
-    blocks: WeakRef<Block[]>;
+    blocks: BlockSnapshot;
     persisted: WeakSet<Block>;
     lead?: string;
   }
@@ -536,7 +550,7 @@ export async function upsertSession(
     );
     ordinarySaved.set(session.id, {
       revision,
-      blocks: new WeakRef(snapshot),
+      blocks: weakBlockSnapshot(snapshot),
       persisted,
       lead: session.orchestrationLeadId,
     });
@@ -743,7 +757,7 @@ export async function readSession(sessionId: string): Promise<Session | null> {
   else if (record.persistenceRevision !== undefined)
     ordinarySaved.set(sessionId, {
       revision: record.persistenceRevision,
-      blocks: new WeakRef(persistedBlocks),
+      blocks: weakBlockSnapshot(persistedBlocks),
       persisted,
       lead: session.orchestrationLeadId,
     });
