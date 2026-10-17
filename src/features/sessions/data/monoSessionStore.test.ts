@@ -71,7 +71,8 @@ describe("Mono database pagination and writes", () => {
     expect(persistFingerprint(session)).not.toBe(before);
     call.mockResolvedValueOnce(saved(session));
     await upsertSession(session);
-    const payload = (call.mock.calls.at(-1)![1] as { session: Session }).session;
+    const payload = (call.mock.calls.at(-1)![1] as { session: Session })
+      .session;
     expect(payload.blocks[0].artifactCards).toEqual([card, visual]);
     call.mockResolvedValueOnce(saved(payload));
     const restored = (await getSession(session.id))!;
@@ -432,13 +433,13 @@ describe("Mono database pagination and writes", () => {
     );
   });
 
-  it("keeps normal session loading and complete saves unchanged", async () => {
+  it("keeps normal loading separate and initializes its own block-row baseline", async () => {
     const session = await load(false);
     expect(call).toHaveBeenCalledWith("session_get", { sessionId: session.id });
-    call.mockResolvedValueOnce(saved(session));
+    call.mockResolvedValueOnce([saved(session), 1]);
     await upsertSession(session);
     expect(call).toHaveBeenLastCalledWith(
-      "session_upsert",
+      "session_upsert_delta",
       expect.objectContaining({
         session: expect.objectContaining({
           blocks: [

@@ -27,10 +27,7 @@ import {
   type WorkspaceTab,
 } from "../../features/workspace/model/layout";
 import { useIdleSessionDetach } from "./useIdleSessionDetach";
-import {
-  createMono,
-  saveMonoSessionId,
-} from "../../features/monos/model/mono";
+import { createMono, saveMonoSessionId } from "../../features/monos/model/mono";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -52,14 +49,19 @@ beforeEach(() => {
   mocks.forgetHarnessSession.mockReset().mockResolvedValue(undefined);
   stored = new Map();
   mocks.invoke.mockReset().mockImplementation(async (command, args) => {
-    if (command === "session_upsert") {
+    if (command === "session_upsert_delta") {
+      const previous = stored.get(args.session.id);
+      const byId = new Map(previous?.blocks.map((block) => [block.id, block]));
+      for (const block of args.session.blocks) byId.set(block.id, block);
       const record = structuredClone({
         ...args.session,
+        blocks: args.blockIds.map((id: string) => byId.get(id)!),
+        persistenceRevision: (previous?.persistenceRevision ?? 0) + 1,
         createdAt: 1,
         updatedAt: 2,
       });
       stored.set(record.id, record);
-      return record;
+      return [record, record.persistenceRevision];
     }
     if (command === "session_get") {
       return structuredClone(stored.get(args.sessionId) ?? null);

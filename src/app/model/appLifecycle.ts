@@ -32,7 +32,7 @@ import {
 } from "../../features/sessions/model/session";
 import { sessionChildHarnesses } from "../../features/sessions/model/handoff";
 import {
-  getSession,
+  readSession,
   listInFlightSessions,
   listSessionsByProject,
   loadWorkspaceSnapshot,
@@ -327,7 +327,7 @@ async function loadResumedWorkspaceOnce(): Promise<ResumedWorkspace | null> {
   const loaded = new Map<string, Session>();
   await Promise.all(
     [...ids].map(async (id) => {
-      const record = await getSession(id).catch(() => null);
+      const record = await readSession(id).catch(() => null);
       if (record) loaded.set(id, record);
     }),
   );

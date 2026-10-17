@@ -116,6 +116,12 @@ fn delete_artifact(conn: &Connection, id: &str) -> rusqlite::Result<()> {
         [id],
     )?;
     tx.execute(
+        "UPDATE ordinary_blocks SET block_json = json_set(block_json, '$.artifactCards',
+           (SELECT json_group_array(json(card.value)) FROM json_each(block_json, '$.artifactCards') AS card
+            WHERE json_extract(card.value, '$.id') != ?1))
+         WHERE EXISTS (SELECT 1 FROM json_each(block_json, '$.artifactCards') AS card
+                       WHERE json_extract(card.value, '$.id') = ?1)", [id])?;
+    tx.execute(
         "UPDATE sessions SET blocks_json = (
            SELECT json_group_array(json(CASE WHEN json_type(block.value, '$.artifactCards') = 'array'
              THEN json_set(block.value, '$.artifactCards',
@@ -444,6 +450,17 @@ mod tests {
         }))
         .unwrap();
         upsert_session(&conn, &session).unwrap();
+        let normalized = SessionUpsert {
+            id: "normalized".into(),
+            ..session.clone()
+        };
+        crate::session_store::incremental::save(
+            &conn,
+            &normalized,
+            &["turn".into(), "reply".into()],
+            None,
+        )
+        .unwrap();
         let mono = SessionUpsert {
             id: "mono".into(),
             ..session.clone()
@@ -453,6 +470,17 @@ mod tests {
         delete_artifact(&conn, "remove").unwrap();
         delete_artifact(&conn, "remove").unwrap();
         delete_artifact(&conn, "personal").unwrap();
+        let normalized = crate::session_store::get_session(&conn, "normalized")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            normalized.blocks[0]["artifactCards"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(normalized.blocks[0]["artifactCards"][0]["id"], "keep");
         assert!(get_artifact(&conn, "remove").unwrap().is_none());
         assert!(get_artifact(&conn, "keep").unwrap().is_some());
         let kept_note: String = conn

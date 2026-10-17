@@ -108,7 +108,7 @@ export function recentOpenedFiles(cwd: string): string[] {
 
 export function prefetchProjectFiles(cwd: string) {
   if (!looksLikeProject(cwd)) return;
-  void loadProjectFiles(cwd);
+  void loadProjectFiles(cwd).catch(() => undefined);
 }
 
 export function loadProjectFiles(

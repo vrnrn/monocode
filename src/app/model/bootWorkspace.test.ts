@@ -7,6 +7,7 @@ const store = vi.hoisted(() => ({
   loadWorkspaceSnapshot: vi.fn(),
   listInFlightSessions: vi.fn(),
   getSession: vi.fn(),
+  readSession: vi.fn(),
   upsertSession: vi.fn(),
 }));
 vi.mock("../../features/sessions/data/sessionStore", async (original) => ({
@@ -35,7 +36,7 @@ function savedWorkspace() {
   store.loadWorkspaceSnapshot.mockResolvedValue(
     collectWorkspaceSnapshot(tabs, sessions, tabs[0].id, "/repo", new Map()),
   );
-  store.getSession.mockImplementation(
+  store.readSession.mockImplementation(
     async (id: string) => sessions.find((session) => session.id === id) ?? null,
   );
   return sessions;
@@ -50,6 +51,7 @@ it("restores ten idle tabs without rewriting their transcripts before first pain
   );
   expect(restored?.tabs).toHaveLength(10);
   expect(store.upsertSession).not.toHaveBeenCalled();
+  expect(store.getSession).not.toHaveBeenCalled();
 });
 
 it("still persists the interruption marker for a recovered running turn", async () => {

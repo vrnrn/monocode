@@ -6,7 +6,10 @@ import { getSession } from "../data/sessionStore";
 import { foldableWork, foldedBlocks, groupTurnItems, groupTurns } from "./transcriptActivity";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: async (command: string, args: unknown) => {
+  const value = await mocks.invoke(command, args);
+  return command === "session_upsert_delta" ? [value ?? null, 1] : value;
+} }));
 afterEach(() => mocks.invoke.mockReset());
 
 const anchor: OmpInterjectionAnchor = {
@@ -464,7 +467,7 @@ describe("persisted session loading", () => {
     mocks.invoke.mockImplementation(async (command, args) => {
       if (command === "session_get") return record;
       if (command === "omp_session_interjections") return [anchor];
-      if (command === "session_upsert") {
+      if (command === "session_upsert_delta") {
         writes += 1;
         record = { ...record, ...args.session };
         return record;
@@ -494,7 +497,7 @@ describe("persisted session loading", () => {
         expect(args).toEqual({ providerSessionId: "provider" });
         return verified ? [{ text: "First.Second.", concat: "First.Second." }] : [];
       }
-      if (command === "session_upsert") {
+      if (command === "session_upsert_delta") {
         writes++;
         record = { ...record, ...args.session };
         return record;
@@ -524,7 +527,7 @@ describe("persisted session loading", () => {
       if (command === "session_get") return record;
       if (command === "omp_session_interjections") return [];
       if (command === "omp_active_assistant_texts") return [{ text: "First.Second.", concat: "First.Second." }];
-      if (command === "session_upsert") return args.session;
+      if (command === "session_upsert_delta") return args.session;
       throw new Error(command);
     });
     const loaded = (await getSession(record.id))!;

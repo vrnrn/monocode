@@ -35,6 +35,7 @@ import {
   hostGitAction,
   hostGitIndex,
   indexHostFiles,
+  invalidateHostFileIndex,
   listHostFiles,
   readHostFile,
   searchHostContent,
@@ -501,7 +502,7 @@ export function createHostServer(
               String(params.projectId ?? ""),
             );
             const cwd = await resolveHostWorktreeAsync(project.cwd, params.cwd);
-            result = await engine.withIdleProject(project.id, () =>
+            const created = await engine.withIdleProject(project.id, () =>
               createHostWorktree(
                 project.cwd,
                 params.branch,
@@ -510,6 +511,8 @@ export function createHostServer(
                 cwd,
               ),
             );
+            result = created;
+            invalidateHostFileIndex(created.path);
             workspace.invalidateRoots();
             break;
           }

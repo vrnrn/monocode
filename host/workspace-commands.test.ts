@@ -23,6 +23,7 @@ import type {
 } from "../src/platform/tauri/fs";
 import { HostStore } from "./store";
 import { WorkspaceCommands } from "./workspace-commands";
+import { indexHostFiles } from "./workspace";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -74,6 +75,23 @@ function fixture() {
 
 const apiRoot = (path: string) =>
   process.platform === "win32" ? path.replace(/\\/g, "/") : path;
+
+it("invalidates the cached project index after rename and delete", async () => {
+  const { commands, repo } = fixture();
+  const a = repo("a");
+  writeFileSync(join(a.cwd, "transient.txt"), "untracked\n");
+  expect(await indexHostFiles(a.cwd)).toContain("transient.txt");
+
+  await commands.run("rename_path", {
+    path: join(a.cwd, "transient.txt"),
+    name: "renamed.txt",
+  });
+  expect(await indexHostFiles(a.cwd)).toContain("renamed.txt");
+  expect(await indexHostFiles(a.cwd)).not.toContain("transient.txt");
+
+  await commands.run("delete_path", { path: join(a.cwd, "renamed.txt") });
+  expect(await indexHostFiles(a.cwd)).not.toContain("renamed.txt");
+});
 
 it("commits only selected working files and preserves other staging and repos", async () => {
   const { commands, repo } = fixture();

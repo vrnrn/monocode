@@ -1,3 +1,4 @@
+/// <reference lib="es2021.weakref" />
 import {
   listLocalSubmissions,
   restoreLocalSubmissions,
@@ -97,6 +98,7 @@ type SessionRecord = {
   title: string;
   providerSessionId?: string | null;
   providerAccountId?: string | null;
+  persistenceRevision?: number;
   blocks: Block[];
   queuedMessages?: QueuedMessage[];
   queueStatus?: MessageQueueStatus;
@@ -400,6 +402,17 @@ export function sanitizeSessionForPersist(
  * overwrite a newer one. Chain them per session; different sessions still
  * write concurrently.
  */
+// Revisions fence other windows/native full writers. Weak snapshots avoid keeping
+// every conversation alive merely because it has been saved in this process.
+const ordinarySaved = new Map<
+  string,
+  {
+    revision: number;
+    blocks: WeakRef<Block[]>;
+    persisted: WeakSet<Block>;
+    lead?: string;
+  }
+>();
 const sessionWriteQueues = new Map<string, Promise<unknown>>();
 const sessionWriteLeadById = new Map<string, string>();
 const deletedSessionIds = new Set<string>();
@@ -435,9 +448,7 @@ export async function upsertSession(
     ? session.blocks.filter((block) => monoPersistedBlock(block) !== null)
     : session.blocks;
   // Mono writes sanitize only the changed suffix inside the serialized queue.
-  const payload = mono
-    ? persistableMeta(session)
-    : sanitizeSessionForPersist(session);
+  const payload = persistableMeta(session);
   if (session.orchestrationLeadId) {
     sessionWriteLeadById.set(session.id, session.orchestrationLeadId);
   } else {
@@ -478,17 +489,59 @@ export async function upsertSession(
       monoSavedBlocks.set(session.id, snapshot);
       return summary;
     }
-    return invoke<SessionSummary>("session_upsert", {
-      session: {
-        ...payload,
-        blocks: (payload as SessionUpsertPayload).blocks.map((block) =>
-          block.orchestrationLeadId &&
-          deletedSessionIds.has(block.orchestrationLeadId)
-            ? { ...block, orchestrationLeadId: undefined }
-            : block,
-        ),
+    const baseline = ordinarySaved.get(session.id);
+    const previous = baseline?.blocks.deref();
+    const byId = new Map(previous?.map((block) => [block.id, block]));
+    const firstUser = snapshot.findIndex((block) => block.role === "user");
+    const ids: string[] = [];
+    const blocks: Block[] = [];
+    const persisted = new WeakSet<Block>();
+    for (const [index, source] of snapshot.entries()) {
+      const lead =
+        index === firstUser &&
+        session.orchestrationLeadId &&
+        !deletedSessionIds.has(session.orchestrationLeadId)
+          ? session.orchestrationLeadId
+          : undefined;
+      const same =
+        byId.get(source.id) === source &&
+        (index !== firstUser || baseline?.lead === lead);
+      // Omitted ephemeral blocks have no stored identity. Recheck them only
+      // when their reference changes, just like ordinary immutable blocks.
+      if (same) {
+        if (baseline?.persisted.has(source)) {
+          ids.push(source.id);
+          persisted.add(source);
+        }
+        continue;
+      }
+      const owned = lead
+        ? { ...source, orchestrationLeadId: lead }
+        : source.orchestrationLeadId &&
+            deletedSessionIds.has(source.orchestrationLeadId)
+          ? { ...source, orchestrationLeadId: undefined }
+          : source;
+      const clean = sanitizeBlock(owned);
+      if (!clean) continue;
+      ids.push(clean.id);
+      persisted.add(source);
+      blocks.push(clean);
+    }
+    const [saved, revision] = await invoke<[SessionSummary, number]>(
+      "session_upsert_delta",
+      {
+        session: { ...payload, blocks },
+        blockIds: ids,
+        expectedRevision: baseline?.revision ?? null,
       },
+    );
+    ordinarySaved.set(session.id, {
+      revision,
+      blocks: new WeakRef(snapshot),
+      persisted,
+      lead: session.orchestrationLeadId,
     });
+    return saved;
   });
   return summary ? normalizeSummary(summary) : null;
 }
@@ -687,6 +740,14 @@ export async function readSession(sessionId: string): Promise<Session | null> {
     }
   }
   if (session.monoTranscript) monoSavedBlocks.set(sessionId, persistedBlocks);
+  else if (record.persistenceRevision !== undefined)
+    ordinarySaved.set(sessionId, {
+      revision: record.persistenceRevision,
+      blocks: new WeakRef(persistedBlocks),
+      persisted: new WeakSet(persistedBlocks),
+      lead: session.orchestrationLeadId,
+    });
+  else ordinarySaved.delete(sessionId);
   return session;
 }
 
@@ -904,6 +965,7 @@ export async function deleteSession(
     );
     discardComposerDraft(sessionId);
     monoSavedBlocks.delete(sessionId);
+    ordinarySaved.delete(sessionId);
     const tombstone = setTimeout(
       () => deletedSessionIds.delete(sessionId),
       60_000,
@@ -927,6 +989,7 @@ export async function discardDraftSessionRecord(
     }),
   );
   monoSavedBlocks.delete(sessionId);
+  ordinarySaved.delete(sessionId);
 }
 
 export async function setSessionArchived(

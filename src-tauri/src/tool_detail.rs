@@ -140,11 +140,16 @@ pub(crate) fn stored_detail(
     step_id: Option<&str>,
 ) -> rusqlite::Result<Option<String>> {
     // Extract the one block inside SQLite instead of parsing the transcript.
+    let normalized = crate::session_store::incremental::indexed(conn, session_id)?;
     let block: Option<String> = conn
         .query_row(
-            "SELECT block.value FROM sessions, json_each(sessions.blocks_json) AS block
+            if normalized {
+                "SELECT block_json FROM ordinary_blocks WHERE session_id=?1 AND block_id=?2"
+            } else {
+                "SELECT block.value FROM sessions, json_each(sessions.blocks_json) AS block
              WHERE sessions.id = ?1 AND json_extract(block.value, '$.id') = ?2
-             LIMIT 1",
+             LIMIT 1"
+            },
             [session_id, block_id],
             |row| row.get(0),
         )
@@ -179,6 +184,7 @@ mod tests {
             "CREATE TABLE sessions (id TEXT PRIMARY KEY, blocks_json TEXT NOT NULL)",
         )
         .unwrap();
+        crate::session_store::incremental::ensure_tables(&conn).unwrap();
         conn.execute(
             "INSERT INTO sessions (id, blocks_json) VALUES ('s', ?1)",
             [blocks.to_string()],

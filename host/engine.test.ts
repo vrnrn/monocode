@@ -767,6 +767,67 @@ describe("headless session ownership", () => {
     },
   );
 
+  it("restores provider bindings without parsing idle transcripts", () => {
+    const { directory, store, provider, id } = setup();
+    const initial = store.session(id);
+    const marker = "transcript-only-marker";
+    for (let index = 0; index < 40; index++) {
+      store.save({
+        ...initial,
+        updatedAt: initial.updatedAt + index,
+        session: {
+          ...initial.session,
+          id: `history-${index}`,
+          providerSessionId: `provider-${index}`,
+          blocks: [{ id: "body", role: "assistant", text: marker.repeat(3_000) }],
+        },
+      }, { type: "fixture" });
+    }
+    const reopened = new HostStore(join(directory, "host.db"));
+    cleanups.push(() => reopened.close());
+    provider.bind = vi.fn();
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      const recovered = new HostEngine(reopened, { codex: provider });
+      cleanups.push(() => recovered.close());
+      expect(parse.mock.calls.some(([source]) => source.includes(marker))).toBe(false);
+      expect(provider.bind).toHaveBeenCalledTimes(40);
+      expect(provider.bind).toHaveBeenNthCalledWith(
+        1, "history-39", "provider-39", initial.session.cwd,
+      );
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
+  it.each(["incomplete", "malformed"])("repairs %s binding metadata from its snapshot once", async (kind) => {
+    const { directory, store, provider, id } = setup();
+    const initial = store.session(id);
+    store.save({
+      ...initial,
+      revision: initial.revision + 1,
+      session: { ...initial.session, providerSessionId: "legacy-provider" },
+    }, { type: "fixture" });
+    const legacy = { ...store.summaries()[0] } as Record<string, unknown>;
+    delete legacy.cwd;
+    delete legacy.harness;
+    store.db.prepare("UPDATE sessions SET summary=? WHERE id=?").run(
+      kind === "malformed" ? "invalid JSON" : JSON.stringify(legacy), id,
+    );
+    const reopened = new HostStore(join(directory, "host.db"));
+    cleanups.push(() => reopened.close());
+    provider.bind = vi.fn();
+    const load = vi.spyOn(reopened, "session");
+    const first = new HostEngine(reopened, { codex: provider });
+    expect(load).toHaveBeenCalledExactlyOnceWith(id);
+    expect(provider.bind).toHaveBeenCalledWith(id, "legacy-provider", initial.session.cwd);
+    load.mockClear();
+    const second = new HostEngine(reopened, { codex: provider });
+    expect(load).not.toHaveBeenCalled();
+    await first.close();
+    await second.close();
+  });
+
   it("recovers interrupted durable state without replaying an uncertain provider send", async () => {
     const { store, provider, id } = setup();
     const value = store.session(id);

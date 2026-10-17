@@ -158,6 +158,43 @@ describe("groupMonoChatTurns", () => {
     expect(groupMonoChatTurns(blocks)).toHaveLength(2);
   });
 
+  it("measures the next gap from the latest run even with out-of-order completions", () => {
+    const blocks: Block[] = [
+      { id: "first", role: "user", text: "First", startedAt: at },
+      completion("later", at + 50 * minute),
+      completion("earlier", at + 10 * minute),
+      completion("next", at + 100 * minute),
+      completion("separate", at + 170 * minute),
+    ];
+    expect(
+      groupMonoChatTurns(blocks).map((turn) => turn.map((block) => block.id)),
+    ).toEqual([["first", "later", "earlier", "next"], ["separate"]]);
+  });
+
+  it("visits completion bursts linearly instead of rescanning merged history", () => {
+    let roleReads = 0;
+    const blocks: Block[] = [
+      { id: "first", role: "user", text: "First", startedAt: at },
+    ];
+    for (let index = 0; index < 1_000; index++) {
+      blocks.push(completion(`completion-${index}`, at + index));
+      blocks.push({
+        id: `answer-${index}`,
+        get role(): "assistant" {
+          roleReads++;
+          return "assistant";
+        },
+        text: "Done",
+      });
+    }
+    const turns = groupMonoChatTurns(blocks);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toEqual(blocks);
+    // A deterministic work bound, independent of machine speed. The old
+    // accumulated-history scan read these roles about half a million times.
+    expect(roleReads).toBeLessThan(10_000);
+  });
+
   it("keeps the user's own messages and habit reports as their own turns", () => {
     const blocks: Block[] = [
       { id: "first", role: "user", text: "First", startedAt: at },
