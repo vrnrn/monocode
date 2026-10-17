@@ -16,8 +16,8 @@ export function verifyMacRelease(tag, feed, release, version) {
   );
   assert.equal(
     release.name,
-    `vorkspace ${version} (Mac)`,
-    "Release title must identify the Mac build",
+    `vorkspace ${version}`,
+    "Release title must match the app version without a platform suffix",
   );
   const allowed = new Set([
     "latest.json",

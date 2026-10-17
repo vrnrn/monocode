@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.7] - 2026-10-17
+
 ### Added
 
 - Resource pressure controls show agent/tool processes, and Settings → Chat can disable smooth text reveal. Adapted from upstream MonoCode PR #1045 by Nick (hardbeat920).
@@ -14,10 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Large conversations use per-session streaming updates, worker-based code highlighting and diff preparation, and deferred tool output to reduce UI work. Background indexing and agent tools receive lower scheduling priority where supported.
+- Ordinary conversations save changed blocks instead of repeatedly copying unchanged history, with revision checks and preservation of unopened tool output.
+- Startup restores saved conversations before optional log repairs and probes, and loads editor support, release notes, and occasional Mono screens when needed.
+- Remote hosts use a size-bounded conversation cache and briefly share file lists between searches.
+- Releases build only the Apple Silicon app and Mac remote hosts. Release titles use the app name and version without a platform suffix.
 
 ### Fixed
 
 - Reader position survives reply completion, file-pane resizing and cached tab restores. Notification sounds suspend their audio context after playback.
+- Long Mono conversations avoid repeated history scans during completion, and content searches reuse prepared queries to reduce allocations.
 
 ## [0.13.6] - 2026-10-17
 
