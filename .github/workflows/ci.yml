@@ -60,7 +60,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:host
-      - run: npm run host:package
+      # test:host builds the bundle before running the integration tests.
+      - run: node host/package.mjs
 
   check:
     name: Mac application

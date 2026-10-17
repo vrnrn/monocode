@@ -1,6 +1,6 @@
 # Performance improvements in plain English
 
-These are the five improvements approved for implementation. The code keeps the recovery, scrolling, and background-work improvements already on main. The [technical audit](performance-audit.md) explains the design, tests, measurements, and remaining opportunities.
+These five improvements are complete. The [0.13.7 performance audit](https://github.com/vrnrn/vorkspace/blob/mac-v0.13.7/docs/performance-audit.md) preserves their design, tests, and historical measurements. See the [remaining performance opportunities](performance-audit.md) before proposing further changes.
 
 ## Save just the new bits
 
@@ -38,4 +38,4 @@ The isolated remote-host startup benchmark improved from **50.5 ms to 12.1 ms**,
 
 The incremental-save regression checks that changing one block updates one stored block while preserving the other 100 large results. Cache tests check bounds, expiry, invalidation, and failed requests. These checks establish less repeated work; everyday launch time and total app RAM still need measurements from matched packaged builds.
 
-Further work, such as releasing more distant conversation views or changing native startup ordering, remains a separate profiling decision. Those larger changes are not needed for these five improvements.
+Further work, such as releasing more distant conversation views or changing native startup ordering, remains a separate profiling decision. The audit describes the remaining opportunities and the whole-app workload needed to assess them.

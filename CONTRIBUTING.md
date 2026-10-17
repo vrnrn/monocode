@@ -23,6 +23,11 @@ npm run tauri dev
 - `src/platform/tauri/` - browser-to-Tauri adapters for filesystem, PTY, clipboard, and platform behavior
 - `src/shared/` - reusable UI, hooks, and small utilities that contain no feature behavior
 - `src-tauri/src/` - the Rust side: PTYs, filesystem and git, session storage, native window
+- `host/` - remote host runtime, transport, persistence, process ownership, and tests
+- `tests/browser/` - browser fixtures and cross-feature interaction tests
+- `scripts/` - small maintenance, development, packaging, and release commands; focused script tests live alongside them
+
+The [historical architecture review](https://github.com/vrnrn/vorkspace/blob/mac-v0.13.7/docs/archive-architecture-review.md) preserves deferred ideas for search continuation, structured cleanup outcomes, and reconciling Git mutations with observed repository state.
 
 `src/integrations/harness/` is the most useful place to start if you want to fix something real. Each folder under `providers/` has an adapter (`claudeAdapter.ts`) that implements the shared `HarnessAdapter` lifecycle from `core/registry.ts`, and a protocol module (`claudeProtocol.ts`) that translates the CLI’s output into vorkspace’s own event types. The protocol modules are pure functions with unit tests beside them, so you can fix a Codex parsing bug with only Claude Code installed. That’s for the providers we already ship - please don’t add a new one yet.
 
@@ -32,7 +37,22 @@ npm run tauri dev
 npm run check
 ```
 
-That runs what CI runs: vitest, `tsc --noEmit`, `cargo fmt`, `cargo clippy`, and `cargo test`. If it’s green locally it should be green on GitHub. `npm run check:web` and `npm run check:rust` run the two halves separately when you only touched one side.
+`npm run check` runs the frontend unit suite and type check, then Rust formatting, Clippy, and tests. Host tests, script tests, and browser tests are separate checks; CI coverage can also vary by workflow.
+
+```bash
+npm run test:host
+node --test scripts/*.test.*
+```
+
+`npm run check:web` and `npm run check:rust` run the two halves separately when you only touched one side.
+
+To measure remote-host startup with the script's default isolated fixture (200 sessions, 262,144 characters each, seven runs; not application data):
+
+```sh
+node scripts/benchmark-host-startup.mjs
+```
+
+Pass `--baseline` with a Git ref to compare that revision with the current source.
 
 For transcript layout and scrolling changes, also run the real-browser tests:
 
