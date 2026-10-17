@@ -264,3 +264,58 @@ it("saves worker prompts and responses with their source session and project", a
     vi.unstubAllGlobals();
   }
 });
+
+it("loads a saved worker's deferred tool output when expanded", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  localStorage.clear();
+  vi.mocked(invoke).mockClear();
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "session_tool_detail" ? "Full saved build output" : null,
+  );
+  const session = {
+    ...newSession("codex", "/project"),
+    blocks: [
+      { id: "worker-prompt", role: "user" as const, text: "Build the app" },
+      {
+        id: "worker-build",
+        role: "tool" as const,
+        text: "Build",
+        tool: {
+          kind: "execute",
+          status: "completed",
+          detailOmitted: true,
+        },
+      },
+    ],
+  };
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(AgentTabView, { title: "Worker", session, visible: true }),
+      ),
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      "session_tool_detail",
+      expect.anything(),
+    );
+    const output = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Accepted tool call: Build"]',
+    );
+    expect(output).not.toBeNull();
+    await act(async () => output!.click());
+    expect(invoke).toHaveBeenCalledWith("session_tool_detail", {
+      sessionId: session.id,
+      blockId: "worker-build",
+      stepId: null,
+    });
+    expect(container.textContent).toContain("Full saved build output");
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+    vi.mocked(invoke).mockReset();
+    vi.unstubAllGlobals();
+  }
+});

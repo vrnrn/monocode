@@ -7,6 +7,7 @@ import {
 } from "react";
 import { AgentTranscript } from "./AgentTranscript";
 import { useSessionSnapshot } from "../model/sessionStateStore";
+import { isRemoteProjectPath } from "../../projects/model/recents";
 import { TranscriptFind } from "./TranscriptFind";
 import {
   clearTranscriptJump,
@@ -127,6 +128,7 @@ export function AgentTabView({
     <div data-agent-tab className="flex h-full min-h-0 flex-col">
       <div className="relative min-h-0 flex-1">
         <AgentTranscript
+          sessionId={isRemoteProjectPath(session.cwd) ? undefined : session.id}
           blocks={session.blocks}
           busy={session.busy}
           cwd={sessionWorkCwd(session)}
