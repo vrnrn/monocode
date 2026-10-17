@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-10-16
+
+### Changed
+
+- Apple Silicon release for testing in-app updates from 0.13.1.
+
 ## [0.13.1] - 2026-10-16
 
 ### Added
