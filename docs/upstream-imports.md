@@ -58,4 +58,17 @@ The fork's concurrent 0.13.6 release (`7f944b3a483c9ac15b0eae2b4f6a328dd7fdd104`
 
 ### Validation and target outcome
 
-Validation and the exact target implementation commit/PR are finalized on this branch before merge. Keep those results with this record so a future import can distinguish a reviewed skip from an unvalidated pending change.
+The combined runtime/test head reviewed independently was `11c96633302353e7974a08ce488927e41f96e072`, containing target main `7f944b3a483c9ac15b0eae2b4f6a328dd7fdd104`. The final follow-up changes this record only. Its ancestry has the single detached root `b33e6e6b09b5202f0d945015386aecdef118a42f`; there is no common ancestor with upstream. Every one of the 26 commits since the previous upstream baseline is accounted for in the table above. The snapshot/source tree equality was rechecked.
+
+Independent cloud validation on that combined head:
+
+- `npm run check:web`: 5,212 passed, 13 existing live-provider skips; TypeScript passed.
+- `npm run build`: passed, including both new worker bundles and the standalone startup splash. Existing CSS pseudo-element and chunk-size warnings remain.
+- Host TypeScript/build passed. The full host run passed 124 tests with five platform skips; three process-tree tests initially failed because this container's PID 1 retained terminated descendants as zombies. All eight tests in `host/child-backend.test.ts`, including those three, then passed under a Linux child-subreaper wrapper. This covers all 127 host tests without changing application or test code.
+- Chromium functional coverage: the full run passed 80 cases and skipped the optional workspace navigation benchmark. One completion case lost its execution context when a documentation save triggered Vite's page reload; its entire eight-test `session-performance.spec.ts` fixture then passed without concurrent writes. All 81 functional cases are covered, including streaming/reflow, tab returns, ticket context, provider/model visibility, startup and recovery.
+- `node --test scripts/*.test.*`: 16 passed, eight macOS migration tests skipped on Linux.
+- `git diff --check` passed. Release/updater configuration, version 0.13.6, provider implementations, automation guards, host sources and `.impeccable` have no changes relative to target main. Fork-specific changes in shared transcript/startup modules were inspected separately against upstream.
+
+The original cloud executor reported native formatting and strict Clippy passing, with 602 native tests passed and one ignored. The independent continuation has no Rust toolchain or GTK/WebKit development packages installed, so it did not rerun those native checks. Separately, all 12 jobs in [upstream CI run 39055090652](https://github.com/hardbeat920/monocode/actions/runs/39055090652) were verified successful for upstream PR #1045 head `3e400e68fa95a3fe4cfe48a422e0325fa4464c53`, including Chromium/WebKit, native checks on three platforms and packaging. These are source checks, not fork PR checks; GitHub returned no workflow runs or commit statuses for the fork's reviewed head.
+
+Combined-fork WebKit remains unvalidated: both Playwright download hosts returned HTTP 403 in this cloud environment. Native GUI launch, live provider accounts and release packaging were not exercised by this continuation. The functional browser suite does not establish the optional 50 ms workspace benchmark; upstream PR #1045 reports WebKit at 69 ms against that budget. Native CPU/memory and owned-process controls are currently implemented for macOS; other platforms retain unavailable native samples and UI-stall detection.
