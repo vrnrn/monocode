@@ -64,7 +64,6 @@ jobs:
       - run: npm run test:host
       - name: Package Mac remote hosts
         run: |
-          npm run host:build
           node host/package.mjs --target darwin-arm64
           node host/package.mjs --target darwin-x64
 
