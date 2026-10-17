@@ -55,17 +55,15 @@ The comparison substitutes only `host/engine.ts` and `host/store.ts` from the ba
 
 ### Desktop startup dependency measurement
 
-A Vite `generateBundle` inspection walked the static imports of both `main` and `App`, counting each emitted JavaScript chunk once. `main` starts loading `App` immediately and awaits it before the first render. CSS, image assets, and subsequent dynamic feature imports are excluded.
+Identical programmatic Vite production builds compared a fresh archive of main `b55a4720` with the combined changes, sharing the installed dependencies. A `generateBundle` inspection walks the static imports of both `main` and `App`, counting UTF-8 bytes of each emitted JavaScript chunk once. `main` starts loading `App` immediately and awaits it before the first render. CSS, images, and subsequent dynamic imports are excluded. Build roots were canonicalized to avoid macOS temporary-directory aliases affecting emitted HTML paths.
 
-The comparison was rerun on main `b55a4720`, switching only App's editor-command import between main's direct import and our local bridge. The other local changes, including transcript grouping, are present in both builds.
-
-| Metric | Before bridge | After bridge |
+| Metric | Main | Combined changes |
 | --- | ---: | ---: |
-| Minified JavaScript in startup closure | 3,187,550 bytes | 2,913,528 bytes |
-| App chunk | 1,588,743 bytes | 1,314,721 bytes |
-| CodeMirror packages in startup closure | view, state, search | none |
+| Minified JavaScript in startup closure | 3,187,139 bytes | 2,712,471 bytes |
+| App chunk | 1,588,446 bytes | 1,112,982 bytes |
+| CodeMirror, raw changelog, What's New and optional Mono settings/channel screens in startup closure | Present | None |
 
-The local bridge still defers 274,022 bytes, or 8.6% of that JavaScript closure, until an editor or another feature using CodeMirror is opened. A restored editor will still load CodeMirror. Byte counts measure dependency delivery, not elapsed startup time or resident memory.
+The combined changes defer approximately 475 KB, or 14.9%, of this startup JavaScript. All optional modules still emit and can load on demand. A restored editor still needs CodeMirror; a restored visible channel still needs its view. Byte counts measure dependency delivery, not elapsed startup time or resident memory. Both production comparison builds passed.
 
 ## Approved changes and remaining larger opportunities
 
@@ -89,9 +87,11 @@ Acceptance: compare the existing measured-history implementation with any protot
 
 The ordinary branch of [upsertSession](../src/features/sessions/data/sessionStore.ts) now compares immutable block references inside the existing per-session write queue. It sanitizes and sends only changed blocks plus ordered block IDs and the expected revision. The successful-save baseline advances only after the native acknowledgement. Mono retains its separate changed-suffix path.
 
-The additive native schema stores ordinary block JSON independently from the session header. A legacy conversation normalizes on its first delta save inside the same SQLite transaction; conversion, ordering, deletions, metadata, and the new revision commit together. Normal updates inspect IDs and positions without reading unchanged transcript JSON. Updating an omitted tool result restores its existing full detail from that block's row. Compatibility full writes reconstruct normalized history before atomically returning to the legacy representation and invalidating the delta revision.
+Weak snapshots are feature-detected. Older webviews without `WeakRef` retain the revision fence and safely sanitize/resend all blocks on each save, without retaining a strong history snapshot or requiring a higher platform minimum.
 
-Reads, search, lazy tool detail, artifact ownership, orchestration cleanup, and attachment collection account for both representations. Revision mismatches fail instead of falling back to an unconditional full overwrite. This protects other windows and native writers; callers must reload an out-of-date conversation before attempting a conflicting save. The frontend still performs a linear reference/ID pass; the large JSON payload and changed-row writes follow changed content rather than total history. This is not constant-time persistence.
+The additive native schema stores ordinary block JSON independently from the session header. A legacy conversation normalizes on its first delta save inside the same SQLite transaction; conversion, ordering, deletions, metadata, and the new revision commit together. Normal updates inspect IDs and positions without reading unchanged transcript JSON. Updating an omitted tool result restores its existing full detail from that block's row. Compatibility full writes reconstruct normalized history before atomically returning to the legacy representation and replacing the delta revision token. A retained revision row distinguishes a legacy full writer from an untouched legacy session.
+
+Reads, search, lazy tool detail, artifact ownership, orchestration cleanup, and attachment collection account for both representations. Worker detachment updates normalized rows without invalidating the open worker's revision; durable detachment records prevent a later dirty save from restoring the removed ownership. Revision mismatches fail instead of falling back to an unconditional full overwrite. This protects other windows and native writers; callers must reload an out-of-date conversation before attempting a conflicting save. The frontend still performs a linear reference/ID pass; the large JSON payload and changed-row writes follow changed content rather than total history. This is not constant-time persistence.
 
 Regression tests cover a changed block among 100 unchanged 4 KiB tool results, omitted-detail read/save/reopen, reordering and rewind, full-writer compatibility, deletion, transaction rollback, stale writers on separate connections, and frontend write ordering. The row-write regression observes exactly one updated block with less than 5 KiB rewritten.
 
@@ -119,20 +119,24 @@ The native provider-output queue remains bounded to 16 MiB and 4,096 records per
 
 ## Validation and next profiling workload
 
-The earlier validation below covers main `b55a4720` plus the initial five small optimizations. Final combined follow-through validation is recorded separately below before merge. The imported first-paint tests initially expired under concurrent builds because history now warms one turn per frame/timer cycle. Their tests now control that schedule and verify each growth step and scroll pinning, without changing runtime code or increasing timeouts.
+The combined checks cover main `b55a4720` plus the performance changes. The imported first-paint tests initially expired under concurrent builds because history now warms one turn per frame/timer cycle. Their tests now control that schedule and verify each growth step and scroll pinning, without changing runtime code or increasing timeouts.
 
 | Check | Result |
 | --- | --- |
-| Web suite and TypeScript (`NODE_OPTIONS=--no-experimental-webstorage npm run check:web`) | 5,221 passed, 13 skipped; type check passed |
-| Host build and full suite (`npm run test:host`) | 130 passed, 6 skipped |
-| Rust suite (`cargo test`) | 654 passed, 1 ignored |
+| Web suite and TypeScript (`NODE_OPTIONS=--no-experimental-webstorage npm run check:web`) | 5,239 passed, 13 skipped; type check passed |
+| Host build and full suite (`npm run test:host`) | 139 passed, 6 skipped |
+| Rust suite after review fixes (`cargo test`) | 660 passed, 1 ignored |
 | Rust formatting and Clippy with `-D warnings` | Passed using the installed stable toolchain directly |
 | Chromium and WebKit (`npm run test:browser`) | 162 passed, 2 optional release-benchmark cases skipped |
-| Production Vite build and dependency inspection | Passed |
-| Benchmark script syntax, isolated smoke run, and diff whitespace | Passed |
+| Production comparison builds and dependency inspection | Passed |
+| Host benchmark script and isolated seven-sample comparison | Passed |
 
-Node v26's experimental global web storage conflicts with the DOM test environment; the web checks disable that Node feature without changing application code. The automated checks establish behavior and build compatibility; the host benchmark and emitted dependency inspection supply the performance evidence above.
+Astra reviewed the MR at medium reasoning and identified two persistence/search regressions: synthesized provider-migration notices were incorrectly considered already durable, and the normalized search limited raw JSON candidates before checking searchable content. Focused regressions exercise read/save/reopen and metadata-only search candidates; the fixes preserve the byte budget and report incomplete searches honestly. Astra's follow-up review confirmed both blockers resolved and found no new blockers. A final feature-detected weak-reference fallback also passed review and its focused regression.
 
-The browser run covers the imported completion, reader-position, history retention, tab revisit and real file-pane resizing behavior in both engines. It does not establish the separate release-mode navigation latency budget; that optional benchmark remains a profiling task.
+Node v26's experimental global web storage conflicts with the DOM test environment; web checks disable that Node feature without changing application code. The automated checks establish behavior and build compatibility; the host benchmark and emitted dependency inspection supply the performance evidence above.
 
-The next whole-app profile should use matched release builds and an isolated fixture with an empty workspace, a long restored chat, a restored editor, multiple parked transcripts, four concurrent streams, and a large repository search. Record launch marks already emitted by `main`, aggregate RSS across native/webview/provider processes, heap snapshots after navigation and idle collection, input-to-paint delay, and p95 search latency. Use repeated runs on the same machine and keep startup and steady-state workloads separate.
+The browser run covers completion, reader-position, history retention, tab revisit and real file-pane resizing in both engines. It does not establish the separate release-mode navigation latency budget; that optional benchmark remains a profiling task. The final provider-migration fix changes storage baseline classification, covered by the data-layer regressions, rather than rendering.
+
+The dormant window-transfer collector has no production caller. Wiring it in the future requires an explicit save-flush and revision-baseline handoff; transferred dirty contents cannot safely adopt an arbitrary current database revision. The current change does not activate that path or retry stale writes blindly.
+
+The next whole-app profile should use matched release builds and an isolated fixture with an empty workspace, a long restored chat, a restored editor, multiple parked transcripts, four concurrent streams, and a large repository search. Record existing launch marks, aggregate RSS across native/webview/provider processes, heap snapshots after navigation and idle collection, input-to-paint delay, and p95 search latency. Use repeated runs on the same machine and keep startup and steady-state workloads separate.

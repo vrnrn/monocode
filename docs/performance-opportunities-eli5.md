@@ -6,7 +6,7 @@ These are the five improvements approved for implementation. The code keeps the 
 
 Adding one sentence to a notebook used to mean copying the whole notebook again. Ordinary conversations now save the new or edited pieces and a small list showing their order.
 
-That means less copying during long conversations. Older saved conversations convert when first saved. Large tool results that have not been opened stay safely on disk. Saves check their version so an old window cannot silently overwrite a newer save.
+That means less copying during long conversations. Older saved conversations convert when first saved. Large tool results that have not been opened stay safely on disk. Saves check their version so an old window cannot silently overwrite a newer save. Older webviews that lack weak references safely send all the blocks while keeping that version check.
 
 ## Put old chats away
 
@@ -24,7 +24,7 @@ Safety checks for unfinished submissions and interrupted work still finish befor
 
 Release-note text, the What's New dialog, and optional Mono settings and channel screens load when requested. A restored release-note tab can wait until it is visible.
 
-The app has less JavaScript to fetch and process during ordinary startup. Opening one of these features for the first time may require loading its code. Failed loads can be retried.
+The app needs about 15% less JavaScript during ordinary startup in the production comparison. Opening one of these features for the first time may require loading its code. Failed loads can be retried.
 
 ## Remember the file list briefly
 
