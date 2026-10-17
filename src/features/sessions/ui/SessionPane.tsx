@@ -18,7 +18,7 @@ import {
   orchestrator,
   sameCheckout,
 } from "../../orchestration/model/orchestration";
-import { DiscussionEmpty } from "./DiscussionEmpty";
+import { SessionsEmpty } from "./SessionsEmpty";
 import { LinkedWorkItemUpdateNotice } from "../../inbox/ui/LinkedWorkItemUpdateNotice";
 import { SessionReview } from "./SessionReview";
 import { sessionEditPaths } from "../model/checkpointEdits";
@@ -909,7 +909,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
                 </div>
               ) : session.inboxAsk ? (
                 <div className="scrollbar-none h-full min-h-0 overflow-y-auto">
-                  <DiscussionEmpty message="Explore this item with your agent." />
+                  <SessionsEmpty message="Explore this item with your agent." />
                 </div>
               ) : (
                 <EmptySession
