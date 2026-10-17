@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-16
+
 ### Added
 
+- Personal Mac builds use this fork's signed update feed. A release workflow builds only for Apple Silicon without requiring an Apple Developer certificate.
 - Claude Code sessions can use the **1M-context GPT-6.1 Sol** and **GPT-6 Luna** variants through GitHub Copilot. A session-local adapter preserves ordinary Claude provider settings.
 - Copilot GPT models expose their supported reasoning levels in the effort selector. The adapter applies the selected level to every request.
 - Jira and GitLab have a **Default Mono** in Settings → Integrations. **Send to chat** preselects that Mono for their items. You can choose another destination before sending, or choose **No default Mono** to use the usual destination picker.

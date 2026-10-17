@@ -17,6 +17,27 @@ npm install
 npm run tauri dev
 ```
 
+## Personal Mac releases
+
+This fork's Mac builds check [vrnrn/monocode releases](https://github.com/vrnrn/monocode/releases) for updates. The public verification key and feed URL live in [tauri.macos.conf.json](../src-tauri/tauri.macos.conf.json), which Tauri loads automatically on macOS. Install a build with this configuration once; existing builds cannot change their embedded updater configuration automatically.
+
+The app uses ad hoc Apple signing and does not require an Apple Developer certificate. It is not notarized, so a downloaded build may need **System Settings → Privacy & Security → Open Anyway** on first launch. The separate updater signature still verifies every update before installation.
+
+To build an Apple Silicon app locally, install the Rust target and supply the matching updater private key from outside the repository:
+
+```bash
+rustup target add aarch64-apple-darwin
+TAURI_SIGNING_PRIVATE_KEY="$HOME/.config/monocode/updater/signing.key" \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD='' \
+npx tauri build --target aarch64-apple-darwin --bundles app,dmg
+```
+
+The app, updater archive, and signature are under `target/aarch64-apple-darwin/release/bundle/macos/`; the DMG is under `bundle/dmg/`. Install the app in `~/Applications` so the in-app updater can replace it without administrator access. Keep the private key backed up securely: future updates must use the same key. Never commit it.
+
+The [Mac release workflow](../.github/workflows/macos-release.yml) builds only for Apple Silicon. It requires the matching private key in the encrypted repository secret `MACOS_UPDATER_SIGNING_KEY`. With that secret configured, bump the version with `npm run set-version -- X.Y.Z`, update the changelog, merge to `main`, and run **Actions → Mac release → Run workflow** from `main`, or push `mac-vX.Y.Z`. The workflow validates the arm64 app and the feed before publishing the release. Published versions cannot be overwritten; each update needs a higher version. Ordinary pushes to `main` do not publish a release.
+
+The separate upstream `v*` release workflow requires Apple notarization and Cloudflare credentials; it is not used for this personal Mac release channel.
+
 ## Ubuntu / Debian packages
 
 On an Ubuntu/Debian workstation, the repository can install the native Tauri prerequisites and build distributable Linux packages directly:
@@ -61,6 +82,7 @@ The Windows build emits an NSIS installer under `target/release/bundle/nsis/`.
 ## Tauri configuration
 
 - [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) contains the shared application and bundle configuration.
+- [src-tauri/tauri.macos.conf.json](../src-tauri/tauri.macos.conf.json) configures this fork's Mac updater.
 - [src-tauri/tauri.linux.conf.json](../src-tauri/tauri.linux.conf.json) loads automatically for Linux development and builds.
 - [src-tauri/tauri.windows.conf.json](../src-tauri/tauri.windows.conf.json) loads automatically for Windows development and builds.
 
