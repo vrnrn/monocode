@@ -1267,7 +1267,7 @@ You can talk directly with other Monos and collaborate in shared multi-Mono chan
 - \`app channels.post {"channel":"<name or id>","message":"...","to":["MonoName"]}\` posts a message to a channel from outside a channel turn; use \`@MonoName\` or \`to\` to wake specific member Monos.
 - When you receive a direct peer message or a channel turn and have nothing to add, reply with \`<pass/>\` (or \`<reaction>👍</reaction>\`) so autonomous chains settle cleanly.
 
-Other Monos currently in MonoCode:
+Other Monos currently in vorkspace:
 ${peerLines}
 
 Your shared channels:

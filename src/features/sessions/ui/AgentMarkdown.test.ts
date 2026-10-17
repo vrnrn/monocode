@@ -4,17 +4,25 @@ import { describe, expect, it } from "vitest";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { ticketContextLink } from "../../inbox/model/ticketContext";
 
-it("renders valid MonoCode ticket links while retaining the script URL filter", () => {
-  const link = ticketContextLink({
+it.each([
+  ["chat", {}],
+  ["document", { cwd: "/repo", documentPath: "/repo/notes.md" }],
+  ["inbox", { allowRemoteMedia: true }],
+] as const)("renders new and legacy ticket links in %s while filtering script URLs", (_surface, props) => {
+  const current = ticketContextLink({
     provider: "jira",
     url: "https://demo.atlassian.net/browse/DEMO-42",
   });
+  const legacy = current.replace("vorkspace:", "monocode:");
   const markup = renderToStaticMarkup(
     createElement(AgentMarkdown, {
-      text: `[Ticket](${link}) [Bad](javascript:alert%281%29)`,
+      ...props,
+      text: `[Ticket](${current}) [Legacy ticket](${legacy}) [Bad](javascript:alert%281%29)`,
     }),
   );
-  expect(markup).toContain(`href="${link.replace(/&/g, "&amp;")}"`);
+  for (const link of [current, legacy]) {
+    expect(markup).toContain(`href="${link.replace(/&/g, "&amp;")}"`);
+  }
   expect(markup).not.toContain('href="javascript:');
 });
 

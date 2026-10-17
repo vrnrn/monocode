@@ -28,7 +28,7 @@ function fixture(badChecksum = false) {
   mkdirSync(source);
   mkdirSync(bin);
   writeFileSync(
-    join(source, "monocode-host"),
+    join(source, "vorkspace-host"),
     `#!/bin/sh\ncase "$1" in\n--version) printf '%s\\n' ${quote(version)} ;;\nservice) printf 'service %s\\n' "$2" >> "$MONOCODE_TEST_EVENTS" ;;\nconnection-info) printf '{"port":3774,"pid":123}\\n' ;;\n*) exit 1 ;;\nesac\n`,
     { mode: 0o755 },
   );
@@ -87,6 +87,7 @@ it.skipIf(process.platform === "win32")(
     expect(first.error).toBe("");
     expect(first.code).toBe(0);
     expect(JSON.parse(first.out).port).toBe(3774);
+    expect(existsSync(join(base, "bin/vorkspace-host"))).toBe(true);
     expect(existsSync(join(base, "bin/monocode-host"))).toBe(true);
     expect((await run()).code).toBe(0);
     expect(

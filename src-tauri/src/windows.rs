@@ -14,7 +14,7 @@ use windows_sys::Win32::System::{
 
 static MANAGED_JOB: OnceLock<Result<OwnedHandle, i32>> = OnceLock::new();
 
-/// Restrict DLL lookup before the first PTY is opened. MonoCode itself stays
+/// Restrict DLL lookup before the first PTY is opened. vorkspace itself stays
 /// outside the job so relaunches and external applications do not inherit it.
 pub(crate) fn initialize() -> io::Result<()> {
     unsafe {

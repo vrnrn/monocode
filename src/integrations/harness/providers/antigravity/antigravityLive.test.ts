@@ -159,7 +159,7 @@ describe.each(providers)("$id offline ACP transport", (provider) => {
       undefined,
       provider.id,
     );
-    expect(mock.sent.find((m) => m.method === "initialize")?.params).toMatchObject({ protocolVersion: 1 });
+    expect(mock.sent.find((m) => m.method === "initialize")?.params).toMatchObject({ protocolVersion: 1, clientInfo: { name: "vorkspace" } });
     expect(mock.sent.find((m) => m.method === "session/set_config_option")?.params)
       .toMatchObject({ configId: "thinking", value: "high" });
     expect(mock.sent.find((m) => m.method === "session/prompt")?.params?.prompt)

@@ -289,7 +289,7 @@ mod platform {
 
     define_class!(
         #[unsafe(super(NSObject))]
-        #[name = "MonoCodeNotificationDelegate"]
+        #[name = "vorkspaceNotificationDelegate"]
         #[ivars = DelegateIvars]
         struct Delegate;
 
@@ -446,11 +446,11 @@ mod platform {
     ) -> Result<(), String> {
         let mut notification = notify_rust::Notification::new();
         notification
-            .appname("MonoCode")
+            .appname("vorkspace")
             .summary(&format!("{title}: {subtitle}"))
             // The body is agent output; servers render it as markup.
             .body(&escape_markup(body))
-            .icon("monocode")
+            .icon("vorkspace")
             // Servers only report the click when a "default" action exists.
             .action("default", "Show");
         if sound {

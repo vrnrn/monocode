@@ -30,7 +30,7 @@ function textWithFolderPaths(text: string, paths: string[]): string {
   return text.endsWith("\n") ? text + suffix : `${text}\n${suffix}`;
 }
 
-/** HTML keeps arbitrary files together with text across MonoCode windows. */
+/** HTML keeps arbitrary files together with text across vorkspace windows. */
 export async function copyMessage(
   text: string,
   attachments: Attachment[] = [],

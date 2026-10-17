@@ -54,7 +54,8 @@ export async function runPowerShell(script: string): Promise<string> {
         maxBuffer: 128 * 1024,
       },
       (error, stdout, stderr) => {
-        if (error) reject(new Error(powershellErrorText(stderr) || error.message));
+        if (error)
+          reject(new Error(powershellErrorText(stderr) || error.message));
         else resolve(stdout);
       },
     );
@@ -69,7 +70,7 @@ export async function protectWindowsDirectory(
   directory: string,
 ): Promise<void> {
   await runPowerShell(
-    `${aclScript}\nProtect-MonoCodeDirectory ${psQuote(directory)}`,
+    `${aclScript}\nProtect-vorkspaceDirectory ${psQuote(directory)}`,
   );
 }
 
@@ -96,6 +97,7 @@ export function windowsTaskScript(
   return `
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $sid = $identity.User.Value
+# Keep the task identity stable across branding changes.
 $name = "MonoCode Host-$sid"
 $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
 if ($null -eq $task) {
@@ -104,13 +106,13 @@ if ($null -eq $task) {
   $principal = New-ScheduledTaskPrincipal -UserId $sid -LogonType Interactive -RunLevel Limited
   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $sid
   $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
-  Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description 'MonoCode remote agent host for this user' | Out-Null
+  Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description 'vorkspace remote agent host for this user' | Out-Null
 } else {
   $taskSid = [string] $task.Principal.UserId
   if ($taskSid -notmatch '^S-1-') {
     $taskSid = ([Security.Principal.NTAccount]::new($taskSid)).Translate([Security.Principal.SecurityIdentifier]).Value
   }
-  if ($taskSid -ne $sid) { throw 'The existing MonoCode task belongs to a different user.' }
+  if ($taskSid -ne $sid) { throw 'The existing vorkspace task belongs to a different user.' }
 }
 Start-ScheduledTask -TaskName $name
 `;
@@ -121,6 +123,7 @@ Start-ScheduledTask -TaskName $name
 export function windowsUninstallScript(): string {
   return `
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+# Keep the task identity stable across branding changes.
 $name = "MonoCode Host-$sid"
 if ($null -ne (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)) {
   Unregister-ScheduledTask -TaskName $name -Confirm:$false

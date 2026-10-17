@@ -26,7 +26,7 @@ it(
     });
     const port = (probe.address() as AddressInfo).port;
     await new Promise<void>((resolve) => probe.close(() => resolve()));
-    const cli = resolve("build/host/monocode-host.mjs");
+    const cli = resolve("build/host/vorkspace-host.mjs");
     const run = (...args: string[]) =>
       exec(
         process.execPath,

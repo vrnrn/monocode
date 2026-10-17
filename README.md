@@ -1,31 +1,24 @@
 <p align="center">
-  <img src="public/monocode.png" alt="MonoCode" width="88" />
+  <img src="public/vorkspace.png" alt="vorkspace" width="88" />
 </p>
 
-<h1 align="center">MonoCode</h1>
+<h1 align="center">vorkspace</h1>
 
 <p align="center">
   <strong>A GUI for your coding agents.</strong>
 </p>
 
-<p align="center">
-  <img width="1680" height="1050" alt="MonoCode with agent sessions open side by side" src="https://github.com/user-attachments/assets/2cd4a6ec-eb1e-4b45-8627-a76442ea3874" />
-</p>
+vorkspace is based on [MonoCode](https://github.com/hardbeat920/monocode), created by [Nick (hardbeat920)](https://github.com/hardbeat920). Thanks to Nick and the upstream contributors for the foundation.
 
-Works with your subscriptions on Claude Code, Codex, Pi, omp, and Antigravity. If they’re installed and logged in, MonoCode can run them. Tabs are sessions. The composer is the input. MonoCode does not sell tokens.
+Works with your subscriptions on Claude Code, Codex, Pi, omp, and Antigravity. If they’re installed and logged in, vorkspace can run them. Tabs are sessions. The composer is the input. vorkspace does not sell tokens.
 
 ## Install
 
 Install and sign in to at least one supported agent first. See [provider setup](docs/providers.md) for instructions.
 
-| Platform | Download |
-| --- | --- |
-| macOS, Apple Silicon | [MonoCode.dmg](https://dl.usemono.dev/MonoCode.dmg) |
-| macOS, Intel | [MonoCode_x64.dmg](https://dl.usemono.dev/MonoCode_x64.dmg) |
-| Linux, x86_64 | [.deb, .rpm, or AppImage](https://github.com/hardbeat920/monocode/releases/latest) |
-| Windows, x86_64 | [Installer](https://github.com/hardbeat920/monocode/releases/latest) |
+Download the Apple Silicon DMG from [vorkspace releases](https://github.com/vrnrn/vorkspace/releases/latest). Release files are named `vorkspace_X.Y.Z_aarch64.dmg`.
 
-On macOS, open the DMG and drag MonoCode to Applications. On Windows, run the installer. See [Linux setup](docs/install.md) for dependencies and package instructions.
+Open the DMG and copy `vorkspace.app` to `~/Applications`. The fork publishes Apple Silicon macOS builds. For source builds on other platforms, see [build setup](docs/building.md).
 
 ## Get started
 
@@ -38,12 +31,12 @@ Open a project folder, choose an agent, and send a message. Each tab is a sessio
 
 Monos are experimental agents that work across your projects. They keep a memory and can run scheduled tasks you set up with them.
 
-MonoCode is still early. If something breaks, [report a bug](https://github.com/hardbeat920/monocode/issues).
+vorkspace is still early. If something breaks, [report a bug](https://github.com/vrnrn/vorkspace/issues).
 
 ## Guides
 
 - [Provider setup](docs/providers.md)
-- [Linux installation](docs/install.md)
+- [Installation](docs/install.md)
 - [Agent access with /operator](docs/agent-access.md)
 - [Remote sessions, experimental](docs/remote-access.md)
 
@@ -60,9 +53,9 @@ Small, focused contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md
 
 ## Contributors
 
-Thanks to everyone who contributes to MonoCode!
+Thanks to everyone who contributes to vorkspace and to its original MonoCode foundation!
 
-[![MonoCode contributors](https://contrib.rocks/image?repo=hardbeat920/monocode)](https://github.com/hardbeat920/monocode/graphs/contributors)
+[![vorkspace contributors](https://contrib.rocks/image?repo=vrnrn/vorkspace)](https://github.com/vrnrn/vorkspace/graphs/contributors)
 
 Contributor image by [contrib.rocks](https://contrib.rocks).
 

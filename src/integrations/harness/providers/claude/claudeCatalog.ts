@@ -226,7 +226,7 @@ export function refreshClaudeCatalog(): Promise<void> {
       if (models.length > 0) setHarnessModels("claude", models);
     })
     .catch((error: unknown) => {
-      console.debug("[monocode] claude catalog", error);
+      console.debug("[vorkspace] claude catalog", error);
     })
     .finally(() => {
       inflight = null;
@@ -240,7 +240,7 @@ export async function discoverClaudeModels(
   const copilot = listCopilotClaudeModels().catch(() => []);
   const listed = await discoverViaListModels(workingDirectory).catch(
     (error: unknown) => {
-      console.debug("[monocode] claude list_models catalog failed", error);
+      console.debug("[vorkspace] claude list_models catalog failed", error);
       return [];
     },
   );

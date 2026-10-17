@@ -652,9 +652,9 @@ fn capture_workspace(root: &Path, reference: &str) -> Result<String, String> {
         checked_output(
             git_command(root, args)
                 .env("GIT_INDEX_FILE", &index.0)
-                .env("GIT_AUTHOR_NAME", "MonoCode")
+                .env("GIT_AUTHOR_NAME", "vorkspace")
                 .env("GIT_AUTHOR_EMAIL", "checkpoint@monocode.local")
-                .env("GIT_COMMITTER_NAME", "MonoCode")
+                .env("GIT_COMMITTER_NAME", "vorkspace")
                 .env("GIT_COMMITTER_EMAIL", "checkpoint@monocode.local"),
         )
     };
@@ -678,7 +678,7 @@ fn capture_workspace(root: &Path, reference: &str) -> Result<String, String> {
             "commit-tree",
             tree.trim(),
             "-m",
-            "MonoCode workspace checkpoint",
+            "vorkspace workspace checkpoint",
         ],
     ]
     .concat())?)

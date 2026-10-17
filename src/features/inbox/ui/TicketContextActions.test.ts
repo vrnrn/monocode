@@ -205,7 +205,7 @@ it("keeps copy available when there are no destinations", async () => {
   expect(button("Send to chat").disabled).toBe(true);
   await act(async () => button("Copy context").click());
   expect(copyText).toHaveBeenCalledWith(
-    expect.stringContaining("monocode://context/jira?url="),
+    expect.stringContaining("vorkspace://context/jira?url="),
   );
   expect(button("Copied")).toBeDefined();
 });

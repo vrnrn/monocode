@@ -85,7 +85,7 @@ const GIT_POLL_MS = 2000;
 
 function confirmNative(message: string, okLabel?: string): Promise<boolean> {
   return ask(message, {
-    title: "MonoCode",
+    title: "vorkspace",
     kind: "warning",
     ...(okLabel ? { okLabel } : {}),
   });
@@ -585,7 +585,7 @@ function ChangedFiles({
   const confirmAmend = async () => {
     if (!amend || !index?.headPushed) return true;
     return confirmNative(
-      "Amend a commit that is already pushed? MonoCode cannot push the result. You will need a force push from the terminal.",
+      "Amend a commit that is already pushed? vorkspace cannot push the result. You will need a force push from the terminal.",
       "Amend",
     );
   };

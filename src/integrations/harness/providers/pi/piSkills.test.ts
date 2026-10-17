@@ -125,7 +125,7 @@ describe("OMP native commands", () => {
     expect(mocks.releaseBridge).toHaveBeenCalledOnce();
   });
 
-  it("preserves metadata from all command origins and escapes reserved MonoCode commands", () => {
+  it("preserves metadata from all command origins and escapes reserved vorkspace commands", () => {
     expect(
       ompCommandsFromRpcData({
         commands: [

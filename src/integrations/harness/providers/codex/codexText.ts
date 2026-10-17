@@ -355,8 +355,8 @@ async function startLive(
       "initialize",
       {
         clientInfo: {
-          name: "monocode-text",
-          title: "MonoCode",
+          name: "vorkspace-text",
+          title: "vorkspace",
           version: "0.1.0",
         },
         capabilities: { experimentalApi: true },

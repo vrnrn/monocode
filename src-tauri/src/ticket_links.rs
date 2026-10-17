@@ -10,7 +10,10 @@ impl PendingTicketLinks {
         if let Ok(mut pending) = self.0.lock() {
             pending.extend(
                 urls.into_iter()
-                    .filter(|url| url.scheme() == "monocode" && url.host_str() == Some("context"))
+                    .filter(|url| {
+                        matches!(url.scheme(), "vorkspace" | "monocode")
+                            && url.host_str() == Some("context")
+                    })
                     .map(String::from),
             );
         }

@@ -1,7 +1,7 @@
 {
-  "name": "monocode-desktop",
+  "name": "vorkspace",
   "private": true,
-  "version": "0.13.2",
+  "version": "0.13.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,7 +13,7 @@
     "test:browser": "playwright test",
     "host:build": "tsc --noEmit -p host/tsconfig.json && node host/build.mjs",
     "host:package": "npm run host:build && node host/package.mjs",
-    "host": "node build/host/monocode-host.mjs",
+    "host": "node build/host/vorkspace-host.mjs",
     "pretest:host": "npm run host:build",
     "test:host": "vitest run --config host/vitest.config.ts",
     "check": "npm run check:web && npm run check:rust",
@@ -24,6 +24,7 @@
     "tauri:stable": "tauri dev --no-watch --config src-tauri/tauri.stable.conf.json",
     "setup:linux:deb": "bash scripts/install-linux-deps-debian.sh",
     "setup:linux:fedora": "bash scripts/install-linux-deps-fedora.sh",
+    "build:mac": "tauri build --target aarch64-apple-darwin --bundles app,dmg",
     "build:linux": "tauri build --bundles deb,appimage && bash scripts/repack-appimage.sh",
     "build:fedora": "tauri build --bundles rpm",
     "build:windows": "set \"RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc\" && tauri build --bundles nsis"

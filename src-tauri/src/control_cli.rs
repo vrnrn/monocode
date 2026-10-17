@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-const USAGE: &str = r#"MonoCode local control — supervise this orchestration run from the lead agent.
+const USAGE: &str = r#"vorkspace local control — supervise this orchestration run from the lead agent.
 
 Usage: {exe} control ACTION [--json JSON | --input FILE|-] [--request-id ID]
 
@@ -56,7 +56,7 @@ for corrections -> review each task -> finish.
 
 When paused, list, get and wait still return the reason and recovery steps.
 Do not keep polling or retry mutations. Explain the pause and ask the user to
-click Resume in MonoCode. Resume continues interrupted workers in their
+click Resume in vorkspace. Resume continues interrupted workers in their
 retained checkouts. A policy-blocked worker remains stopped until message,
 retry or cancel explicitly resolves it.
 
@@ -71,10 +71,10 @@ failed response reports the ID it used whenever the outcome is unknown — a
 timeout, say. Retry that exact call with --request-id ID; retrying a delegate
 under a fresh ID instead would queue a second worker.
 
-Tasks run inside the MonoCode app, not in this process. Exiting this CLI, or a
+Tasks run inside the vorkspace app, not in this process. Exiting this CLI, or a
 failure here, never cancels a task that was already accepted.
 
-MonoCode sets MONOCODE_CONTROL_ENDPOINT and MONOCODE_CONTROL_TOKEN for the lead
+vorkspace sets MONOCODE_CONTROL_ENDPOINT and MONOCODE_CONTROL_TOKEN for the lead
 agent's process only. They are already in your environment; never print them.
 "#;
 
@@ -123,7 +123,7 @@ const APP_ACTIONS: [&str; 39] = [
     "channels.post",
     "chat.card",
 ];
-const APP_USAGE: &str = r#"MonoCode app access — use in a thread enabled by /operator.
+const APP_USAGE: &str = r#"vorkspace app access — use in a thread enabled by /operator.
 
 Usage: {exe} app ACTION [--json JSON | --input FILE|-] [--request-id ID]
 
@@ -146,7 +146,7 @@ Actions:
                   in the calling Mono's chat. It waits until that Mono is idle.
   sessions.draft {"sessionId":"...","prompt":"..."}
                   Save an unsent draft in an idle project session. Existing
-                  drafts are preserved; send or remove one in MonoCode first.
+                  drafts are preserved; send or remove one in vorkspace first.
                   Reuse --request-id on retries.
   sessions.start {"prompt":"...","harness":"codex","model":"codex:...",
                   "effort":"high","reveal":false,
@@ -188,7 +188,7 @@ Actions:
                   unchanged. Reuse --request-id on retries.
   sessions.archive {"sessionId":"..."}
                   Stop the session if running, save its conversation, and
-                  archive it. It can be restored from MonoCode's archive.
+                  archive it. It can be restored from vorkspace's archive.
                   Open files, terminals and worktrees are kept.
                   Reuse --request-id on retries.
   sessions.delete {"sessionId":"..."}
@@ -258,7 +258,7 @@ Actions:
                   "schedule":{...},"enabled":false}  Change or pause one.
   habits.run     {"id":"..."}  Run one within a minute, to try it out.
   habits.remove  {"id":"..."}
-  monos.list     {}  Mono only. Other Monos in MonoCode with their IDs, names,
+  monos.list     {}  Mono only. Other Monos in vorkspace with their IDs, names,
                   providers, models, busy status and projects.
   monos.read     {"mono":"<name or id>","before":"<turnId>","limit":3,"maxChars":1200}
                   Read up to 3 recent exchanges from another Mono's chat.
@@ -286,7 +286,7 @@ Actions:
                   the user must start it before it is scheduled.
 
 The output is one JSON line: {"ok":true,"result":...} or {"ok":false,"error":"..."}.
-Use --input - to pass JSON on stdin. Never print MonoCode credentials.
+Use --input - to pass JSON on stdin. Never print vorkspace credentials.
 Keep the same --request-id when retrying a call after an uncertain result.
 "#;
 
@@ -315,14 +315,14 @@ fn quoted(value: &str) -> String {
 pub fn help() -> String {
     let exe = std::env::current_exe()
         .map(|path| quoted(&path.to_string_lossy()))
-        .unwrap_or_else(|_| "monocode".into());
+        .unwrap_or_else(|_| "vorkspace".into());
     USAGE.replace("{exe}", &exe)
 }
 
 pub fn app_help() -> String {
     let exe = std::env::current_exe()
         .map(|path| quoted(&path.to_string_lossy()))
-        .unwrap_or_else(|_| "monocode".into());
+        .unwrap_or_else(|_| "vorkspace".into());
     APP_USAGE.replace("{exe}", &exe)
 }
 
@@ -426,23 +426,23 @@ fn send(action: &str, input: &Value, request_id: &str, app_mode: bool) -> Result
     };
     let endpoint = std::env::var(endpoint_key).map_err(|_| {
         unsent(if app_mode {
-            "No MonoCode app connection. Start this agent turn in MonoCode."
+            "No vorkspace app connection. Start this agent turn in vorkspace."
         } else {
-            "No MonoCode connection. Confirm the Orchestrator proposal in MonoCode first."
+            "No vorkspace connection. Confirm the Orchestrator proposal in vorkspace first."
         })
     })?;
     let token = std::env::var(token_key)
-        .map_err(|_| unsent("No MonoCode session credential. Start the agent from MonoCode."))?;
+        .map_err(|_| unsent("No vorkspace session credential. Start the agent from vorkspace."))?;
     let address: SocketAddr = endpoint
         .parse()
-        .map_err(|_| unsent("Invalid MonoCode endpoint"))?;
+        .map_err(|_| unsent("Invalid vorkspace endpoint"))?;
     if !address.ip().is_loopback() {
-        return Err(unsent("MonoCode control only connects to localhost"));
+        return Err(unsent("vorkspace control only connects to localhost"));
     }
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(3))
         .map_err(|error| {
             unsent(format!(
-                "Cannot connect to MonoCode at {address}: {error}. The app may have restarted, or this agent's sandbox may be blocking localhost."
+                "Cannot connect to vorkspace at {address}: {error}. The app may have restarted, or this agent's sandbox may be blocking localhost."
             ))
         })?;
     stream
@@ -462,11 +462,11 @@ fn send(action: &str, input: &Value, request_id: &str, app_mode: bool) -> Result
     BufReader::new(stream)
         .take(max_response + 1)
         .read_line(&mut line)
-        .map_err(|e| sent(format!("No reply from MonoCode: {e}")))?;
+        .map_err(|e| sent(format!("No reply from vorkspace: {e}")))?;
     if line.len() > max_response as usize {
-        return Err(sent("MonoCode response is too large"));
+        return Err(sent("vorkspace response is too large"));
     }
-    serde_json::from_str(&line).map_err(|_| sent("MonoCode returned an invalid response"))
+    serde_json::from_str(&line).map_err(|_| sent("vorkspace returned an invalid response"))
 }
 
 fn read_capped(mut source: impl Read) -> Result<String, String> {
@@ -637,18 +637,24 @@ mod tests {
     #[test]
     fn quotes_the_control_path_only_when_the_shell_needs_it() {
         assert_eq!(
-            quoted("/Applications/MonoCode.app/Contents/MacOS/monocode"),
-            "/Applications/MonoCode.app/Contents/MacOS/monocode"
+            quoted("/Applications/vorkspace.app/Contents/MacOS/vorkspace"),
+            "/Applications/vorkspace.app/Contents/MacOS/vorkspace"
         );
-        assert_eq!(quoted("/Users/a b/MonoCode"), "'/Users/a b/MonoCode'");
-        assert_eq!(quoted("C:\\Tools\\monocode.exe"), "C:\\Tools\\monocode.exe");
+        assert_eq!(quoted("/Users/a b/vorkspace"), "'/Users/a b/vorkspace'");
         assert_eq!(
-            quoted("C:\\Program Files\\MonoCode\\monocode.exe"),
-            "\"C:\\Program Files\\MonoCode\\monocode.exe\""
+            quoted("C:\\Tools\\vorkspace.exe"),
+            "C:\\Tools\\vorkspace.exe"
+        );
+        assert_eq!(
+            quoted("C:\\Program Files\\vorkspace\\vorkspace.exe"),
+            "\"C:\\Program Files\\vorkspace\\vorkspace.exe\""
         );
         // A backslash escapes in a POSIX shell, so bare would rewrite the path.
-        assert_eq!(quoted("/Users/a\\b/MonoCode"), "'/Users/a\\b/MonoCode'");
-        assert_eq!(quoted("/Users/it's/MonoCode"), r"'/Users/it'\''s/MonoCode'");
+        assert_eq!(quoted("/Users/a\\b/vorkspace"), "'/Users/a\\b/vorkspace'");
+        assert_eq!(
+            quoted("/Users/it's/vorkspace"),
+            r"'/Users/it'\''s/vorkspace'"
+        );
     }
     #[test]
     fn app_mode_exposes_only_app_actions_and_safe_request_ids() {

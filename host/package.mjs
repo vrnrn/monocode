@@ -123,7 +123,7 @@ for (const target of targets) {
       `${stem}/bin/node`,
       `${stem}/LICENSE`,
     ]);
-  await copyFile("build/host/monocode-host.mjs", join(folder, "host.mjs"));
+  await copyFile("build/host/vorkspace-host.mjs", join(folder, "host.mjs"));
   await copyFile("host/provider-guard.mjs", join(folder, "provider-guard.mjs"));
   await copyFile("host/claude-copilot.mjs", join(folder, "claude-copilot.mjs"));
   await copyFile("LICENSE", join(folder, "MONOCODE-LICENSE"));
@@ -133,13 +133,24 @@ for (const target of targets) {
   );
   if (windows) {
     await writeFile(
-      join(folder, "monocode-host.cmd"),
+      join(folder, "vorkspace-host.cmd"),
       '@echo off\r\nsetlocal DisableDelayedExpansion\r\n"%~dp0node.exe" "%~dp0host.mjs" %*\r\nexit /b %errorlevel%\r\n',
+    );
+    // Preserve the public launcher used by existing Windows installations.
+    await copyFile(
+      join(folder, "vorkspace-host.cmd"),
+      join(folder, "monocode-host.cmd"),
     );
   } else {
     await writeFile(
-      join(folder, "monocode-host"),
+      join(folder, "vorkspace-host"),
       '#!/bin/sh\nset -eu\nDIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$DIR/bin/node" "$DIR/host.mjs" "$@"\n',
+    );
+    await chmod(join(folder, "vorkspace-host"), 0o755);
+    // Existing remote launchers resolve the same versioned runtime directory.
+    await copyFile(
+      join(folder, "vorkspace-host"),
+      join(folder, "monocode-host"),
     );
     await chmod(join(folder, "monocode-host"), 0o755);
   }
@@ -157,7 +168,7 @@ for (const target of targets) {
     if (actual !== version)
       throw new Error("Packaged host failed its executable smoke test");
   }
-  const filename = `monocode-host-${target}.${extension}`;
+  const filename = `vorkspace-host-${target}.${extension}`;
   await rm(join(output, filename), { force: true });
   if (windows) {
     if (process.platform === "win32")

@@ -53,7 +53,10 @@ export async function acquireHostOwner(directory: string): Promise<() => void> {
                     timeout: 5_000,
                   })
                 ).stdout;
-          if (!command.trim() || /monocode-host.*\bserve\b/.test(command))
+          if (
+            !command.trim() ||
+            /(?:vorkspace|monocode)-host.*\bserve\b/.test(command)
+          )
             throw new Error("A host already owns this data directory");
         }
       }

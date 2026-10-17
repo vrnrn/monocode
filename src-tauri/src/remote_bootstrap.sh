@@ -1,7 +1,7 @@
 set -eu
 umask 077
 BASE="$HOME/.monocode-host"
-ENTRY="$BASE/bin/monocode-host"
+ENTRY="$BASE/bin/vorkspace-host"
 VERSION=@@VERSION@@
 RELEASE=@@RELEASE@@
 EXISTED=0
@@ -10,9 +10,9 @@ FORCE_UPGRADE=${MONOCODE_HOST_FORCE_UPGRADE:-0}
 HOST_PORT=${MONOCODE_HOST_PORT:-3774}
 
 if [ ! -x "$ENTRY" ] || [ "$FORCE_UPGRADE" = 1 ]; then
-  case "$(uname -s)" in Darwin) OS=darwin ;; Linux) OS=linux ;; *) echo 'MonoCode Host supports Linux and macOS.' >&2; exit 1 ;; esac
+  case "$(uname -s)" in Darwin) OS=darwin ;; Linux) OS=linux ;; *) echo 'vorkspace Host supports Linux and macOS.' >&2; exit 1 ;; esac
   case "$(uname -m)" in arm64|aarch64) ARCH=arm64 ;; x86_64|amd64) ARCH=x64 ;; *) echo 'Unsupported host architecture.' >&2; exit 1 ;; esac
-  FILE="monocode-host-$OS-$ARCH.tar.gz"
+  FILE="vorkspace-host-$OS-$ARCH.tar.gz"
   mkdir -p "$BASE/runtime" "$BASE/bin"
   TMP=$(mktemp -d "$BASE/runtime/.install.XXXXXXXX")
   trap 'rm -rf "$TMP"' EXIT
@@ -27,7 +27,7 @@ if [ ! -x "$ENTRY" ] || [ "$FORCE_UPGRADE" = 1 ]; then
     fi
   }
   if ! download "$RELEASE/$FILE" "$TMP/$FILE" || ! download "$RELEASE/$FILE.sha256" "$TMP/checksum"; then
-    echo "The MonoCode Host package for version $VERSION is unavailable. Install a MonoCode release that includes host packages." >&2; exit 1
+    echo "The vorkspace Host package for version $VERSION is unavailable. Install a vorkspace release that includes host packages." >&2; exit 1
   fi
   EXPECTED=$(awk 'NR == 1 {print $1}' "$TMP/checksum")
   case "$EXPECTED" in *[!0-9a-f]*|'') echo 'Invalid host package checksum.' >&2; exit 1 ;; esac
@@ -39,14 +39,14 @@ if [ ! -x "$ENTRY" ] || [ "$FORCE_UPGRADE" = 1 ]; then
   else
     echo 'Install shasum or sha256sum on this host and reconnect.' >&2; exit 1
   fi
-  [ "$EXPECTED" = "$ACTUAL" ] || { echo 'MonoCode Host package checksum mismatch.' >&2; exit 1; }
+  [ "$EXPECTED" = "$ACTUAL" ] || { echo 'vorkspace Host package checksum mismatch.' >&2; exit 1; }
   mkdir "$TMP/unpacked"
   tar -xzf "$TMP/$FILE" -C "$TMP/unpacked"
-  [ "$("$TMP/unpacked/monocode-host" --version)" = "$VERSION" ] || { echo 'MonoCode Host version mismatch.' >&2; exit 1; }
+  [ "$("$TMP/unpacked/vorkspace-host" --version)" = "$VERSION" ] || { echo 'vorkspace Host version mismatch.' >&2; exit 1; }
   DEST="$BASE/runtime/$VERSION-$OS-$ARCH-$(basename "$TMP")"
   # Concurrent installations never replace a directory used by a running host.
   mv "$TMP/unpacked" "$DEST"
-  [ "$("$DEST/monocode-host" --version)" = "$VERSION" ] || exit 1
+  [ "$("$DEST/vorkspace-host" --version)" = "$VERSION" ] || exit 1
   # Keep a real wrapper (rather than a symlink): it resolves the packaged Node
   # relative to the versioned executable, not this bin directory.
   printf '%s\n' "$DEST" > "$TMP/runtime-path"
@@ -56,9 +56,10 @@ if [ ! -x "$ENTRY" ] || [ "$FORCE_UPGRADE" = 1 ]; then
 set -eu
 BASE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 RUNTIME=$(cat "$BASE/runtime-path")
-exec "$RUNTIME/monocode-host" "$@"
+exec "$RUNTIME/vorkspace-host" "$@"
 SH
   chmod 700 "$TMP/launcher"
+  cp "$TMP/launcher" "$BASE/bin/monocode-host"
   mv "$TMP/launcher" "$ENTRY"
 fi
 

@@ -33,7 +33,7 @@ it("attaches to the existing Mono without replacing its conversation", async () 
     "existing-chat",
     expect.objectContaining({
       title: "Demo ticket",
-      prompt: expect.stringContaining("monocode://context/jira"),
+      prompt: expect.stringContaining("vorkspace://context/jira"),
     }),
   );
   expect(h.session.blocks[0].text).toBe("Existing conversation");

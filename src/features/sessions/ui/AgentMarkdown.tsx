@@ -100,7 +100,7 @@ const ticketLinkSanitize: PluggableList[number] = [
     ...schema,
     protocols: {
       ...schema.protocols,
-      href: [...schema.protocols.href, "monocode"],
+      href: [...schema.protocols.href, "vorkspace", "monocode"],
     },
   },
 ];
@@ -112,7 +112,7 @@ const MARKDOWN_HARDEN: Pluggable = [
     // relative note URLs reach that component without changing link parsing.
     allowedImagePrefixes: ["*"],
     allowedLinkPrefixes: ["*"],
-    allowedProtocols: ["monocode:"],
+    allowedProtocols: ["vorkspace:", "monocode:"],
     allowDataImages: true,
     imageBlockPolicy: "remove" as const,
   },
@@ -143,7 +143,7 @@ const INBOX_MEDIA_REHYPE_PLUGINS: PluggableList = [
       defaultOrigin: "https://inbox.invalid",
       allowedImagePrefixes: INBOX_MEDIA_PREFIXES,
       allowedLinkPrefixes: ["*"],
-      allowedProtocols: ["monocode:"],
+      allowedProtocols: ["vorkspace:", "monocode:"],
       allowDataImages: true,
       imageBlockPolicy: "remove" as const,
     },
@@ -200,15 +200,15 @@ const REVEAL_LABEL = IS_MAC
     : "Open Containing Folder";
 
 function fileLinkMenuItems(
-  canOpenInMonoCode: boolean,
+  canOpenInvorkspace: boolean,
   canCopyRelativePath: boolean,
 ): ExplorerMenuItem[] {
   return [
     {
       kind: "item",
       id: "open-monocode",
-      label: "Open in MonoCode",
-      disabled: !canOpenInMonoCode,
+      label: "Open in vorkspace",
+      disabled: !canOpenInvorkspace,
     },
     { kind: "item", id: "open-default", label: "Open in Default App" },
     { kind: "item", id: "reveal", label: REVEAL_LABEL },

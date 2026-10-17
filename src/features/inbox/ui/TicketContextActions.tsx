@@ -269,7 +269,7 @@ export function TicketContextActions({
       <button
         type="button"
         disabled={copying}
-        title="Copy a MonoCode link that loads the latest ticket description and comments"
+        title="Copy a vorkspace link that loads the latest ticket description and comments"
         className="inline-flex h-7 items-center gap-1.5 rounded-md border border-content/15 px-2.5 text-[12px] font-medium text-content/80 hover:bg-content/5 disabled:opacity-40"
         onClick={async () => {
           setCopying(true);

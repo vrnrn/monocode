@@ -215,8 +215,8 @@ async function runCodexAccountRequest<T>(
           "initialize",
           {
             clientInfo: {
-              name: "monocode",
-              title: "MonoCode",
+              name: "vorkspace",
+              title: "vorkspace",
               version: "0.1.0",
             },
             capabilities: { experimentalApi: true },

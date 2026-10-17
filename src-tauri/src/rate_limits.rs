@@ -92,7 +92,7 @@ fn fetch_claude_usage_sync(
 
     // Claude Code owns this credential and rotates its refresh token. The
     // usage footer must remain read-only: independently refreshing here can
-    // race a live CLI (or another MonoCode window) and leave one process with
+    // race a live CLI (or another vorkspace window) and leave one process with
     // a spent refresh token, which forces the user through sign-in again.
     if token_expired(creds.expires_at_ms, now_ms()) {
         return Ok(usage_error(401));
