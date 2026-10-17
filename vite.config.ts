@@ -1,8 +1,8 @@
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, type Plugin, type UserConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { strictBuildPlugin, strictLogger } from "./scripts/buildBudgets";
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // Keep the small splash entry independent of the workspace module graph, so
@@ -27,12 +27,26 @@ function bootSplashEntry(): Plugin {
   };
 }
 
-export default defineConfig(async ({ mode }) => {
+export default defineConfig(async ({ mode, command }): Promise<UserConfig> => {
   const stable = mode === "stable";
 
   return {
-    plugins: [react(), tailwindcss(), bootSplashEntry()],
-    worker: { format: "es" },
+    customLogger: command === "build" ? strictLogger() : undefined,
+    plugins: [
+      react(),
+      tailwindcss(),
+      bootSplashEntry(),
+      strictBuildPlugin({ budgets: !mode.startsWith("benchmark") }),
+    ],
+    worker: {
+      format: "es" as const,
+      plugins: () => [
+        strictBuildPlugin({
+          startup: false,
+          budgets: !mode.startsWith("benchmark"),
+        }),
+      ],
+    },
     resolve: {
       alias: [
         ...(mode.startsWith("benchmark")
@@ -53,6 +67,9 @@ export default defineConfig(async ({ mode }) => {
     },
     clearScreen: false,
     build: {
+      // Replace the generic heuristic with per-artifact and startup budgets.
+      // The largest exception is one unchanged generated vendor table.
+      chunkSizeWarningLimit: 1150,
       rollupOptions: {
         // The quick composer panel loads its own page so it does not boot the
         // whole workspace.

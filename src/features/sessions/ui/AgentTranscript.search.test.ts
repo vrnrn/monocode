@@ -27,6 +27,9 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   navigate = undefined;
+  document
+    .getElementById("monocode-transcript-search-highlight-styles")
+    ?.remove();
   vi.unstubAllGlobals();
 });
 
@@ -139,6 +142,19 @@ it("paints matching words and clears them when find closes", () => {
       .get("monocode-transcript-search-current")
       ?.ranges.map((range) => range.toString()),
   ).toEqual(["can you"]);
+  expect(
+    document.querySelectorAll("#monocode-transcript-search-highlight-styles"),
+  ).toHaveLength(1);
+  expect(
+    document.getElementById("monocode-transcript-search-highlight-styles")
+      ?.textContent,
+  ).toContain("::highlight(monocode-transcript-search-current)");
+  act(() => {
+    navigate?.("user", "can you");
+  });
+  expect(
+    document.querySelectorAll("#monocode-transcript-search-highlight-styles"),
+  ).toHaveLength(1);
   expect(
     registry
       .get("monocode-transcript-search-match")

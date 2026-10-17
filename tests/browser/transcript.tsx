@@ -63,6 +63,9 @@ function Fixture() {
       initialTurns={20}
       visible={!parked}
       parked={parked}
+      onNavigateReady={(navigate) => {
+        Object.assign(window, { findTranscript: navigate });
+      }}
     />
   );
 }

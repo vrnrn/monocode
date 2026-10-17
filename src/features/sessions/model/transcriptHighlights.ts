@@ -1,5 +1,6 @@
 const MATCH_HIGHLIGHT = "monocode-transcript-search-match";
 const CURRENT_HIGHLIGHT = "monocode-transcript-search-current";
+const HIGHLIGHT_STYLE_ID = "monocode-transcript-search-highlight-styles";
 const MATCH_CAP = 1000;
 const BLOCK_ELEMENTS = new Set([
   "blockquote",
@@ -19,10 +20,25 @@ const BLOCK_ELEMENTS = new Set([
 
 let highlightOwner: symbol | null = null;
 
-function transcriptSearchPattern(
-  query: string,
-  flags: string,
-): RegExp | null {
+function ensureHighlightStyles(document: Document): void {
+  if (document.getElementById(HIGHLIGHT_STYLE_ID)) return;
+  // These selectors belong to the native CSS Highlight API, like the file
+  // preview's search styles. Install them with the ranges: the CSS optimizer
+  // does not yet recognize this browser-supported pseudo-element.
+  const style = document.createElement("style");
+  style.id = HIGHLIGHT_STYLE_ID;
+  style.textContent = `
+    ::highlight(${MATCH_HIGHLIGHT}) {
+      background-color: color-mix(in srgb, #e2c08d 46%, transparent);
+    }
+    ::highlight(${CURRENT_HIGHLIGHT}) {
+      background-color: color-mix(in srgb, var(--color-accent) 62%, transparent);
+    }
+  `;
+  document.head.append(style);
+}
+
+function transcriptSearchPattern(query: string, flags: string): RegExp | null {
   const needle = query.trim();
   if (!needle) return null;
   return new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
@@ -97,6 +113,10 @@ export function paintTranscriptHighlights(
   current: Range | null,
 ): void {
   if (typeof CSS === "undefined" || !("highlights" in CSS)) return;
+  const document =
+    current?.startContainer.ownerDocument ??
+    ranges[0]?.startContainer.ownerDocument;
+  if (document) ensureHighlightStyles(document);
   if (highlightOwner !== owner) {
     CSS.highlights.delete(MATCH_HIGHLIGHT);
     CSS.highlights.delete(CURRENT_HIGHLIGHT);
