@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { invalidateHostFileIndex } from "./workspace";
 
 const exec = promisify(execFile);
 const options = (cwd: string) => ({
@@ -89,6 +90,7 @@ export async function switchHostBranch(
       options(cwd),
     );
   else await exec("git", ["switch", branch], options(cwd));
+  invalidateHostFileIndex(cwd);
   return hostBranches(cwd);
 }
 
@@ -117,5 +119,6 @@ export async function createHostBranch(
       "Commit or stash changes on the host before switching branches",
     );
   await exec("git", ["switch", "-c", branch], options(cwd));
+  invalidateHostFileIndex(cwd);
   return hostBranches(cwd);
 }

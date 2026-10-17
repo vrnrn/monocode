@@ -1,3 +1,4 @@
+pub(crate) mod incremental;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -185,6 +186,8 @@ pub struct SessionSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionRecord {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persistence_revision: Option<i64>,
     #[serde(default)]
     pub sidebar_hidden: bool,
     pub id: String,
@@ -228,6 +231,13 @@ pub fn session_upsert(
     store: State<'_, SessionStore>,
     session: SessionUpsert,
 ) -> Result<SessionSummary, String> {
+    validate_upsert(&session)?;
+    let conn = store.conn.lock().map_err(|_| "Session store is locked")?;
+    let summary = upsert_session(&conn, &session).map_err(|e| e.to_string())?;
+    Ok(summary)
+}
+
+fn validate_upsert(session: &SessionUpsert) -> Result<(), String> {
     validate_id(&session.id, "session")?;
     if session.cwd.trim().is_empty() {
         return Err("cwd is required".into());
@@ -254,9 +264,25 @@ pub fn session_upsert(
         return Err("blocks must be an array".into());
     }
 
+    Ok(())
+}
+
+#[tauri::command(async)]
+pub fn session_upsert_delta(
+    store: State<'_, SessionStore>,
+    session: SessionUpsert,
+    block_ids: Vec<String>,
+    expected_revision: Option<i64>,
+) -> Result<(SessionSummary, i64), String> {
+    validate_upsert(&session)?;
+    if session.cwd.starts_with("remote://") {
+        return Err("Remote sessions belong to their host".into());
+    }
+    if session.id.starts_with("mono/") {
+        return Err("Mono sessions use their own transcript store".into());
+    }
     let conn = store.conn.lock().map_err(|_| "Session store is locked")?;
-    let summary = upsert_session(&conn, &session).map_err(|e| e.to_string())?;
-    Ok(summary)
+    incremental::save(&conn, &session, &block_ids, expected_revision)
 }
 
 fn generated_image_paths(blocks: &Value) -> Vec<String> {
@@ -1034,6 +1060,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     crate::notes::ensure_notes_table(conn)?;
     crate::reminders::ensure_table(conn)?;
     crate::automations::ensure_tables(conn)?;
+    incremental::ensure_tables(conn)?;
     ensure_orchestration_history(conn)?;
     crate::mono_transcript::ensure_tables(conn)?;
     crate::composer_drafts::ensure_table(conn)?;
@@ -1080,7 +1107,8 @@ fn ensure_orchestration_history(conn: &Connection) -> rusqlite::Result<()> {
 }
 
 fn remember_worker(conn: &Connection, id: &str, lead: &str) -> rusqlite::Result<()> {
-    if id != lead && validate_id(id, "Worker").is_ok() && validate_id(lead, "Lead").is_ok() {
+    if id != lead && validate_id(id, "Worker").is_ok() && validate_id(lead, "Lead").is_ok()
+        && !conn.query_row("SELECT EXISTS(SELECT 1 FROM ordinary_detached_leads WHERE session_id=?1 AND lead_id=?2)",params![id,lead],|r|r.get::<_,bool>(0))? {
         // Keep earlier workers indexed when a lead starts a subsequent run.
         conn.execute(
             "INSERT OR IGNORE INTO orchestration_workers(session_id, lead_id) VALUES (?1, ?2)",
@@ -1163,20 +1191,61 @@ pub(crate) fn upsert_session(
     conn: &Connection,
     session: &SessionUpsert,
 ) -> rusqlite::Result<SessionSummary> {
+    conn.execute_batch("SAVEPOINT ordinary_full_save")?;
+    let result = (|| {
+        let summary = upsert_session_inner(conn, session, false)?;
+        conn.execute(
+            "DELETE FROM ordinary_blocks WHERE session_id=?1",
+            [&session.id],
+        )?;
+        conn.execute(
+            "INSERT INTO ordinary_transcripts(session_id,revision,normalized) VALUES (?1,abs(random() % 9007199254740991),0) ON CONFLICT(session_id) DO UPDATE SET revision=excluded.revision,normalized=0",
+            [&session.id],
+        )?;
+        Ok(summary)
+    })();
+    match result {
+        Ok(summary) => {
+            conn.execute_batch("RELEASE ordinary_full_save")?;
+            Ok(summary)
+        }
+        Err(error) => {
+            let _ =
+                conn.execute_batch("ROLLBACK TO ordinary_full_save; RELEASE ordinary_full_save");
+            Err(error)
+        }
+    }
+}
+
+fn upsert_session_inner(
+    conn: &Connection,
+    session: &SessionUpsert,
+    incremental: bool,
+) -> rusqlite::Result<SessionSummary> {
     let now = now_millis();
     let model_settings = serde_json::to_string(&session.model_settings)
         .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
     let existing: Option<(i64, i64, String, i64, i64, String)> = conn
         .query_row(
-            "SELECT created_at, updated_at, blocks_json, archived, pinned, queued_messages_json FROM sessions WHERE id = ?1",
+            if incremental { "SELECT created_at, updated_at, '[]', archived, pinned, queued_messages_json FROM sessions WHERE id = ?1" }
+            else { "SELECT created_at, updated_at, blocks_json, archived, pinned, queued_messages_json FROM sessions WHERE id = ?1" },
             params![session.id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
         )
         .optional()?;
-    let previous_blocks: Option<Value> = existing
-        .as_ref()
-        .and_then(|(_, _, raw, _, _, _)| serde_json::from_str(raw).ok());
-    let blocks = crate::artifacts::retain_existing_cards(conn, &session.blocks)?;
+    let previous_blocks: Option<Value> = if !incremental && incremental::indexed(conn, &session.id)?
+    {
+        Some(incremental::blocks(conn, &session.id)?)
+    } else {
+        existing
+            .as_ref()
+            .and_then(|(_, _, raw, _, _, _)| serde_json::from_str(raw).ok())
+    };
+    let blocks = if incremental {
+        Cow::Owned(Value::Array(Vec::new()))
+    } else {
+        crate::artifacts::retain_existing_cards(conn, &session.blocks)?
+    };
     // Loaded transcripts omit large tool output; never let a save erase it.
     let blocks = match &previous_blocks {
         Some(previous) => match crate::tool_detail::restore_details(previous, &blocks) {
@@ -1237,8 +1306,14 @@ pub(crate) fn upsert_session(
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
-    let has_user_message = has_user_block(&session.blocks);
-    let is_draft = has_draft_block(&session.blocks);
+    let (has_user_message, is_draft) = if incremental {
+        conn.query_row("SELECT COALESCE(MAX(has_user),0),COALESCE(MAX(is_draft),0) FROM ordinary_blocks WHERE session_id=?1", [&session.id], |r| Ok((r.get::<_,i64>(0)? != 0,r.get::<_,i64>(1)? != 0)))?
+    } else {
+        (
+            has_user_block(&session.blocks),
+            has_draft_block(&session.blocks),
+        )
+    };
 
     let created_at = existing
         .as_ref()
@@ -1393,6 +1468,11 @@ fn search_sessions_sql(include_archived: bool, cwd_scoped: bool) -> String {
                  OR CASE WHEN octet_length(blocks_json) <= ?2
                          THEN LOWER(blocks_json) LIKE LOWER(?1) ESCAPE '\\'
                          ELSE 0 END
+                 OR EXISTS(SELECT 1 FROM ordinary_blocks
+                           WHERE ordinary_blocks.session_id = sessions.id
+                             AND CASE WHEN octet_length(block_json) <= ?2
+                                      THEN LOWER(block_json) LIKE LOWER(?1) ESCAPE '\\'
+                                      ELSE 0 END)
                  OR EXISTS(SELECT 1 FROM mono_blocks
                            WHERE mono_blocks.session_id = sessions.id
                              AND search_text LIKE LOWER(?1) ESCAPE '\\'))",
@@ -1527,6 +1607,12 @@ fn search_sessions_with_connection(
                 MAX_MESSAGE_HITS - messages.len(),
             )
             .map_err(|e| e.to_string())?
+        } else if incremental::indexed(conn, &id).map_err(|e| e.to_string())? {
+            let (blocks, budget_exhausted) =
+                incremental::matching_blocks(conn, &id, &pattern, MAX_SEARCH_BUFFER_BYTES)
+                    .map_err(|e| e.to_string())?;
+            truncated |= budget_exhausted;
+            blocks
         } else {
             let Ok(blocks) = serde_json::from_str::<Value>(&blocks_raw) else {
                 continue;
@@ -1830,6 +1916,14 @@ fn delete_session_record(
         .query_map([session_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for (id, raw) in workers {
+        tx.execute(
+            "INSERT OR IGNORE INTO ordinary_detached_leads(session_id,lead_id) VALUES (?1,?2)",
+            params![id, session_id],
+        )?;
+        if incremental::indexed(&tx, &id)? {
+            tx.execute("UPDATE ordinary_blocks SET block_json=json_remove(block_json,'$.orchestrationLeadId') WHERE session_id=?1 AND json_extract(block_json,'$.orchestrationLeadId')=?2",params![id,session_id])?;
+            continue;
+        }
         let mut blocks: Value = serde_json::from_str(&raw).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
         })?;
@@ -1846,6 +1940,7 @@ fn delete_session_record(
             "UPDATE sessions SET blocks_json = ?1 WHERE id = ?2",
             params![blocks.to_string(), id],
         )?;
+        tx.execute("UPDATE ordinary_transcripts SET revision=abs(random() % 9007199254740991) WHERE session_id=?1", [&id])?;
     }
     tx.execute(
         "DELETE FROM orchestration_runs WHERE lead_id = ?1",
@@ -2016,7 +2111,19 @@ fn get_session_record(
                     Box::new(e),
                 )
             })?;
+            let blocks = if with_blocks && incremental::indexed(conn, session_id)? {
+                incremental::blocks(conn, session_id)?
+            } else {
+                blocks
+            };
             Ok(SessionRecord {
+                persistence_revision: conn
+                    .query_row(
+                        "SELECT revision FROM ordinary_transcripts WHERE session_id=?1",
+                        [session_id],
+                        |r| r.get(0),
+                    )
+                    .optional()?,
                 sidebar_hidden: row.get::<_, i64>(21)? != 0,
                 id: row.get(0)?,
                 orchestration_lead_id: worker_parent(conn, session_id)?,

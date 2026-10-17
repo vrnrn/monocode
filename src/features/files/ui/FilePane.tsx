@@ -208,7 +208,10 @@ function FilePaneComponent({
                   onBuildPlan={onBuildPlan}
                 />
               ) : isReleaseNotesTab(file) ? (
-                <ReleaseNotesSurface source={file.releaseNotes} />
+                <ReleaseNotesSurface
+                  source={file.releaseNotes}
+                  visible={visible && file.id === pane.activeFileId}
+                />
               ) : isTerminalTab(file) ? (
                 <TerminalView
                   id={file.id}

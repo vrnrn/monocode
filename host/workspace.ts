@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { promisify } from "node:util";
 import {
   lstat,
@@ -166,6 +167,91 @@ export async function listHostFiles(
 
 /** Upper bound on paths sent for Go to File, as for a local project. */
 const MAX_INDEXED_FILES = 20_000;
+const HOST_FILE_INDEX_TTL_MS = 1_000;
+const HOST_FILE_INDEX_MAX_ROOTS = 24;
+const HOST_FILE_INDEX_MAX_BYTES = 8 * 1024 * 1024;
+
+type FileIndexEntry = { paths: string[]; weight: number; expiresAt: number };
+type FileIndexFlight = { promise: Promise<string[]> };
+
+/** A short-lived, bounded index shared by the picker and fuzzy file search. */
+export class HostFileIndexCache {
+  private readonly entries = new Map<string, FileIndexEntry>();
+  private readonly flights = new Map<string, FileIndexFlight>();
+  private bytes = 0;
+
+  constructor(
+    private readonly load: (root: string) => Promise<string[]>,
+    private readonly ttlMs = HOST_FILE_INDEX_TTL_MS,
+    private readonly maxRoots = HOST_FILE_INDEX_MAX_ROOTS,
+    private readonly maxBytes = HOST_FILE_INDEX_MAX_BYTES,
+  ) {}
+
+  get(root: string): Promise<string[]> {
+    const cached = this.entries.get(root);
+    if (cached && cached.expiresAt > Date.now()) {
+      this.entries.delete(root);
+      this.entries.set(root, cached);
+      return Promise.resolve(cached.paths);
+    }
+    if (cached) this.remove(root);
+
+    const existing = this.flights.get(root);
+    if (existing) return existing.promise;
+
+    const canTrack = this.flights.size < this.maxRoots;
+    const flight: FileIndexFlight = { promise: Promise.resolve([]) };
+    flight.promise = this.load(root).then(
+      (paths) => {
+        if (canTrack && this.flights.get(root) === flight) {
+          this.flights.delete(root);
+          const weight = paths.reduce(
+            (sum, path) => sum + path.length * 2 + 48,
+            0,
+          );
+          if (weight <= this.maxBytes) {
+            this.entries.set(root, {
+              paths,
+              weight,
+              expiresAt: Date.now() + this.ttlMs,
+            });
+            this.bytes += weight;
+            this.trim();
+          }
+        }
+        return paths;
+      },
+      (error) => {
+        if (this.flights.get(root) === flight) this.flights.delete(root);
+        throw error;
+      },
+    );
+    if (canTrack) this.flights.set(root, flight);
+    return flight.promise;
+  }
+
+  invalidate(root: string): void {
+    this.remove(root);
+    // An old request may still finish for its callers, but it cannot publish
+    // into the cache after invalidation because its flight identity is gone.
+    this.flights.delete(root);
+  }
+
+  private remove(root: string): void {
+    const entry = this.entries.get(root);
+    if (!entry) return;
+    this.entries.delete(root);
+    this.bytes -= entry.weight;
+  }
+
+  private trim(): void {
+    while (this.entries.size > this.maxRoots || this.bytes > this.maxBytes) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest === undefined) return;
+      this.remove(oldest);
+    }
+  }
+}
 
 /** Every file in the worktree, honoring .gitignore when it is a repository. */
 async function hostFilePaths(root: string): Promise<string[]> {
@@ -206,9 +292,31 @@ async function hostFilePaths(root: string): Promise<string[]> {
   return paths;
 }
 
+const hostFileIndex = new HostFileIndexCache(hostFilePaths);
+
+async function canonicalFileIndexRoot(root: string): Promise<string> {
+  return realpath(root);
+}
+
+/** Invalidate both filename search and Go to File indexes for one checkout. */
+export function invalidateHostFileIndex(root: string): void {
+  let canonical: string;
+  try {
+    canonical = realpathSync.native(root);
+  } catch {
+    canonical = resolve(root);
+  }
+  hostFileIndex.invalidate(canonical);
+}
+
+async function indexedHostFilePaths(root: string): Promise<string[]> {
+  const canonical = await canonicalFileIndexRoot(root);
+  return hostFileIndex.get(canonical);
+}
+
 /** Relative paths of the worktree's files, for fuzzy Go to File on the client. */
 export async function indexHostFiles(root: string): Promise<string[]> {
-  return (await hostFilePaths(root)).slice(0, MAX_INDEXED_FILES);
+  return (await indexedHostFilePaths(root)).slice(0, MAX_INDEXED_FILES);
 }
 
 /** Bounded filename search for the remote Explorer. */
@@ -220,7 +328,7 @@ export async function searchHostFiles(
     throw new Error("Invalid search");
   const query = input.trim().toLocaleLowerCase();
   if (!query) return [];
-  return (await hostFilePaths(root))
+  return (await indexedHostFilePaths(root))
     .filter((path) => path.toLocaleLowerCase().includes(query))
     .slice(0, 200)
     .map((path) => ({
@@ -233,6 +341,7 @@ export async function searchHostFiles(
 
 type ContentSearchOptions = {
   query: string;
+  columnPattern: RegExp;
   caseSensitive: boolean;
   wholeWord: boolean;
   regex: boolean;
@@ -263,8 +372,13 @@ function searchOptions(input: unknown): ContentSearchOptions {
       .split(",")
       .map((part) => part.trim())
       .filter(Boolean);
+  const query = value.query.trim();
   return {
-    query: value.query.trim(),
+    query,
+    columnPattern: new RegExp(
+      query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      value.caseSensitive === true ? "g" : "gi",
+    ),
     caseSensitive: value.caseSensitive === true,
     wholeWord: value.wholeWord === true,
     regex: value.regex === true,
@@ -275,11 +389,7 @@ function searchOptions(input: unknown): ContentSearchOptions {
 
 function searchColumn(line: string, options: ContentSearchOptions): number {
   if (options.regex) return 1;
-  const pattern = new RegExp(
-    options.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-    options.caseSensitive ? "g" : "gi",
-  );
-  for (const match of line.matchAll(pattern)) {
+  for (const match of line.matchAll(options.columnPattern)) {
     if (options.wholeWord) {
       const before = line[match.index - 1];
       const after = line[match.index + match[0].length];
@@ -460,6 +570,7 @@ export async function writeHostFile(
   if (current !== expected)
     throw new Error("File changed on the host; reload before saving");
   await writeFile(path, content, "utf8");
+  invalidateHostFileIndex(root);
 }
 
 /** Create a new file or folder under an existing workspace directory. */
@@ -516,6 +627,7 @@ export async function createHostPath(
     const file = await open(path, "wx");
     await file.close();
   }
+  invalidateHostFileIndex(root);
   return relative(root, path).split(sep).join("/");
 }
 
@@ -740,7 +852,7 @@ export async function hostFileDiff(
   };
 }
 
-export async function hostGitAction(
+async function performHostGitAction(
   root: string,
   action: unknown,
   input?: unknown,
@@ -840,4 +952,17 @@ export async function hostGitAction(
     default:
       throw new Error("Unsupported Git action");
   }
+}
+
+export async function hostGitAction(
+  root: string,
+  action: unknown,
+  input?: unknown,
+  message?: unknown,
+  contents?: unknown,
+) {
+  const result = await performHostGitAction(root, action, input, message, contents);
+  if (action === "discard" || action === "discardAll")
+    invalidateHostFileIndex(root);
+  return result;
 }

@@ -13,6 +13,10 @@ import type { LinkedWorkItem } from "../src/features/sessions/model/session";
 import { sessionNeedsInput } from "../src/features/sessions/model/session";
 
 const CACHED_SESSIONS = 32;
+const CACHED_SESSION_BYTES = 16 * 1024 * 1024;
+const MAX_CACHED_SESSION_BYTES = 8 * 1024 * 1024;
+const MIN_CACHED_SESSION_BYTES = 4 * 1024;
+type StoredSessionSummary = HostSessionSummary & { cwd: string };
 
 export class HostStore {
   readonly db: DatabaseSync;
@@ -21,7 +25,8 @@ export class HostStore {
   // This process is the only session writer, so recently used snapshots are
   // served from memory instead of re-parsing whole transcripts. Callers must
   // treat returned values as immutable.
-  private cache = new Map<string, HostSession>();
+  private cache = new Map<string, { value: HostSession; weight: number }>();
+  private cacheBytes = 0;
 
   constructor(path: string) {
     this.attachmentDir = join(dirname(path), "attachments");
@@ -54,7 +59,7 @@ export class HostStore {
       this.db.exec("COMMIT");
       return value;
     } catch (error) {
-      this.cache.clear();
+      this.clearCache();
       try {
         this.db.exec("ROLLBACK");
       } catch (rollbackError) {
@@ -85,23 +90,52 @@ export class HostStore {
       .get(cwd) as unknown as HostProject;
   }
 
-  private remember(value: HostSession): HostSession {
-    this.cache.delete(value.session.id);
-    this.cache.set(value.session.id, value);
-    if (this.cache.size > CACHED_SESSIONS)
-      this.cache.delete(this.cache.keys().next().value!);
+  private removeCached(id: string): void {
+    const cached = this.cache.get(id);
+    if (!cached) return;
+    this.cache.delete(id);
+    this.cacheBytes -= cached.weight;
+  }
+
+  private clearCache(): void {
+    this.cache.clear();
+    this.cacheBytes = 0;
+  }
+
+  private remember(value: HostSession, snapshotLength: number): HostSession {
+    const id = value.session.id;
+    this.removeCached(id);
+    // Parsed JSON retains both strings and object/array structure. Four bytes
+    // per serialized UTF-16 code unit is a cheap conservative heap estimate;
+    // snapshotLength is already available from the DB row or save serialization.
+    const weight = Math.max(MIN_CACHED_SESSION_BYTES, snapshotLength * 4);
+    if (weight > MAX_CACHED_SESSION_BYTES) return value;
+    this.cache.set(id, { value, weight });
+    this.cacheBytes += weight;
+    while (
+      this.cache.size > CACHED_SESSIONS ||
+      this.cacheBytes > CACHED_SESSION_BYTES
+    ) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest === undefined) break;
+      this.removeCached(oldest);
+    }
     return value;
   }
 
   private find(id: string): HostSession | undefined {
     const cached = this.cache.get(id);
-    if (cached) return this.remember(cached);
+    if (cached) {
+      this.cache.delete(id);
+      this.cache.set(id, cached);
+      return cached.value;
+    }
     const row = this.db
       .prepare("SELECT snapshot FROM sessions WHERE id=?")
       .get(id);
-    return row
-      ? this.remember(JSON.parse(String(row.snapshot)) as HostSession)
-      : undefined;
+    if (!row) return undefined;
+    const snapshot = String(row.snapshot);
+    return this.remember(JSON.parse(snapshot) as HostSession, snapshot.length);
   }
 
   session(id: string): HostSession {
@@ -110,16 +144,25 @@ export class HostStore {
     return value;
   }
 
-  summaries(projectId: string): HostSessionSummary[] {
-    return this.db
-      .prepare("SELECT id, summary FROM sessions WHERE project_id=?")
-      .all(projectId)
+  summaries(projectId?: string): StoredSessionSummary[] {
+    const rows = projectId === undefined
+      ? this.db.prepare("SELECT id, summary FROM sessions").all()
+      : this.db
+          .prepare("SELECT id, summary FROM sessions WHERE project_id=?")
+          .all(projectId);
+    return rows
       .map((row) => {
-        const cached = row.summary
-          ? (JSON.parse(String(row.summary)) as HostSessionSummary)
-          : undefined;
+        let cached: StoredSessionSummary | undefined;
+        try {
+          if (row.summary) cached = JSON.parse(String(row.summary)) as StoredSessionSummary;
+        } catch {
+          // Summaries are derived metadata; repair a malformed cache from the
+          // durable snapshot rather than making startup depend on its validity.
+        }
         if (
           cached?.model &&
+          typeof cached.harness === "string" &&
+          typeof cached.cwd === "string" &&
           cached.needsInput !== undefined &&
           cached.providerSessionId !== undefined
         )
@@ -177,6 +220,7 @@ export class HostStore {
         input.createdAt ?? previous?.createdAt ?? previous?.updatedAt ?? input.updatedAt,
       blockRevisions: blockRevisions(previous, input),
     };
+    const snapshot = JSON.stringify(value);
     this.db
       .prepare(
         "INSERT INTO sessions (id, project_id, snapshot, summary) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET snapshot=excluded.snapshot, summary=excluded.summary",
@@ -184,7 +228,7 @@ export class HostStore {
       .run(
         value.session.id,
         value.projectId,
-        JSON.stringify(value),
+        snapshot,
         JSON.stringify(summary(value)),
       );
     this.db
@@ -193,7 +237,7 @@ export class HostStore {
     this.db
       .prepare("DELETE FROM events WHERE session_id=? AND revision<?")
       .run(value.session.id, value.revision - 2_000);
-    return this.remember(value);
+    return this.remember(value, snapshot.length);
   }
 
   updateSession(
@@ -231,7 +275,7 @@ export class HostStore {
         throw new Error("Stop this session before deleting it");
       this.db.prepare("DELETE FROM events WHERE session_id=?").run(id);
       this.db.prepare("DELETE FROM sessions WHERE id=?").run(id);
-      this.cache.delete(id);
+      this.removeCached(id);
     });
   }
 
@@ -316,7 +360,7 @@ export class HostStore {
   }
 }
 
-export function summary(value: HostSession): HostSessionSummary {
+export function summary(value: HostSession): StoredSessionSummary {
   return {
     projectId: value.projectId,
     revision: value.revision,

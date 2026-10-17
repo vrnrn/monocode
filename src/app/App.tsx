@@ -19,6 +19,8 @@ import {
   MonoSessionCompletionBatches,
 } from "../features/monos/model/monoSessionCompletion";
 import { acceptQuickLaunch } from "./model/quickLaunchSession";
+import { deferSessionRepairs } from "./model/deferredSessionRepairs";
+import { scheduleAfterPaint } from "../shared/lib/afterPaint";
 import { useWorkspaceNavigation } from "./hooks/useWorkspaceNavigation";
 import { useIdleSessionDetach } from "./hooks/useIdleSessionDetach";
 import { HarnessEventQueue } from "./model/harnessFlush";
@@ -99,7 +101,6 @@ import { Sidebar } from "./shell/Sidebar";
 import { ApprovalToasts } from "../features/sessions/ui/ApprovalToasts";
 import { ResourcePressureNotice } from "../features/notifications/ui/ResourcePressureNotice";
 import { HarnessUpdateNotice } from "../features/providers/ui/HarnessUpdateNotice";
-import { WhatsNewDialog } from "./shell/WhatsNewDialog";
 import { ProviderSignInDialog } from "../features/sessions/ui/ProviderSignInDialog";
 import { TitleBar, type Tab as TitleTab } from "./shell/TitleBar";
 import { WindowControls } from "./shell/WindowControls";
@@ -107,7 +108,6 @@ import {
   MonoOverview,
   type MonoOverviewTab,
 } from "../features/monos/ui/MonoOverview";
-import { MonoSettingsDialog } from "../features/monos/ui/MonoSettingsDialog";
 import { MonoActivityView } from "../features/monos/ui/MonoActivityView";
 import {
   launchedSessionState,
@@ -242,10 +242,8 @@ import {
   type SplitDir,
   type WorkspaceTab,
 } from "../features/workspace/model/layout";
-import {
-  releaseNotesForVersion,
-  releaseNotesTitle,
-} from "./model/releaseNotes";
+import { releaseNotesTitle } from "./model/releaseNotes";
+import { releaseNotesLoader } from "./model/releaseNotesLoader";
 import { mergeOrderedSubset, orderByIds } from "../shared/lib/reorder";
 import {
   addTerminalToDock,
@@ -634,7 +632,6 @@ import {
   removeMonoChannel,
   subscribeMonoChannels,
 } from "../features/monos/model/monoChannels";
-import { MonoChannelView } from "../features/monos/ui/MonoChannelView";
 import { useMonoChannels } from "./hooks/useMonoChannels";
 import { monoReaction as parseMonoReaction } from "../features/monos/model/monoReaction";
 import {
@@ -779,7 +776,7 @@ import {
 import {
   handleEditorFindKey,
   openFindInActiveEditor,
-} from "../features/files/editor/editorSearch";
+} from "../features/files/editor/editorSearchCommands";
 
 import {
   mergeHistorySummary,
@@ -824,6 +821,19 @@ import {
   setQuitWorkspace,
   type ResumedWorkspace,
 } from "./model/appLifecycle";
+
+const WhatsNewDialog = lazySurface(async () => {
+  const module = await import("./shell/WhatsNewDialog");
+  return { default: module.WhatsNewDialog };
+});
+const MonoSettingsDialog = lazySurface(async () => {
+  const module = await import("../features/monos/ui/MonoSettingsDialog");
+  return { default: module.MonoSettingsDialog };
+});
+const MonoChannelView = lazySurface(async () => {
+  const module = await import("../features/monos/ui/MonoChannelView");
+  return { default: module.MonoChannelView };
+});
 
 const SearchView = lazySurface(
   async () => {
@@ -1311,6 +1321,10 @@ function Workspace({
   });
   const [updateNotice, setUpdateNotice] = useState(installedUpdate);
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
+  const whatsNewRequest = useRef(0);
+  useEffect(() => () => {
+    whatsNewRequest.current += 1;
+  }, []);
   const monosEnabled = useSyncExternalStore(
     subscribeMonosEnabled,
     loadMonosEnabled,
@@ -1726,6 +1740,30 @@ function Workspace({
     }
   }, [windowTransfer, resumed]);
 
+  useEffect(() => {
+    if (!resumed?.sessions.length || windowTransfer) return;
+    return deferSessionRepairs(
+      resumed.sessions,
+      (id) =>
+        isAppQuitting()
+          ? undefined
+          : sessionsRef.current.find((session) => session.id === id),
+      (source, repaired) => {
+        if (isAppQuitting()) return;
+        updateSessionState(sessionsRef, setSessions, (current) => {
+          let changed = false;
+          const next = current.map((session) => {
+            if (session.id !== source.id) return session;
+            const merged = applySessionRepair(session, source, repaired);
+            changed ||= merged !== session;
+            return merged;
+          });
+          return changed ? next : current;
+        });
+      },
+    );
+  }, [resumed, windowTransfer]);
+
   const flushHarnessEvents = harnessEvents.flush;
   const flushForegroundHarnessEvents = harnessEvents.flushForeground;
 
@@ -1839,31 +1877,41 @@ function Workspace({
   }, [monosSnap]);
 
   useEffect(() => {
-    void probeHarnessAvailability();
-    // Only the harnesses already in this window. Probing every installed CLI
-    // at boot left unused agents (especially Pi) running in the background.
-    const harnesses = [
-      ...new Set(sessionsRef.current.map((session) => session.harness)),
-    ];
-    void refreshHarnessCatalogs(harnesses).then(() => {
-      setSessions((prev) =>
-        prev.map((session) => {
-          if (!isLiveHarness(session.harness)) return session;
-          const resolved = resolveModel(session.harness, session.model);
-          const modelSettings = mergeModelSettings(
-            resolved,
-            session.modelSettings,
+    let disposed = false;
+    const cancel = scheduleAfterPaint(() => {
+      void probeHarnessAvailability().catch(() => undefined);
+      // Only the harnesses already in this window. Probing every installed CLI
+      // at boot left unused agents (especially Pi) running in the background.
+      const harnesses = [
+        ...new Set(sessionsRef.current.map((session) => session.harness)),
+      ];
+      void refreshHarnessCatalogs(harnesses)
+        .then(() => {
+          if (disposed) return;
+          setSessions((prev) =>
+            prev.map((session) => {
+              if (!isLiveHarness(session.harness)) return session;
+              const resolved = resolveModel(session.harness, session.model);
+              const modelSettings = mergeModelSettings(
+                resolved,
+                session.modelSettings,
+              );
+              if (
+                resolved.id === session.model &&
+                sameSettings(modelSettings, session.modelSettings)
+              ) {
+                return session;
+              }
+              return { ...session, model: resolved.id, modelSettings };
+            }),
           );
-          if (
-            resolved.id === session.model &&
-            sameSettings(modelSettings, session.modelSettings)
-          ) {
-            return session;
-          }
-          return { ...session, model: resolved.id, modelSettings };
-        }),
-      );
+        })
+        .catch(() => undefined);
     });
+    return () => {
+      disposed = true;
+      cancel();
+    };
   }, []);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
@@ -2049,7 +2097,9 @@ function Workspace({
   const activeHarness = active?.harness;
   useEffect(() => {
     if (!activeHarness || !isLiveHarness(activeHarness)) return;
-    void refreshHarnessCatalogs([activeHarness]);
+    return scheduleAfterPaint(() => {
+      void refreshHarnessCatalogs([activeHarness]).catch(() => undefined);
+    });
   }, [activeHarness]);
 
   const usageProviders = useMemo(() => {
@@ -2165,7 +2215,10 @@ function Workspace({
 
   // Cache the OS decision so a turn ending later can skip a denied banner.
   useEffect(() => {
-    if (loadNotificationsEnabled()) void probeNotificationPermission();
+    if (!loadNotificationsEnabled()) return;
+    return scheduleAfterPaint(() => {
+      void probeNotificationPermission().catch(() => undefined);
+    });
   }, []);
   const unseenFinishedIds = useUnseenFinishedSessions(
     sessions,
@@ -2399,7 +2452,7 @@ function Workspace({
   }, [inboxViewOpen]);
 
   useEffect(() => {
-    prefetchProjectFiles(gitCwd);
+    return scheduleAfterPaint(() => prefetchProjectFiles(gitCwd));
   }, [gitCwd]);
 
   const persistSession = useCallback((session: Session | undefined) => {
@@ -2762,15 +2815,27 @@ function Workspace({
   );
 
   const onOpenWhatsNew = useCallback((version: string) => {
-    const document = releaseNotesForVersion(version);
-    if (!document) {
-      void message(
-        "Release notes for this version are not available in this build.",
-        { title: "vorkspace" },
-      );
-      return;
-    }
-    setWhatsNewVersion(document.source.version);
+    const request = ++whatsNewRequest.current;
+    void Promise.all([
+      releaseNotesLoader.load(version),
+      WhatsNewDialog.preload(),
+    ])
+      .then(([document]) => {
+        if (request !== whatsNewRequest.current) return;
+        if (!document) {
+          return message(
+            "Release notes for this version are not available in this build.",
+            { title: "vorkspace" },
+          );
+        }
+        setWhatsNewVersion(document.source.version);
+      })
+      .catch(() => {
+        if (request === whatsNewRequest.current)
+          void message("Could not load release notes. Please try again.", {
+            title: "vorkspace",
+          }).catch(() => undefined);
+      });
   }, []);
 
   const createWorkspaceTab = useCallback(
@@ -4885,12 +4950,29 @@ function Workspace({
     if (monoId) void onOpenMono(monoId);
   }, [closeMonoView, monosEnabled, onOpenMono]);
 
+  const onOpenMonoSettings = useCallback((monoId: string) => {
+    const request = monoViewRequest.current;
+    void MonoSettingsDialog.preload()
+      .then(() => {
+        if (
+          request === monoViewRequest.current &&
+          findMono(monoId)?.sessionId === monoViewIdRef.current
+        )
+          setMonoSettingsFor(monoId);
+      })
+      .catch(() => {
+        if (request === monoViewRequest.current)
+          void message("Could not open Mono settings. Please try again.", {
+            title: "vorkspace",
+          }).catch(() => undefined);
+      });
+  }, []);
+
   /** A new Mono opens straight away, ready to be told what it works on. */
   const onCreateMono = useCallback(() => {
     const monoId = createMono().id;
-    setMonoSettingsFor(monoId);
-    void onOpenMono(monoId);
-  }, [onOpenMono]);
+    void onOpenMono(monoId).then(() => onOpenMonoSettings(monoId));
+  }, [onOpenMono, onOpenMonoSettings]);
 
   const onResetMono = useCallback(
     async (sessionId: string): Promise<void> => {
@@ -13205,13 +13287,26 @@ function Workspace({
   const onOpenRailChannel = useCallback((channelId: string) => {
     const channel = findMonoChannel(channelId);
     if (!channel) return;
-    monoViewRequest.current += 1;
-    monoViewIdRef.current = channel.id;
-    setMonoShownSession(null);
-    setMonoShownSessionFocused(false);
-    setMonoOverviewDocument(null);
-    setMonoViewId(channel.id);
-    setProjectTerminalFocused(false);
+    const request = ++monoViewRequest.current;
+    void MonoChannelView.preload()
+      .then(() => {
+        if (request !== monoViewRequest.current || !findMonoChannel(channelId))
+          return;
+        monoViewIdRef.current = channel.id;
+        startTransition(() => {
+          setMonoShownSession(null);
+          setMonoShownSessionFocused(false);
+          setMonoOverviewDocument(null);
+          setMonoViewId(channel.id);
+          setProjectTerminalFocused(false);
+        });
+      })
+      .catch(() => {
+        if (request === monoViewRequest.current)
+          void message("Could not open the channel. Please try again.", {
+            title: "vorkspace",
+          }).catch(() => undefined);
+      });
   }, []);
   const onDeleteRailMono = useCallback(
     (monoId: string) => void onDeleteMono(monoId),
@@ -13285,7 +13380,7 @@ function Workspace({
       monoOverviewOpen={monoOverviewOpen}
       onOpenMonoSettings={
         monoCovers && monoViewMono
-          ? () => setMonoSettingsFor(monoViewMono.id)
+          ? () => onOpenMonoSettings(monoViewMono.id)
           : undefined
       }
       hideWindowControls={monoCovers && monoOverviewOpen && !!monoOverviewPanel}
@@ -13976,7 +14071,10 @@ function Workspace({
           {whatsNewVersion ? (
             <WhatsNewDialog
               version={whatsNewVersion}
-              onClose={() => setWhatsNewVersion(null)}
+              onClose={() => {
+                whatsNewRequest.current += 1;
+                setWhatsNewVersion(null);
+              }}
             />
           ) : null}
           {remoteProjectDialogOpen ? (

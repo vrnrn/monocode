@@ -28,10 +28,11 @@ import {
 } from "@codemirror/view";
 import { MOD, ALT, SHIFT } from "../../../platform/tauri/platform";
 import { keybindingPressed } from "../../settings/model/settings";
-import {
-  handleFilePreviewFindKey,
-  openFindInActiveFilePreview,
-} from "../ui/FilePreviewSearch";
+import { registerEditorSearchCommands } from "./editorSearchCommands";
+export {
+  handleEditorFindKey,
+  openFindInActiveEditor,
+} from "./editorSearchCommands";
 
 const MATCH_CAP = 999;
 const panels = new WeakMap<EditorView, FindPanel>();
@@ -61,34 +62,13 @@ export function matchIndexAtSelection(
   return 0;
 }
 
-export function handleEditorFindKey(event: KeyboardEvent): boolean {
-  if (event.isComposing) return false;
-
-  const target = event.target instanceof Element ? event.target : null;
-  if (
-    target?.closest(
-      "[data-file-picker], [data-model-picker], [data-branch-picker], [data-skill-picker], [data-mention-picker]",
-    )
-  ) {
-    return false;
-  }
-
-  if (handleFilePreviewFindKey(event)) return true;
-
+function handleEditorKey(event: KeyboardEvent): boolean {
   const view = editorViewForFind();
   const mod = event.metaKey || event.ctrlKey;
   const key = event.key.toLowerCase();
 
   const defaultReplace = mod && event.altKey && !event.shiftKey && key === "f";
   const defaultFind = mod && !event.altKey && !event.shiftKey && key === "f";
-  if (
-    (defaultReplace && !keybindingPressed("Editor: Replace", event, true)) ||
-    (defaultFind && !keybindingPressed("Editor: Find", event, true))
-  ) {
-    event.preventDefault();
-    return true;
-  }
-
   if (keybindingPressed("Editor: Replace", event, defaultReplace)) {
     if (!view) return false;
     event.preventDefault();
@@ -162,13 +142,17 @@ function editorViewForFind(): EditorView | null {
   return el ? EditorView.findFromDOM(el) : null;
 }
 
-export function openFindInActiveEditor(): boolean {
-  if (openFindInActiveFilePreview()) return true;
+function openFindInEditor(): boolean {
   const view = editorViewForFind();
   if (!view) return false;
   openSearchPanel(view);
   return true;
 }
+
+registerEditorSearchCommands({
+  handleKey: handleEditorKey,
+  openFind: openFindInEditor,
+});
 
 function openReplacePanel(view: EditorView): boolean {
   openSearchPanel(view);

@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
@@ -12,9 +12,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createHostPath,
+  HostFileIndexCache,
   hostFileDiff,
   hostGitAction,
   hostGitIndex,
+  indexHostFiles,
   listHostFiles,
   readHostFile,
   searchHostContent,
@@ -26,6 +28,102 @@ const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true });
+});
+
+it("coalesces file-index scans, expires them, and isolates different roots", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(10_000);
+  try {
+    const load = vi.fn(async (root: string) => [`${root}/one.ts`]);
+    const cache = new HostFileIndexCache(load, 100);
+    const [first, concurrent] = await Promise.all([
+      cache.get("/repo-a"),
+      cache.get("/repo-a"),
+    ]);
+    expect(first).toEqual(["/repo-a/one.ts"]);
+    expect(concurrent).toBe(first);
+    expect(load).toHaveBeenCalledTimes(1);
+
+    expect(await cache.get("/repo-b")).toEqual(["/repo-b/one.ts"]);
+    expect(await cache.get("/repo-a")).toBe(first);
+    expect(load).toHaveBeenCalledTimes(2);
+
+    vi.advanceTimersByTime(101);
+    expect(await cache.get("/repo-a")).toEqual(["/repo-a/one.ts"]);
+    expect(load).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("does not cache stale or failed file-index scans", async () => {
+  const resolvers: Array<(paths: string[]) => void> = [];
+  const load = vi.fn(
+    () => new Promise<string[]>((resolve) => resolvers.push(resolve)),
+  );
+  const cache = new HostFileIndexCache(load);
+  const stale = cache.get("/repo");
+  cache.invalidate("/repo");
+  const current = cache.get("/repo");
+  resolvers[0](["old.ts"]);
+  await stale;
+  resolvers[1](["new.ts"]);
+  await current;
+  expect(await cache.get("/repo")).toEqual(["new.ts"]);
+  expect(load).toHaveBeenCalledTimes(2);
+
+  const retry = vi
+    .fn<() => Promise<string[]>>()
+    .mockRejectedValueOnce(new Error("scan failed"))
+    .mockResolvedValueOnce(["ok.ts"]);
+  const retrying = new HostFileIndexCache(retry);
+  await expect(retrying.get("/retry")).rejects.toThrow("scan failed");
+  await expect(retrying.get("/retry")).resolves.toEqual(["ok.ts"]);
+  expect(retry).toHaveBeenCalledTimes(2);
+});
+
+it("bounds cached indexes by root count and retained path bytes", async () => {
+  const load = vi.fn(async (root: string) =>
+    root === "/large" ? ["x".repeat(20)] : [`${root}/a`],
+  );
+  const cache = new HostFileIndexCache(load, 1_000, 1, 64);
+  await cache.get("/a");
+  await cache.get("/b");
+  await cache.get("/a");
+  await cache.get("/large");
+  await cache.get("/large");
+  expect(load).toHaveBeenCalledTimes(5);
+});
+
+it("does not retain in-flight scans beyond the per-root bound", async () => {
+  let finishA!: (paths: string[]) => void;
+  const load = vi.fn((root: string) =>
+    root === "/a"
+      ? new Promise<string[]>((resolve) => {
+          finishA = resolve;
+        })
+      : Promise.resolve([root]),
+  );
+  const cache = new HostFileIndexCache(load, 1_000, 1);
+  const pendingA = cache.get("/a");
+  await expect(cache.get("/b")).resolves.toEqual(["/b"]);
+  finishA(["/a"]);
+  await pendingA;
+  await cache.get("/b");
+  await cache.get("/b");
+  expect(load).toHaveBeenCalledTimes(3);
+});
+
+it("invalidates a cached filename index after creating a path", async () => {
+  const root = realpathSync.native(
+    mkdtempSync(join(tmpdir(), "monocode-index-mutation-")),
+  );
+  roots.push(root);
+  await indexHostFiles(root);
+  await createHostPath(root, "", "new-entry.ts", false);
+  expect(
+    (await searchHostFiles(root, "new-entry")).map((entry) => entry.path),
+  ).toEqual(["new-entry.ts"]);
 });
 
 it("reports a broken Git index instead of searching ignored files", async () => {
@@ -93,6 +191,25 @@ it("lists host files and rejects paths escaping the project", async () => {
     additions: 0,
     deletions: 0,
   });
+});
+
+it("reuses literal search matching across lines without carrying global state", async () => {
+    const root = realpathSync.native(
+      mkdtempSync(join(tmpdir(), "monocode-search-lines-")),
+    );
+    roots.push(root);
+    writeFileSync(join(root, "matches.txt"), "fooish foo\nFOO\nnone\n");
+
+    const result = await searchHostContent(root, {
+      query: "foo",
+      wholeWord: true,
+    });
+
+    expect(result.matches).toEqual([
+      expect.objectContaining({ relative: "matches.txt", line: 1, column: 8 }),
+      expect.objectContaining({ relative: "matches.txt", line: 2, column: 1 }),
+    ]);
+    expect(result.truncated).toBe(false);
 });
 
 it("reports tracked and untracked changes and commits staged files", async () => {

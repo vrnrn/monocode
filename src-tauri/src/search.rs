@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -196,6 +197,7 @@ fn git_grep_capped(
         }
     }
 
+    let needle = search_needle(query, options.case_sensitive);
     let root = root.to_path_buf();
     let mut matches = Vec::new();
     let mut offset = 0;
@@ -228,13 +230,11 @@ fn git_grep_capped(
             .unwrap_or(1);
         let preview = String::from_utf8_lossy(preview_bytes).to_string();
         let path = crate::fs::path_to_js(&root.join(&relative));
-        let column = match_column(
-            &preview,
-            query,
-            options.case_sensitive,
-            options.whole_word,
-            options.regex,
-        );
+        let column = if options.regex {
+            1
+        } else {
+            find_on_line(&preview, &needle, options).unwrap_or(1)
+        };
         matches.push(SearchMatch {
             path,
             relative,
@@ -278,11 +278,7 @@ fn scan_files(
     }
     let include = glob_tokens(&options.include);
     let exclude = glob_tokens(&options.exclude);
-    let needle = if options.case_sensitive {
-        query.to_string()
-    } else {
-        query.to_lowercase()
-    };
+    let needle = search_needle(query, options.case_sensitive);
 
     let mut matches = Vec::new();
     let mut truncated = false;
@@ -335,11 +331,7 @@ fn scan_files(
 }
 
 fn find_on_line(line: &str, needle: &str, options: &SearchOptions) -> Option<u32> {
-    let haystack = if options.case_sensitive {
-        line.to_string()
-    } else {
-        line.to_lowercase()
-    };
+    let haystack = search_needle(line, options.case_sensitive);
     let mut start = 0;
     while let Some(index) = haystack[start..].find(needle) {
         let column = start + index;
@@ -359,36 +351,14 @@ fn is_word_boundary(line: &str, start: usize, len: usize) -> bool {
     !before.is_some_and(word) && !after.is_some_and(word)
 }
 
-fn match_column(
-    line: &str,
-    query: &str,
-    case_sensitive: bool,
-    whole_word: bool,
-    regex: bool,
-) -> u32 {
-    if regex {
-        return 1;
-    }
-    let needle = if case_sensitive {
-        query.to_string()
+// Case-sensitive searches can inspect the original text without allocating a
+// copy of every line. Case-insensitive queries are prepared once per search.
+fn search_needle(text: &str, case_sensitive: bool) -> Cow<'_, str> {
+    if case_sensitive {
+        Cow::Borrowed(text)
     } else {
-        query.to_lowercase()
-    };
-    find_on_line(
-        line,
-        &needle,
-        &SearchOptions {
-            cwd: String::new(),
-            query: query.to_string(),
-            case_sensitive,
-            whole_word,
-            regex: false,
-            include: None,
-            exclude: None,
-            search_id: String::new(),
-        },
-    )
-    .unwrap_or(1)
+        Cow::Owned(text.to_lowercase())
+    }
 }
 
 fn glob_tokens(value: &Option<String>) -> Vec<String> {
@@ -489,6 +459,33 @@ mod tests {
             include: None,
             exclude: None,
             search_id: String::new(),
+        }
+    }
+
+    #[test]
+    fn git_and_fallback_search_preserve_case_and_whole_word_columns() {
+        let dir = tmp("match-columns");
+        if !git(&dir.0, &["init", "--quiet"]) {
+            return;
+        }
+        std::fs::write(dir.0.join("app.txt"), "Needles Needle needle\n").unwrap();
+        assert!(git(&dir.0, &["add", "app.txt"]));
+        for (case_sensitive, whole_word, expected_column) in
+            [(true, false, 16), (false, false, 1), (false, true, 9)]
+        {
+            let options = SearchOptions {
+                case_sensitive,
+                whole_word,
+                ..options(&dir.0, "needle")
+            };
+            let cancel = AtomicBool::new(false);
+            let indexed = git_grep(&dir.0, &options, "needle", &cancel).unwrap();
+            let fallback = scan_files(&dir.0, &options, "needle", &cancel).unwrap();
+            for result in [indexed, fallback] {
+                assert_eq!(result.matches.len(), 1);
+                assert_eq!(result.matches[0].column, expected_column);
+                assert_eq!(result.matches[0].preview, "Needles Needle needle");
+            }
         }
     }
 

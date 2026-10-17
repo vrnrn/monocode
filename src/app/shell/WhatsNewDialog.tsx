@@ -5,6 +5,7 @@ import {
 } from "../model/releaseNotes";
 import { AgentMarkdown } from "../../features/sessions/ui/AgentMarkdown";
 import { Modal } from "../../shared/ui/Modal";
+import { useReleaseNotes } from "../hooks/useReleaseNotes";
 
 type Props = {
   version: string;
@@ -12,7 +13,10 @@ type Props = {
 };
 
 export function WhatsNewBody({ version }: { version: string }) {
-  const notes = presentReleaseNotes(version);
+  const { notes: document, error, retry } = useReleaseNotes(version);
+  const notes = document
+    ? presentReleaseNotes(version, document.markdown)
+    : null;
   const title = releaseNotesTitle(version);
 
   return (
@@ -23,6 +27,14 @@ export function WhatsNewBody({ version }: { version: string }) {
           text={notes.markdown}
           streaming={false}
         />
+      ) : error ? (
+        <p role="alert" className="text-[13px] text-content/60">
+          Could not load release notes. <button onClick={retry}>Retry</button>
+        </p>
+      ) : document === undefined ? (
+        <p role="status" className="text-[13px] text-content/60">
+          Loading release notes…
+        </p>
       ) : (
         <p className="text-[13px] text-content/60">
           Release notes for this version are not available in this build.
@@ -33,7 +45,10 @@ export function WhatsNewBody({ version }: { version: string }) {
 }
 
 export function WhatsNewDialog({ version, onClose }: Props) {
-  const notes = presentReleaseNotes(version);
+  const { notes: document } = useReleaseNotes(version);
+  const notes = document
+    ? presentReleaseNotes(version, document.markdown)
+    : null;
   const date = notes?.date ? formatReleaseDate(notes.date) : null;
 
   return (

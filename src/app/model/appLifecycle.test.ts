@@ -26,7 +26,9 @@ import {
 import { reconcileProjectReturn } from "../../features/projects/model/projectReturn";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue(undefined),
+  invoke: vi.fn(async (command: string) =>
+    command === "session_upsert_delta" ? [null, 1] : undefined,
+  ),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   ask: vi.fn().mockResolvedValue(true),
@@ -35,13 +37,17 @@ vi.mock("./windowTransferBootstrap", () => ({
   loadWindowTransfer: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("../../features/sessions/data/sessionStore", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../features/sessions/data/sessionStore")>();
+  const actual =
+    await importOriginal<
+      typeof import("../../features/sessions/data/sessionStore")
+    >();
   return {
     ...actual,
     loadWorkspaceSnapshot: vi.fn().mockResolvedValue(null),
     listInFlightSessions: vi.fn().mockResolvedValue([]),
     listSessionsByProject: vi.fn().mockResolvedValue([]),
     getSession: vi.fn().mockResolvedValue(null),
+    readSession: vi.fn().mockResolvedValue(null),
   };
 });
 vi.mock("../../integrations/harness/core/registry", () => ({
@@ -302,9 +308,7 @@ describe("coordinated quit", () => {
   }
 
   function invokedWith(command: string) {
-    return vi
-      .mocked(invoke)
-      .mock.calls.find(([name]) => name === command)?.[1];
+    return vi.mocked(invoke).mock.calls.find(([name]) => name === command)?.[1];
   }
 
   it("reports this window's live turns to the coordinator", async () => {
@@ -362,13 +366,17 @@ describe("coordinated quit", () => {
     vi.mocked(invoke).mockImplementation((command) =>
       command === "workspace_set_snapshot"
         ? Promise.reject(new Error("disk full"))
-        : Promise.resolve(undefined),
+        : Promise.resolve(
+            command === "session_upsert_delta" ? [null, 1] : undefined,
+          ),
     );
     try {
       await commitQuit(6);
       expect(invokedWith("quit_ready")).toEqual({ id: 6, persisted: false });
     } finally {
-      vi.mocked(invoke).mockResolvedValue(undefined);
+      vi.mocked(invoke).mockImplementation(async (command) =>
+        command === "session_upsert_delta" ? [null, 1] : undefined,
+      );
       release();
     }
   });
@@ -462,9 +470,8 @@ describe("remembering the terminal dock side across restarts", () => {
 
   it("saves the chosen side on a coordinated quit", async () => {
     const state = dockWorkspace("right");
-    const { handleQuitRequested, setQuitWorkspace } = await import(
-      "./appLifecycle"
-    );
+    const { handleQuitRequested, setQuitWorkspace } =
+      await import("./appLifecycle");
     const release = setQuitWorkspace(
       () => state.sessions,
       () => state.tabs,

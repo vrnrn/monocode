@@ -27,6 +27,7 @@ import {
   hostGitAction,
   hostGitIndex,
   indexHostFiles,
+  invalidateHostFileIndex,
   listHostFiles,
   searchHostContent,
   workspacePath,
@@ -191,7 +192,7 @@ export class WorkspaceCommands {
       case "git_push":
         return this.gitAction(input.cwd, "push");
       case "git_pull":
-        return this.gitCommand(input.cwd, ["pull", "--ff-only"]).then(() => undefined);
+        return this.gitPull(input.cwd);
       case "git_sync":
         return this.gitSync(input.cwd);
       case "git_pr_status":
@@ -416,6 +417,7 @@ export class WorkspaceCommands {
       // Our own editor writes are serialized, but external writers can still
       // race this last observation and rename. This is not filesystem CAS.
       await rename(temporary, path);
+      invalidateHostFileIndex(root);
       const directory = await open(dirname(path), "r").catch(() => null);
       if (directory) {
         try {
@@ -477,6 +479,7 @@ export class WorkspaceCommands {
       await rm(temporary, { force: true });
       throw reason;
     });
+    invalidateHostFileIndex(root);
   }
 
   private async statFiles(input: unknown): Promise<FileMtime[]> {
@@ -530,12 +533,14 @@ export class WorkspaceCommands {
       throw new Error("Cannot move a folder into itself.");
     await mkdir(dirname(to), { recursive: true });
     await rename(from, to);
+    invalidateHostFileIndex(root);
     return target;
   }
 
   private async delete(input: unknown): Promise<void> {
-    const { path } = await this.existing(input);
+    const { root, path } = await this.existing(input);
     await rm(path, { recursive: true });
+    invalidateHostFileIndex(root);
   }
 
   private async destination(from: unknown, destParent: unknown) {
@@ -548,11 +553,16 @@ export class WorkspaceCommands {
       !relative(source.path, parent.path).startsWith("..")
     )
       throw new Error("Cannot paste a folder into itself.");
-    return { source: source.path, parent: parent.path };
+    return {
+      source: source.path,
+      parent: parent.path,
+      sourceRoot: source.root,
+      parentRoot: parent.root,
+    };
   }
 
   private async copy(from: unknown, destParent: unknown): Promise<string> {
-    const { source, parent } = await this.destination(from, destParent);
+    const { source, parent, sourceRoot, parentRoot } = await this.destination(from, destParent);
     const name = basename(source);
     const ext = extname(name);
     const stem = ext ? name.slice(0, -ext.length) : name;
@@ -562,18 +572,22 @@ export class WorkspaceCommands {
       const to = resolve(parent, candidate);
       if (await lstat(to).then(() => true, () => false)) continue;
       await cp(source, to, { recursive: true, errorOnExist: true });
+      invalidateHostFileIndex(sourceRoot);
+      invalidateHostFileIndex(parentRoot);
       return joined(destParent as string, candidate);
     }
   }
 
   private async move(from: unknown, destParent: unknown): Promise<string> {
-    const { source, parent } = await this.destination(from, destParent);
+    const { source, parent, sourceRoot, parentRoot } = await this.destination(from, destParent);
     const name = basename(source);
     const to = resolve(parent, name);
     if (to === source) return from as string;
     if (await lstat(to).then(() => true, () => false))
       throw new Error(alreadyExists(name));
     await rename(source, to);
+    invalidateHostFileIndex(sourceRoot);
+    invalidateHostFileIndex(parentRoot);
     return joined(destParent as string, name);
   }
 
@@ -702,8 +716,16 @@ export class WorkspaceCommands {
   }
 
   private async gitSync(cwd: unknown) {
-    await this.gitCommand(cwd, ["pull", "--ff-only"]);
-    await this.gitAction(cwd, "push");
+    const root = await this.gitRoot(cwd);
+    await this.gitCommand(root, ["pull", "--ff-only"]);
+    invalidateHostFileIndex(root);
+    await this.gitAction(root, "push");
+  }
+
+  private async gitPull(cwd: unknown): Promise<void> {
+    const root = await this.gitRoot(cwd);
+    await this.gitCommand(root, ["pull", "--ff-only"]);
+    invalidateHostFileIndex(root);
   }
 
   private async ghCommand(cwd: unknown, args: string[]): Promise<string> {
@@ -894,6 +916,7 @@ export class WorkspaceCommands {
   private async gitCheckout(cwd: unknown, name: unknown, remote: unknown) {
     const root = await this.gitRoot(cwd);
     const state = await this.withIdleGitProject(root, () => switchHostBranch(root, name, remote));
+    invalidateHostFileIndex(root);
     return state.current ?? "HEAD";
   }
 
@@ -914,7 +937,9 @@ export class WorkspaceCommands {
   private async gitStash(cwd: unknown, message: unknown) {
     if (message != null && (typeof message !== "string" || message.length > 1000))
       throw new Error("Invalid stash message");
-    await this.gitCommand(cwd, ["stash", "push", "-u", ...(message ? ["-m", message] : [])]);
+    const root = await this.gitRoot(cwd);
+    await this.gitCommand(root, ["stash", "push", "-u", ...(message ? ["-m", message] : [])]);
+    invalidateHostFileIndex(root);
   }
 
   private async gitWorktrees(cwd: unknown) {

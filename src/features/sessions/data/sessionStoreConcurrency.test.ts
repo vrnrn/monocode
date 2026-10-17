@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: async (command: string, args: unknown) => {
+    const value = await mocks.invoke(command, args);
+    return command === "session_upsert_delta" ? [value ?? null, 1] : value;
+  },
+}));
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -46,28 +51,28 @@ describe("session persistence concurrency", () => {
     const commands: string[] = [];
     mocks.invoke.mockImplementation((command: string) => {
       commands.push(command);
-      return command === "session_upsert" && commands.length === 1
+      return command === "session_upsert_delta" && commands.length === 1
         ? firstWrite.promise
         : Promise.resolve();
     });
     const { deleteSession, upsertSession } = await loadStore();
     const worker = { ...session("worker"), orchestrationLeadId: "lead" };
     const writing = upsertSession(worker);
-    await vi.waitFor(() => expect(commands).toEqual(["session_upsert"]));
+    await vi.waitFor(() => expect(commands).toEqual(["session_upsert_delta"]));
     const queued = upsertSession(worker);
     const deleting = deleteSession("lead");
-    expect(commands).toEqual(["session_upsert"]);
+    expect(commands).toEqual(["session_upsert_delta"]);
     firstWrite.resolve(undefined);
     await Promise.all([writing, queued, deleting]);
     expect(commands).toEqual([
-      "session_upsert",
-      "session_upsert",
+      "session_upsert_delta",
+      "session_upsert_delta",
       "session_delete",
     ]);
     await upsertSession(worker);
     for (const [, args] of mocks.invoke.mock.calls
       .slice(1)
-      .filter(([command]) => command === "session_upsert")) {
+      .filter(([command]) => command === "session_upsert_delta")) {
       expect(args.session.blocks[0].orchestrationLeadId).toBeUndefined();
     }
   });
@@ -77,17 +82,17 @@ describe("session persistence concurrency", () => {
     const commands: string[] = [];
     mocks.invoke.mockImplementation((command: string) => {
       commands.push(command);
-      if (command === "session_upsert") return firstWrite.promise;
+      if (command === "session_upsert_delta") return firstWrite.promise;
       return Promise.resolve();
     });
     const { deleteSession, upsertSession } = await loadStore();
 
     const writing = upsertSession(session("s1"));
-    await vi.waitFor(() => expect(commands).toEqual(["session_upsert"]));
+    await vi.waitFor(() => expect(commands).toEqual(["session_upsert_delta"]));
     const lateWrite = upsertSession({ ...session("s1"), title: "late" });
     const deleting = deleteSession("s1");
 
-    expect(commands).toEqual(["session_upsert"]);
+    expect(commands).toEqual(["session_upsert_delta"]);
     firstWrite.resolve({
       id: "s1",
       cwd: "/tmp/project",
@@ -100,7 +105,7 @@ describe("session persistence concurrency", () => {
     });
     await Promise.all([writing, lateWrite, deleting]);
 
-    expect(commands).toEqual(["session_upsert", "session_delete"]);
+    expect(commands).toEqual(["session_upsert_delta", "session_delete"]);
   });
 
   it("discards a draft-only record before reusing its open session id", async () => {
@@ -123,16 +128,16 @@ describe("session persistence concurrency", () => {
     const { discardDraftSessionRecord, upsertSession } = await loadStore();
 
     const draftWrite = upsertSession(session("s1"));
-    await vi.waitFor(() => expect(commands).toEqual(["session_upsert"]));
+    await vi.waitFor(() => expect(commands).toEqual(["session_upsert_delta"]));
     const discarding = discardDraftSessionRecord("s1");
     const laterTurn = upsertSession({ ...session("s1"), title: "later" });
 
     firstWrite.resolve(undefined);
     await Promise.all([draftWrite, discarding, laterTurn]);
     expect(commands).toEqual([
-      "session_upsert",
+      "session_upsert_delta",
       "session_delete",
-      "session_upsert",
+      "session_upsert_delta",
     ]);
   });
 
@@ -162,7 +167,7 @@ describe("session persistence concurrency", () => {
     const commands: string[] = [];
     mocks.invoke.mockImplementation((command: string) => {
       commands.push(command);
-      if (command === "session_upsert" && commands.length === 1) {
+      if (command === "session_upsert_delta" && commands.length === 1) {
         return firstWrite.promise;
       }
       return Promise.resolve({
@@ -179,7 +184,7 @@ describe("session persistence concurrency", () => {
     const { setSessionArchived, upsertSession } = await loadStore();
 
     const writing = upsertSession(session("s1"));
-    await vi.waitFor(() => expect(commands).toEqual(["session_upsert"]));
+    await vi.waitFor(() => expect(commands).toEqual(["session_upsert_delta"]));
     const finalSnapshot = upsertSession({
       ...session("s1"),
       blocks: [
@@ -189,7 +194,7 @@ describe("session persistence concurrency", () => {
     });
     const archiving = setSessionArchived("s1", true);
 
-    expect(commands).toEqual(["session_upsert"]);
+    expect(commands).toEqual(["session_upsert_delta"]);
     firstWrite.resolve({
       id: "s1",
       cwd: "/tmp/project",
@@ -203,8 +208,8 @@ describe("session persistence concurrency", () => {
     await Promise.all([writing, finalSnapshot, archiving]);
 
     expect(commands).toEqual([
-      "session_upsert",
-      "session_upsert",
+      "session_upsert_delta",
+      "session_upsert_delta",
       "session_set_archived",
     ]);
     expect(mocks.invoke.mock.calls[1]?.[1]).toMatchObject({

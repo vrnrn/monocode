@@ -267,8 +267,11 @@ export class HostEngine {
   ) {
     // Provider dispatch is not transactional with SQLite. Never replay a send
     // automatically after a crash; its external effects may already exist.
-    for (const value of store.sessions()) {
-      if (value.status === "running") {
+    // Idle history needs only binding metadata. Loading every transcript here
+    // made startup heap and JSON parsing scale with all saved conversation text.
+    for (const item of store.summaries()) {
+      if (item.status === "running") {
+        const value = store.session(item.id);
         this.save(
           this.settled(
             value,
@@ -281,11 +284,11 @@ export class HostEngine {
       }
       // Retain history for providers no longer installed on this host. Session
       // commands still report them as unavailable, but must not block startup.
-      if (value.session.providerSessionId)
-        this.providers[value.session.harness]?.bind(
-          value.session.id,
-          value.session.providerSessionId,
-          value.session.cwd,
+      if (item.providerSessionId)
+        this.providers[item.harness]?.bind(
+          item.id,
+          item.providerSessionId,
+          item.cwd,
         );
     }
   }

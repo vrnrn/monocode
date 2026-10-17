@@ -439,6 +439,7 @@ export function groupMonoChatTurns(
   managed = false,
 ): Block[][] {
   const groups: Block[][] = [];
+  let latestStart: number | undefined;
   for (const turn of groupMonoTurns(blocks, managed)) {
     const previous = groups[groups.length - 1];
     const at = turn[0].startedAt;
@@ -447,10 +448,23 @@ export function groupMonoChatTurns(
       !previous[0].monoHabit &&
       previous[0].role !== "handoff" &&
       isMonoCompletionPrompt(turn[0]) &&
-      (at == null || !opensNewStretch(at, monoTurnLatestStart(previous)))
+      (at == null || !opensNewStretch(at, latestStart))
     ) {
       previous.push(...turn);
-    } else groups.push(turn);
+      // Update from only the new run. Rescanning the accumulated conversation
+      // for every completion makes a long burst of completions quadratic.
+      for (const block of turn) {
+        if (
+          block.role === "user" &&
+          block.startedAt != null &&
+          (latestStart == null || block.startedAt > latestStart)
+        )
+          latestStart = block.startedAt;
+      }
+    } else {
+      groups.push(turn);
+      latestStart = monoTurnLatestStart(turn);
+    }
   }
   return groups;
 }
