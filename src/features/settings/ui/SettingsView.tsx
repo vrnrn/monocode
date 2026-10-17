@@ -321,12 +321,10 @@ import {
   loadIdleAgentLimit,
   loadCloseToTray,
   loadCollapsedProjectRailMode,
-  loadComposerRunner,
   loadDiffViewer,
   loadFileTabMode,
   loadFollowUpBehavior,
   loadFormatOnSave,
-  loadGridArcadeEnabled,
   loadLiveAgentsEnabled,
   loadModelControls,
   loadNotesEnabled,
@@ -344,12 +342,10 @@ import {
   type IdleAgentLimit,
   saveCloseToTray,
   saveCollapsedProjectRailMode,
-  saveComposerRunner,
   saveDiffViewer,
   saveFileTabMode,
   saveFollowUpBehavior,
   saveFormatOnSave,
-  saveGridArcadeEnabled,
   saveLiveAgentsEnabled,
   saveModelControls,
   saveNotesEnabled,
@@ -982,11 +978,7 @@ function ChatPage() {
     useState<ModelControls>(loadModelControls);
   const [diffViewer, setDiffViewer] = useState<DiffViewer>(loadDiffViewer);
   const [formatOnSave, setFormatOnSave] = useState(loadFormatOnSave);
-  const [composerRunner, setComposerRunner] = useState(loadComposerRunner);
   const composerAutocorrect = useComposerAutocorrect();
-  const [gridArcadeEnabled, setGridArcadeEnabled] = useState(
-    loadGridArcadeEnabled,
-  );
 
   useEffect(() => {
     const onAnchor = (event: Event) => {
@@ -1026,16 +1018,6 @@ function ChatPage() {
   const onFormatOnSave = (next: boolean) => {
     saveFormatOnSave(next);
     setFormatOnSave(next);
-  };
-
-  const onComposerRunner = (next: boolean) => {
-    saveComposerRunner(next);
-    setComposerRunner(next);
-  };
-
-  const onGridArcadeEnabled = (next: boolean) => {
-    saveGridArcadeEnabled(next);
-    setGridArcadeEnabled(next);
   };
 
   return (
@@ -1153,34 +1135,6 @@ function ChatPage() {
               { value: "unified", label: "Unified" },
             ]}
             onChange={onDiffViewer}
-          />
-        </Row>
-      </Group>
-
-      <Group
-        title="Extras"
-        description="Idle animation, and nothing else. Turn both off for a still workspace."
-      >
-        <Row
-          id="composer-mascot"
-          label="Composer mascot"
-          description="When a turn is running, the project mascot runs along the composer, bonks the scroll-to-latest button the first time, then jumps it, and sometimes grabs a coin."
-        >
-          <Toggle
-            label="Composer mascot"
-            on={composerRunner}
-            onChange={onComposerRunner}
-          />
-        </Row>
-        <Row
-          id="empty-session-games"
-          label="Empty session games"
-          description="Pac-man and snake idle on the empty-session grid. Hover the band to take control of whichever is on screen. Turn this off to keep the pane still."
-        >
-          <Toggle
-            label="Empty session games"
-            on={gridArcadeEnabled}
-            onChange={onGridArcadeEnabled}
           />
         </Row>
       </Group>

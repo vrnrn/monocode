@@ -13,10 +13,10 @@ const written = vi.hoisted(() => ({ content: null as string | null }));
 const formatText = vi.hoisted(() => vi.fn(async () => null));
 const invoke = vi.hoisted(() =>
   vi.fn(async (command: string, args?: Record<string, unknown>) => {
-    if (command === "read_text_file") return disk.content;
-    if (command === "write_text_file") {
+    if (command === "read_editor_text_file") return { path: args?.path, content: disk.content, hash: disk.content };
+    if (command === "write_editor_text_file") {
       written.content = args?.content as string;
-      return null;
+      return { status: "saved", path: args?.path, hash: written.content };
     }
     if (command === "stat_files") return [];
     throw new Error(`Unexpected command: ${command}`);
@@ -98,9 +98,10 @@ describe("file editor line endings", () => {
         expect(written.content).toBe("intro\r\nalpha\r\nbeta\r\n"),
       ),
     );
-    expect(invoke).toHaveBeenCalledWith("write_text_file", {
+    expect(invoke).toHaveBeenCalledWith("write_editor_text_file", {
       path: "/repo/notes.txt",
       content: "intro\r\nalpha\r\nbeta\r\n",
+      expectedHash: "alpha\r\nbeta\r\n",
     });
   });
 
@@ -193,7 +194,7 @@ describe("file editor line endings", () => {
     disk.content = "alpha\n";
     let writeAttempts = 0;
     invoke.mockImplementation(async (command, args) => {
-      if (command === "write_text_file" && ++writeAttempts === 1) {
+      if (command === "write_editor_text_file" && ++writeAttempts === 1) {
         throw new Error("disk unavailable");
       }
       return defaultInvoke(command, args);
@@ -233,7 +234,7 @@ describe("file editor line endings", () => {
     });
     const writes: Record<string, unknown>[] = [];
     invoke.mockImplementation(async (command, args) => {
-      if (command === "write_text_file") {
+      if (command === "write_editor_text_file") {
         writes.push(args!);
         if (writes.length === 1) await firstWrite;
       }
@@ -250,7 +251,7 @@ describe("file editor line endings", () => {
         );
       });
       expect(writes).toEqual([
-        { path: "/repo/crlf.txt", content: "first\r\nalpha\r\nbeta\r\n" },
+        { path: "/repo/crlf.txt", content: "first\r\nalpha\r\nbeta\r\n", expectedHash: "alpha\r\nbeta\r\n" },
       ]);
 
       await act(async () => {
@@ -267,10 +268,11 @@ describe("file editor line endings", () => {
 
       await act(async () => releaseFirstWrite());
       expect(writes).toEqual([
-        { path: "/repo/crlf.txt", content: "first\r\nalpha\r\nbeta\r\n" },
+        { path: "/repo/crlf.txt", content: "first\r\nalpha\r\nbeta\r\n", expectedHash: "alpha\r\nbeta\r\n" },
         {
           path: "/repo/crlf.txt",
           content: "second\r\nfirst\r\nalpha\r\nbeta\r\n",
+          expectedHash: "first\r\nalpha\r\nbeta\r\n",
         },
       ]);
     } finally {

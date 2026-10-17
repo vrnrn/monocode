@@ -85,14 +85,23 @@ type LinePayload = { sessionId: string; line: string };
 // The desktop batches a frame's stdout lines into one event;
 // the remote host still sends them one at a time.
 type LinesPayload = LinePayload | { sessionId: string; lines: string[] };
-type ExitPayload = { sessionId: string; code: number | null; pid?: number };
+type ExitPayload = {
+  sessionId: string;
+  code: number | null;
+  pid?: number;
+  error?: string;
+};
 
 type LineHandler = (line: string) => void;
 type ExitHandler = (code: number | null) => void;
 
 const lineHandlers = new Map<string, LineHandler>();
 const exitHandlers = new Map<string, ExitHandler>();
-const lineBuffer = new Map<string, string[]>();
+const lineBuffer = new Map<string, ChildOutputBuffer>();
+const outputFailures = new Map<
+  string,
+  { message: string; delivered: boolean }
+>();
 const stderrHandlers = new Map<string, LineHandler>();
 // Output is broadcast to every window. Only ids this window spawned or opened
 // may buffer while unwatched; anything else would be held until the bridge
@@ -101,7 +110,7 @@ const ownedChildren = new Set<string>();
 const livePid = new Map<string, number>();
 const pendingExit = new Map<
   string,
-  Array<{ code: number | null; pid: number }>
+  Array<{ code: number | null; pid: number; error?: string }>
 >();
 
 /** True when this exit belongs to the child we currently have spawned. */
@@ -114,23 +123,74 @@ export function isCurrentChildExit(
   return exitedPid === expectedPid;
 }
 
-const MAX_BUFFERED = 1000;
+const PREWATCH_OUTPUT_LINES = 1000;
+const PREWATCH_OUTPUT_BYTES = 16 * 1024 * 1024;
+
+/** Pre-watch protocol output is a prefix, never a silently truncated suffix.
+ * Once admission fails the bridge stops the run and reports a failed exit. */
+export class ChildOutputBuffer {
+  readonly lines: string[] = [];
+  private bytes = 0;
+  constructor(
+    private readonly maxLines = PREWATCH_OUTPUT_LINES,
+    private readonly maxBytes = PREWATCH_OUTPUT_BYTES,
+  ) {}
+
+  push(line: string): boolean {
+    const bytes = new TextEncoder().encode(line).byteLength;
+    if (
+      this.lines.length >= this.maxLines ||
+      bytes > this.maxBytes - this.bytes
+    )
+      return false;
+    this.lines.push(line);
+    this.bytes += bytes;
+    return true;
+  }
+}
+
 let bridge: Promise<UnlistenFn[]> | null = null;
 let bridgeAttempt: symbol | null = null;
 let users = 0;
 let teardownTimer: ReturnType<typeof setTimeout> | undefined;
 
-function pushBounded(
-  map: Map<string, string[]>,
+function deliverOutputFailure(sessionId: string) {
+  const failure = outputFailures.get(sessionId);
+  const onExit = exitHandlers.get(sessionId);
+  if (!failure || failure.delivered || !onExit) return;
+  failure.delivered = true;
+  livePid.delete(sessionId);
+  pendingExit.delete(sessionId);
+  const onStderr = stderrHandlers.get(sessionId);
+  if (onStderr) onStderr(failure.message);
+  else console.error(failure.message);
+  onExit(1);
+}
+
+function failPrewatchOutput(sessionId: string) {
+  outputFailures.set(sessionId, {
+    message: `Provider output exceeded the pre-watch buffer (${PREWATCH_OUTPUT_BYTES} bytes / ${PREWATCH_OUTPUT_LINES} records); run stopped`,
+    delivered: false,
+  });
+  // Do not use killChild: the admitted prefix and failure must survive until
+  // the caller installs its watcher. This direct stop never waits on replay.
+  void invoke("harness_kill", { sessionId }).catch((error: unknown) => {
+    console.error("Could not stop provider after output overflow", error);
+  });
+}
+
+function deliverExit(
   sessionId: string,
-  item: string,
+  exit: { code: number | null; error?: string },
 ) {
-  const queued = map.get(sessionId) ?? [];
-  queued.push(item);
-  if (queued.length > MAX_BUFFERED) {
-    queued.splice(0, queued.length - MAX_BUFFERED);
+  livePid.delete(sessionId);
+  pendingExit.delete(sessionId);
+  if (exit.error) {
+    outputFailures.set(sessionId, { message: exit.error, delivered: false });
+    deliverOutputFailure(sessionId);
+  } else {
+    exitHandlers.get(sessionId)?.(exit.code);
   }
-  map.set(sessionId, queued);
 }
 
 function ensureBridge() {
@@ -156,10 +216,13 @@ function ensureBridge() {
         const lines = "lines" in payload ? payload.lines : [payload.line];
         for (const line of lines) {
           // A handler may detach mid-batch; later lines follow the old path.
+          if (outputFailures.has(sessionId)) continue;
           const handler = lineHandlers.get(sessionId);
           if (handler) handler(line);
           else if (ownedChildren.has(sessionId)) {
-            pushBounded(lineBuffer, sessionId, line);
+            const queued = lineBuffer.get(sessionId) ?? new ChildOutputBuffer();
+            if (!queued.push(line)) failPrewatchOutput(sessionId);
+            lineBuffer.set(sessionId, queued);
           }
         }
       }),
@@ -172,18 +235,23 @@ function ensureBridge() {
     ),
     register(
       listen<ExitPayload>("harness-exit", (event) => {
-        const { sessionId, code, pid } = event.payload;
+        const { sessionId, code, pid, error } = event.payload;
+        if (outputFailures.has(sessionId)) return;
         const handler = exitHandlers.get(sessionId);
-        if (!handler || pid == null || pid <= 0) return;
+        if (
+          (!handler && !ownedChildren.has(sessionId)) ||
+          pid == null ||
+          pid <= 0
+        )
+          return;
         const currentPid = livePid.get(sessionId);
-        if (isCurrentChildExit(currentPid, pid)) {
-          livePid.delete(sessionId);
-          handler(code);
+        if (isCurrentChildExit(currentPid, pid) && handler) {
+          deliverExit(sessionId, { code, error });
           return;
         }
-        if (currentPid != null) return;
+        if (currentPid != null && currentPid !== pid) return;
         const exits = pendingExit.get(sessionId) ?? [];
-        exits.push({ code, pid });
+        exits.push({ code, pid, error });
         if (exits.length > 8) exits.splice(0, exits.length - 8);
         pendingExit.set(sessionId, exits);
       }),
@@ -208,6 +276,7 @@ function teardownBridge() {
   lineHandlers.clear();
   exitHandlers.clear();
   lineBuffer.clear();
+  outputFailures.clear();
   stderrHandlers.clear();
   ownedChildren.clear();
   livePid.clear();
@@ -267,13 +336,22 @@ export function watchChild(
   lineHandlers.set(sessionId, onLine);
   exitHandlers.set(sessionId, onExit);
   if (onStderr) stderrHandlers.set(sessionId, onStderr);
-  if (queued) queued.forEach(onLine);
+  if (queued) queued.lines.forEach(onLine);
+  if (outputFailures.has(sessionId)) {
+    deliverOutputFailure(sessionId);
+    return;
+  }
+  const exited = pendingExit
+    .get(sessionId)
+    ?.find((exit) => exit.pid === livePid.get(sessionId));
+  if (exited) deliverExit(sessionId, exited);
 }
 
 export function unwatchChild(sessionId: string) {
   lineHandlers.delete(sessionId);
   exitHandlers.delete(sessionId);
   lineBuffer.delete(sessionId);
+  outputFailures.delete(sessionId);
   ownedChildren.delete(sessionId);
   stderrHandlers.delete(sessionId);
   pendingExit.delete(sessionId);
@@ -290,6 +368,8 @@ export async function spawnChild(
 ): Promise<void> {
   livePid.delete(sessionId);
   pendingExit.delete(sessionId);
+  outputFailures.delete(sessionId);
+  lineBuffer.delete(sessionId);
   ownedChildren.add(sessionId);
   const binaryPath = binaryProvider
     ? runtimeProviderBinaryPath(binaryProvider)
@@ -305,13 +385,11 @@ export async function spawnChild(
     ...(codexStore ? { codexStore } : {}),
   });
   if (typeof pid !== "number" || pid <= 0) return;
+  if (outputFailures.has(sessionId)) return;
   livePid.set(sessionId, pid);
   const exits = pendingExit.get(sessionId);
-  pendingExit.delete(sessionId);
   const exited = exits?.find((event) => event.pid === pid);
-  if (!exited) return;
-  livePid.delete(sessionId);
-  exitHandlers.get(sessionId)?.(exited.code);
+  if (exited && exitHandlers.has(sessionId)) deliverExit(sessionId, exited);
 }
 
 export function writeChild(sessionId: string, line: string): Promise<void> {
@@ -329,6 +407,7 @@ export function killAllChildren(): Promise<void> {
   lineHandlers.clear();
   exitHandlers.clear();
   lineBuffer.clear();
+  outputFailures.clear();
   stderrHandlers.clear();
   ownedChildren.clear();
   livePid.clear();

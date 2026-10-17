@@ -1021,9 +1021,9 @@ describe("settings search", () => {
 
   it("finds a setting that lives on another page", async () => {
     await render("general");
-    await type("pacman");
+    await type("autocorrect");
     expect(options().map((item) => item.textContent)).toEqual([
-      "Empty session gamesChat",
+      "AutocorrectChat",
     ]);
 
     await act(async () => options()[0]!.click());

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -39,10 +39,19 @@ impl SessionStore {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+        conn.busy_timeout(Duration::from_secs(5))
+            .map_err(|e| e.to_string())?;
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")
             .map_err(|e| e.to_string())?;
+        // Announce this opener before migrations/recovery start read-then-write
+        // transactions, so a previous attachment collector yields to startup.
+        let attachment_cache =
+            crate::composer_drafts::admit_attachment_cache(&conn).map_err(|e| e.to_string())?;
         migrate(&conn).map_err(|e| e.to_string())?;
+        crate::local_submissions::recover_unresolved(&conn).map_err(|e| e.to_string())?;
         crate::worktrees::reconcile_removals(&conn)?;
+        crate::composer_drafts::initialize_attachment_cache(&conn, &path, attachment_cache)
+            .map_err(|e| e.to_string())?;
         let read_conn = Connection::open(&path).map_err(|e| e.to_string())?;
         read_conn
             .execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")
@@ -503,6 +512,7 @@ pub fn session_delete(
     store: State<'_, SessionStore>,
     session_id: String,
     mut image_paths: Vec<String>,
+    preserve_composer: Option<bool>,
 ) -> Result<(), String> {
     validate_id(&session_id, "session")?;
     let conn = store.conn.lock().map_err(|_| "Session store is locked")?;
@@ -516,7 +526,8 @@ pub fn session_delete(
         crate::mono_transcript::generated_image_paths(&conn, &session_id)
             .map_err(|e| e.to_string())?,
     );
-    delete_session(&conn, &session_id).map_err(|e| e.to_string())?;
+    delete_session_record(&conn, &session_id, preserve_composer.unwrap_or(false))
+        .map_err(|e| e.to_string())?;
     drop(conn);
     if !image_paths.is_empty() {
         if let Err(error) = crate::fs::delete_generated_images_sync(&app, &image_paths) {
@@ -946,6 +957,20 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             params![now_millis()],
         )?;
     }
+    if current < 20 {
+        crate::composer_drafts::ensure_table(conn)?;
+        conn.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (20, ?1)",
+            params![now_millis()],
+        )?;
+    }
+    if current < 21 {
+        crate::local_submissions::ensure_table(conn)?;
+        conn.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (21, ?1)",
+            params![now_millis()],
+        )?;
+    }
     // Create even when a version row already exists (another build may have
     // used the same numbers, or a previous run recorded the version without
     // the table). Restore writes into these; missing tables look like a
@@ -992,6 +1017,8 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     crate::automations::ensure_tables(conn)?;
     ensure_orchestration_history(conn)?;
     crate::mono_transcript::ensure_tables(conn)?;
+    crate::composer_drafts::ensure_table(conn)?;
+    crate::local_submissions::ensure_table(conn)?;
     Ok(())
 }
 
@@ -1761,7 +1788,16 @@ fn optional_json(raw: Option<String>) -> Option<Value> {
     raw.and_then(|value| serde_json::from_str(&value).ok())
 }
 
+#[cfg(test)]
 fn delete_session(conn: &Connection, session_id: &str) -> rusqlite::Result<()> {
+    delete_session_record(conn, session_id, false)
+}
+
+fn delete_session_record(
+    conn: &Connection,
+    session_id: &str,
+    preserve_composer: bool,
+) -> rusqlite::Result<()> {
     let tx = conn.unchecked_transaction()?;
     let parent = worker_parent(&tx, session_id)?;
     // Ownership is also carried in transcripts for older clients. Release
@@ -1868,6 +1904,10 @@ fn delete_session(conn: &Connection, session_id: &str) -> rusqlite::Result<()> {
         "DELETE FROM orchestration_workers WHERE session_id = ?1 OR lead_id = ?1",
         [session_id],
     )?;
+    if !preserve_composer {
+        crate::composer_drafts::delete_session_draft(&tx, session_id)?;
+        crate::local_submissions::delete_session(&tx, session_id)?;
+    }
     tx.execute("DELETE FROM sessions WHERE id = ?1", [session_id])?;
     tx.commit()
 }
@@ -2081,6 +2121,91 @@ mod tests {
     use rusqlite::hooks::{AuthAction, Authorization};
     use serde_json::json;
     use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn composer_draft_migration_preserves_existing_sessions_and_saved_draft_turns() {
+        let store = SessionStore::open_in_memory().unwrap();
+        let conn = store.lock_conn().unwrap();
+        let mut session = sample("existing-draft", "/tmp/a", "Saved draft");
+        session.blocks =
+            json!([{"id":"saved","role":"user","text":"Explicit saved draft","draft":true}]);
+        upsert_session(&conn, &session).unwrap();
+        conn.execute_batch(
+            "DROP TABLE composer_drafts; DELETE FROM schema_migrations WHERE version >= 20;",
+        )
+        .unwrap();
+        migrate(&conn).unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(
+            get_session(&conn, &session.id).unwrap().unwrap().blocks,
+            session.blocks
+        );
+        assert!(list_by_project(&conn, &session.cwd).unwrap()[0].draft);
+        let (migration, rows): (i64, i64) = conn.query_row(
+            "SELECT (SELECT COUNT(*) FROM schema_migrations WHERE version = 20), (SELECT COUNT(*) FROM composer_drafts)",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!((migration, rows), (1, 0));
+        // Recorded migrations from another build do not prevent table repair.
+        conn.execute_batch("DROP TABLE composer_drafts;").unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(
+            get_session(&conn, &session.id).unwrap().unwrap().blocks,
+            session.blocks
+        );
+        assert!(conn.prepare("SELECT * FROM composer_drafts").is_ok());
+    }
+
+    #[test]
+    fn composer_draft_session_deletion_cleanup_is_atomic_with_transcript_deletion() {
+        let store = SessionStore::open_in_memory().unwrap();
+        let conn = store.lock_conn().unwrap();
+        upsert_session(&conn, &sample("delete-draft", "/tmp/a", "Delete me")).unwrap();
+        let raw = json!({"cwd":"/tmp/a","text":"Unsent input","selectionStart":12,"selectionEnd":12,"attachments":[],"mcpTags":[]}).to_string();
+        conn.execute("INSERT INTO composer_drafts (session_id,cwd,revision,payload_json,updated_at) VALUES ('delete-draft','/tmp/a',4,?1,1)", [&raw]).unwrap();
+        conn.execute_batch("CREATE TRIGGER reject_draft_session_delete BEFORE DELETE ON sessions BEGIN SELECT RAISE(ABORT, 'test failure'); END;").unwrap();
+        assert!(delete_session(&conn, "delete-draft").is_err());
+        let preserved: (String, i64) = conn.query_row("SELECT payload_json,deleted FROM composer_drafts WHERE session_id = 'delete-draft'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(preserved, (raw, 0));
+        assert!(get_session(&conn, "delete-draft").unwrap().is_some());
+        conn.execute_batch("DROP TRIGGER reject_draft_session_delete;")
+            .unwrap();
+        delete_session(&conn, "delete-draft").unwrap();
+        assert!(get_session(&conn, "delete-draft").unwrap().is_none());
+        let (cleared, deleted): (String, i64) = conn.query_row("SELECT payload_json,deleted FROM composer_drafts WHERE session_id = 'delete-draft'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(deleted, 1);
+        assert_eq!(serde_json::from_str::<Value>(&cleared).unwrap()["text"], "");
+        // A session with no transcript/draft yet still receives a fence.
+        delete_session(&conn, "never-persisted").unwrap();
+        let deleted: i64 = conn
+            .query_row(
+                "SELECT deleted FROM composer_drafts WHERE session_id = 'never-persisted'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(deleted, 1);
+    }
+
+    #[test]
+    fn composer_draft_saved_turn_discard_preserves_unsent_typing_and_reusable_identity() {
+        let store = SessionStore::open_in_memory().unwrap();
+        let conn = store.lock_conn().unwrap();
+        upsert_session(&conn, &sample("saved-only", "/tmp/a", "Saved draft")).unwrap();
+        let raw = json!({"cwd":"/tmp/a","text":"Separate unsent input","selectionStart":0,"selectionEnd":0,"attachments":[],"mcpTags":[]}).to_string();
+        conn.execute("INSERT INTO composer_drafts (session_id,cwd,revision,payload_json,updated_at) VALUES ('saved-only','/tmp/a',2,?1,1)", [&raw]).unwrap();
+        delete_session_record(&conn, "saved-only", true).unwrap();
+        assert!(get_session(&conn, "saved-only").unwrap().is_none());
+        let row: (String, i64, i64) = conn.query_row("SELECT payload_json, revision, deleted FROM composer_drafts WHERE session_id = 'saved-only'", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+        assert_eq!(row, (raw, 2, 0));
+        let receipt_tombstones: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM local_submission_deleted_sessions WHERE session_id = 'saved-only'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(receipt_tombstones, 0);
+        upsert_session(&conn, &sample("saved-only", "/tmp/a", "Reused")).unwrap();
+        assert!(get_session(&conn, "saved-only").unwrap().is_some());
+    }
 
     #[test]
     fn search_keeps_older_mono_messages_available_after_conversion() {
@@ -2321,7 +2446,7 @@ mod tests {
                        ON sessions (cwd, has_user_message, updated_at DESC, id, harness,
                                     model, runtime_mode, title, provider_session_id,
                                     created_at, branch, archived, pinned, linked_work_item_json);
-                     DELETE FROM schema_migrations WHERE version IN (16, 17, 18, 19);",
+                     DELETE FROM schema_migrations WHERE version >= 16;",
                 )
                 .unwrap();
                 migrate(&conn).unwrap();

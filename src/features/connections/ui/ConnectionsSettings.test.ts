@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import {
   REMOTE_PROVIDERS,
+  WORKSPACE_EDITOR_SAVE_CAPABILITY,
   type RemoteMachine,
   type SshSetup,
 } from "../model/protocol";
@@ -275,4 +276,29 @@ it("does not spellcheck or autocorrect the machine name", async () => {
   expect(name.getAttribute("autocapitalize")).toBe("off");
   expect(container.textContent).toContain("loginctl enable-linger");
   expect(container.textContent).toContain("Without systemd");
+});
+
+
+it("marks a workspace-capable old host as needing an update for read-only file editing", async () => {
+  machines = [machine];
+  const fallback = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation(async (command, args) => command === "remote_request"
+    ? { environmentId: "env", providers: ["codex"], capabilities: ["workspace.run", "git.worktreeCreate"] }
+    : fallback(command, args));
+  await render();
+  expect(container.textContent).toContain("host update needed for file editing (read-only)");
+  expect(button("Update Host")).toBeDefined();
+  await act(async () => button("Update Host").click());
+  expect(invoke).toHaveBeenCalledWith("remote_ssh_reconnect", { machineId: machine.id, upgrade: true });
+});
+
+it("does not request a host update when checked editor saves are advertised", async () => {
+  machines = [machine];
+  const fallback = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation(async (command, args) => command === "remote_request"
+    ? { environmentId: "env", providers: ["codex"], capabilities: ["workspace.run", "git.worktreeCreate", WORKSPACE_EDITOR_SAVE_CAPABILITY] }
+    : fallback(command, args));
+  await render();
+  expect(button("Update Host")).toBeUndefined();
+  expect(container.textContent).not.toContain("host update needed");
 });

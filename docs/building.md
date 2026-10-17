@@ -17,6 +17,14 @@ npm install
 npm run tauri dev
 ```
 
+## Isolated development profile
+
+`npm run tauri dev` and `npm run tauri:stable` launch **vorkspace Dev** with the `com.vrnrn.vorkspace.development` application profile and a frontend on port 1430. Startup prints the selected data directory. Session history, unsent drafts, Notes, app-managed provider accounts and preferences stay separate from the installed app. No production data is copied automatically. External provider CLI sign-ins remain owned by those CLIs.
+
+Use the npm launcher for development; it applies [tauri.development.conf.json](../src-tauri/tauri.development.conf.json) before any optional config overrides. Debug binaries also enforce the development app identity before initializing native storage. Secondary windows use the same development application profile. The separate frontend origin avoids reusing browser storage from the older port-1420 development setup.
+
+Production builds keep `com.monocode.desktop`, the existing profile, and the signed updater. `npm run tauri build` passes build arguments through without selecting the development configuration. Do not copy a production profile into the development profile for routine testing.
+
 ## Apple Silicon releases
 
 This fork's Mac builds check [vorkspace releases](https://github.com/vrnrn/vorkspace/releases) for updates. The public verification key and feed URL live in [tauri.macos.conf.json](../src-tauri/tauri.macos.conf.json), which Tauri loads automatically on macOS. Install a build with this configuration once; existing builds cannot change their embedded updater configuration automatically.

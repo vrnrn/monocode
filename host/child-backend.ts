@@ -34,6 +34,48 @@ function execArgsAllowed(_provider: RemoteProvider, args: string[]): boolean {
   return ALLOWED_EXEC_ARGS.some(matches);
 }
 
+const HOST_OUTPUT_RECORD_BYTES = 8 * 1024 * 1024;
+
+/** Frame raw UTF-8 bytes before decoding, including unterminated final tails. */
+export class HostOutputFramer {
+  private parts: Buffer[] = [];
+  private bytes = 0;
+  constructor(private readonly maxBytes = HOST_OUTPUT_RECORD_BYTES) {}
+
+  push(chunk: Buffer, receive: (line: string) => void): void {
+    let start = 0;
+    while (start < chunk.length) {
+      const newline = chunk.indexOf(10, start);
+      const end = newline < 0 ? chunk.length : newline;
+      const part = chunk.subarray(start, end);
+      if (part.length > this.maxBytes - this.bytes) {
+        this.parts = [];
+        this.bytes = 0;
+        throw new Error(
+          `Provider output record exceeds the ${this.maxBytes} byte limit; run stopped`,
+        );
+      }
+      // Copy the unfinished piece so a tiny tail does not retain a large chunk.
+      this.parts.push(Buffer.from(part));
+      this.bytes += part.length;
+      if (newline < 0) return;
+      receive(this.take().replace(/\r$/, ""));
+      start = newline + 1;
+    }
+  }
+
+  end(receive: (line: string) => void): void {
+    if (this.bytes) receive(this.take());
+  }
+
+  private take(): string {
+    const line = Buffer.concat(this.parts, this.bytes).toString("utf8");
+    this.parts = [];
+    this.bytes = 0;
+    return line;
+  }
+}
+
 /** Native process implementation for the headless execution proof. */
 export class HostChildBackend implements ChildBackend {
   private events = new EventEmitter();
@@ -42,6 +84,7 @@ export class HostChildBackend implements ChildBackend {
 
   constructor(
     private readonly binaries: Partial<Record<RemoteProvider, string>> = {},
+    private readonly outputRecordBytes = HOST_OUTPUT_RECORD_BYTES,
   ) {
     this.events.setMaxListeners(0);
   }
@@ -205,11 +248,34 @@ export class HostChildBackend implements ChildBackend {
     child.stdin.on("error", () => {
       /* write callbacks report failures */
     });
-    this.lines(child, id, "stdout");
-    this.lines(child, id, "stderr");
+    let outputError: string | undefined;
+    const failOutput = (error: unknown) => {
+      if (outputError) return;
+      outputError = error instanceof Error ? error.message : String(error);
+      if (this.children.get(id) === child) void this.kill(id);
+    };
+    this.lines(
+      child,
+      id,
+      "stdout",
+      failOutput,
+      () => outputError !== undefined,
+    );
+    this.lines(
+      child,
+      id,
+      "stderr",
+      failOutput,
+      () => outputError !== undefined,
+    );
     child.on("close", (code) => {
       if (this.children.get(id) === child) this.children.delete(id);
-      this.emit("harness-exit", { sessionId: id, code, pid: child.pid });
+      this.emit("harness-exit", {
+        sessionId: id,
+        code: outputError ? 1 : code,
+        pid: child.pid,
+        ...(outputError ? { error: outputError } : {}),
+      });
     });
     await new Promise<void>((resolve, reject) => {
       child.once("spawn", resolve);
@@ -222,29 +288,22 @@ export class HostChildBackend implements ChildBackend {
     child: ChildProcessWithoutNullStreams,
     id: string,
     stream: "stdout" | "stderr",
+    fail: (error: unknown) => void,
+    failed: () => boolean,
   ): void {
-    let buffer = "";
-    child[stream].setEncoding("utf8");
-    child[stream].on("data", (data: string) => {
-      buffer += data;
-      let index: number;
-      while ((index = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, index).replace(/\r$/, "");
-        buffer = buffer.slice(index + 1);
-        if (line.length > 8 * 1024 * 1024) {
-          void this.kill(id);
-          return;
-        }
-        this.emit(`harness-${stream}`, { sessionId: id, line });
-      }
-      if (buffer.length > 8 * 1024 * 1024) {
-        buffer = "";
-        void this.kill(id);
+    const framer = new HostOutputFramer(this.outputRecordBytes);
+    const receive = (line: string) =>
+      this.emit(`harness-${stream}`, { sessionId: id, line });
+    child[stream].on("data", (data: Buffer) => {
+      if (failed()) return;
+      try {
+        framer.push(data, receive);
+      } catch (error) {
+        fail(error);
       }
     });
     child[stream].on("end", () => {
-      if (buffer)
-        this.emit(`harness-${stream}`, { sessionId: id, line: buffer });
+      if (!failed()) framer.end(receive);
     });
   }
 

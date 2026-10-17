@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  COMPOSER_RUNNER_DEFAULT,
   AUTOSAVE_DEFAULT,
   COLLAPSED_PROJECT_RAIL_MODE_DEFAULT,
   searchSettings,
@@ -11,11 +10,9 @@ import {
   FORMAT_ON_SAVE_DEFAULT,
   FILE_TAB_MODE_DEFAULT,
   FOLLOW_UP_BEHAVIOR_DEFAULT,
-  GRID_ARCADE_ENABLED_DEFAULT,
   KEYBINDINGS,
   LIVE_AGENTS_ENABLED_DEFAULT,
   TAB_ANIMATIONS_ENABLED_DEFAULT,
-  loadComposerRunner,
   loadAutosave,
   loadCollapsedProjectRailMode,
   loadModelControls,
@@ -24,7 +21,6 @@ import {
   loadFormatOnSave,
   loadFileTabMode,
   loadFollowUpBehavior,
-  loadGridArcadeEnabled,
   loadLiveAgentsEnabled,
   loadNotesEnabled,
   keybindingPressed,
@@ -32,7 +28,6 @@ import {
   loadQuickComposerShortcut,
   loadTabAnimationsEnabled,
   NOTES_ENABLED_DEFAULT,
-  saveComposerRunner,
   saveAutosave,
   saveCollapsedProjectRailMode,
   saveModelControls,
@@ -40,7 +35,6 @@ import {
   saveFormatOnSave,
   saveFileTabMode,
   saveFollowUpBehavior,
-  saveGridArcadeEnabled,
   saveLiveAgentsEnabled,
   saveNotesEnabled,
   saveKeybindingOverride,
@@ -50,14 +44,12 @@ import {
 } from "./settings";
 import { IS_MAC, MOD, SHIFT } from "../../../platform/tauri/platform";
 
-const KEY = "monocode.composerRunner";
 const MODEL_CONTROLS_KEY = "monocode.modelControls";
 const LEGACY_EFFORT_VISIBLE_KEY = "monocode.composerEffortVisible";
 const NOTES_KEY = "monocode.notesEnabled";
 const KEYBINDING_OVERRIDES_KEY = "monocode.keybindingOverrides";
 const QUICK_COMPOSER_SHORTCUT_KEY = "monocode.quickComposerShortcut";
 const LIVE_AGENTS_KEY = "monocode.liveAgentsEnabled";
-const GRID_ARCADE_KEY = "monocode.gridArcadeEnabled";
 const DIFF_VIEWER_KEY = "monocode.diffViewer";
 const FORMAT_ON_SAVE_KEY = "monocode.formatOnSave";
 const AUTOSAVE_KEY = "monocode.autosave";
@@ -111,26 +103,6 @@ function mockLocalStorage() {
     configurable: true,
   });
 }
-
-describe("composer runner setting", () => {
-  beforeEach(mockLocalStorage);
-  afterEach(() => {
-    localStorage.removeItem(KEY);
-  });
-
-  it("defaults to on", () => {
-    expect(COMPOSER_RUNNER_DEFAULT).toBe(true);
-    expect(loadComposerRunner()).toBe(true);
-  });
-
-  it("persists an off switch", () => {
-    saveComposerRunner(false);
-    expect(localStorage.getItem(KEY)).toBe("0");
-    expect(loadComposerRunner()).toBe(false);
-    saveComposerRunner(true);
-    expect(loadComposerRunner()).toBe(true);
-  });
-});
 
 describe("model controls setting", () => {
   beforeEach(mockLocalStorage);
@@ -366,26 +338,6 @@ describe("live agents enabled setting", () => {
     expect(loadLiveAgentsEnabled()).toBe(false);
     saveLiveAgentsEnabled(true);
     expect(loadLiveAgentsEnabled()).toBe(true);
-  });
-});
-
-describe("grid arcade enabled setting", () => {
-  beforeEach(mockLocalStorage);
-  afterEach(() => {
-    localStorage.removeItem(GRID_ARCADE_KEY);
-  });
-
-  it("defaults to on", () => {
-    expect(GRID_ARCADE_ENABLED_DEFAULT).toBe(true);
-    expect(loadGridArcadeEnabled()).toBe(true);
-  });
-
-  it("persists an off switch", () => {
-    saveGridArcadeEnabled(false);
-    expect(localStorage.getItem(GRID_ARCADE_KEY)).toBe("0");
-    expect(loadGridArcadeEnabled()).toBe(false);
-    saveGridArcadeEnabled(true);
-    expect(loadGridArcadeEnabled()).toBe(true);
   });
 });
 

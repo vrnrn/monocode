@@ -1,26 +1,37 @@
 import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import * as fsPromises from "node:fs/promises";
+import { afterEach, expect, it, vi } from "vitest";
+import type {
+  EditorTextFile,
+  EditorTextSaveResult,
+} from "../src/platform/tauri/fs";
 import { HostStore } from "./store";
 import { WorkspaceCommands } from "./workspace-commands";
 
 const cleanups: Array<() => void> = [];
-afterEach(() =>
+afterEach(() => {
+  vi.restoreAllMocks();
   cleanups
     .splice(0)
     .reverse()
-    .forEach((cleanup) => cleanup()),
-);
+    .forEach((cleanup) => cleanup());
+});
 
 function fixture() {
   // Use the same native resolution as fs/promises.realpath in the host,
@@ -282,5 +293,153 @@ it.skipIf(process.platform === "win32")(
         paths: ["dir-link/secret.txt"],
       }),
     ).rejects.toThrow();
+  },
+);
+
+const digest = (content: string) =>
+  createHash("sha256").update(content).digest("hex");
+
+it("reads exact editor bytes and rejects changed or deleted baselines without a watcher", async () => {
+  const { commands, repo } = fixture();
+  const { cwd, write } = repo();
+  const path = join(cwd, "chosen.txt");
+  const content = "\ufeffalpha\r\nbeta\r\n";
+  write("chosen.txt", content);
+  const baseline = (await commands.run("read_editor_text_file", {
+    path,
+  })) as EditorTextFile;
+  expect(baseline).toEqual({ path, content, hash: digest(content) });
+  write("chosen.txt", "external\n");
+  expect(
+    await commands.run("write_editor_text_file", {
+      path,
+      content: "local\r\n",
+      expectedHash: baseline.hash,
+    }),
+  ).toEqual({ status: "conflict", path, hash: digest("external\n") });
+  expect(readFileSync(path, "utf8")).toBe("external\n");
+  rmSync(path);
+  expect(
+    await commands.run("write_editor_text_file", {
+      path,
+      content: "local\r\n",
+      expectedHash: baseline.hash,
+    }),
+  ).toEqual({ status: "conflict", path, hash: null });
+  expect(readdirSync(cwd).some((name) => name.includes(".monocode-"))).toBe(
+    false,
+  );
+  // Existing non-editor clients retain their original API, including creates.
+  await commands.run("write_text_file", { path, content: "legacy\n" });
+  expect(await commands.run("read_text_file", { path })).toBe("legacy\n");
+});
+
+it("advances successful editor baselines and preserves CRLF and file permissions", async () => {
+  const { commands, repo } = fixture();
+  const { cwd, write } = repo();
+  const path = join(cwd, "chosen.txt");
+  write("chosen.txt", "before\r\n");
+  if (process.platform !== "win32") chmodSync(path, 0o751);
+  const baseline = (await commands.run("read_editor_text_file", {
+    path,
+  })) as EditorTextFile;
+  const saved = (await commands.run("write_editor_text_file", {
+    path,
+    content: "after\r\n",
+    expectedHash: baseline.hash,
+  })) as EditorTextSaveResult;
+  expect(saved).toEqual({ status: "saved", path, hash: digest("after\r\n") });
+  expect(readFileSync(path, "utf8")).toBe("after\r\n");
+  if (process.platform !== "win32")
+    expect(statSync(path).mode & 0o777).toBe(0o751);
+  expect(
+    await commands.run("write_editor_text_file", {
+      path,
+      content: "again\r\n",
+      expectedHash: saved.hash,
+    }),
+  ).toEqual({ status: "saved", path, hash: digest("again\r\n") });
+  // An external edit after publication is retained by the next save attempt.
+  write("chosen.txt", "after publication\n");
+  expect(
+    await commands.run("write_editor_text_file", {
+      path,
+      content: "next\n",
+      expectedHash: digest("again\r\n"),
+    }),
+  ).toEqual({ status: "conflict", path, hash: digest("after publication\n") });
+  expect(readFileSync(path, "utf8")).toBe("after publication\n");
+});
+
+it("rechecks external changes made during temporary preparation and cleans up", async () => {
+  const { commands, repo } = fixture();
+  const { cwd } = repo();
+  const path = join(cwd, "chosen.txt");
+  const baseline = (await commands.run("read_editor_text_file", {
+    path,
+  })) as EditorTextFile;
+  const handle = await fsPromises.open(path, "r");
+  const prototype = Object.getPrototypeOf(handle) as fsPromises.FileHandle;
+  const realSync = prototype.sync;
+  await handle.close();
+  vi.spyOn(prototype, "sync").mockImplementation(async function (
+    this: fsPromises.FileHandle,
+  ) {
+    writeFileSync(path, "external during preparation\n");
+    await realSync.call(this);
+  });
+  expect(
+    await commands.run("write_editor_text_file", {
+      path,
+      content: "local\n",
+      expectedHash: baseline.hash,
+    }),
+  ).toEqual({
+    status: "conflict",
+    path,
+    hash: digest("external during preparation\n"),
+  });
+  expect(readFileSync(path, "utf8")).toBe("external during preparation\n");
+  expect(readdirSync(cwd).some((name) => name.includes(".monocode-"))).toBe(
+    false,
+  );
+});
+
+it.skipIf(process.platform === "win32")(
+  "preserves in-project symlinks and rejects editor access outside host projects",
+  async () => {
+    const { home, commands, repo } = fixture();
+    const { cwd } = repo();
+    const target = join(cwd, "chosen.txt");
+    const path = join(cwd, "link.txt");
+    symlinkSync(target, path);
+    const baseline = (await commands.run("read_editor_text_file", {
+      path,
+    })) as EditorTextFile;
+    expect(
+      await commands.run("write_editor_text_file", {
+        path,
+        content: "through link\r\n",
+        expectedHash: baseline.hash,
+      }),
+    ).toEqual({ status: "saved", path, hash: digest("through link\r\n") });
+    expect(lstatSync(path).isSymbolicLink()).toBe(true);
+    expect(readFileSync(target, "utf8")).toBe("through link\r\n");
+    const outside = join(home, "outside.txt");
+    writeFileSync(outside, "outside\n");
+    symlinkSync(outside, join(cwd, "outside-link"));
+    await expect(
+      commands.run("read_editor_text_file", {
+        path: join(cwd, "outside-link"),
+      }),
+    ).rejects.toThrow("outside");
+    await expect(
+      commands.run("write_editor_text_file", {
+        path: join(cwd, "outside-link"),
+        content: "local\n",
+        expectedHash: digest("outside\n"),
+      }),
+    ).rejects.toThrow("outside");
+    expect(readFileSync(outside, "utf8")).toBe("outside\n");
   },
 );

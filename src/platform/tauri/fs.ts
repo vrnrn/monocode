@@ -580,6 +580,45 @@ export function readTextFile(path: string): Promise<string> {
   return invoke<string>("read_text_file", { path });
 }
 
+export type EditorTextFile = {
+  path: string;
+  content: string;
+} & (
+  | { hash: string; saveDisabledReason?: undefined }
+  | { hash: null; saveDisabledReason: string }
+);
+
+export const EDITOR_HOST_UPDATE_MESSAGE =
+  "Update vorkspace Host in Connections to edit and save this file. You can still read it.";
+
+export class EditorSaveUnavailableError extends Error {
+  constructor() {
+    super(EDITOR_HOST_UPDATE_MESSAGE);
+  }
+}
+
+export type EditorTextSaveResult =
+  | { status: "saved"; path: string; hash: string }
+  | { status: "conflict"; path: string; hash: string | null };
+
+/** Read content and its exact disk digest in one operation. */
+export function readEditorTextFile(path: string): Promise<EditorTextFile> {
+  return invoke<EditorTextFile>("read_editor_text_file", { path });
+}
+
+/** Detect changed disk content before atomic replacement; this is not filesystem CAS. */
+export function writeEditorTextFile(
+  path: string,
+  content: string,
+  expectedHash: string,
+): Promise<EditorTextSaveResult> {
+  return invoke<EditorTextSaveResult>("write_editor_text_file", {
+    path,
+    content,
+    expectedHash,
+  });
+}
+
 /** Raw bytes for media previews. Arrives as an ArrayBuffer, not base64. */
 export async function readBinaryFile(path: string): Promise<Uint8Array> {
   const buffer = await invoke<ArrayBuffer | string>("read_binary_file", {

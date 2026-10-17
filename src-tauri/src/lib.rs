@@ -6,8 +6,10 @@ mod automations;
 mod chat_background;
 mod checkpoint;
 mod codex_mono_store;
+mod composer_drafts;
 mod control;
 pub mod control_cli;
+mod development;
 mod external_editor;
 mod fs;
 mod gitlab;
@@ -16,6 +18,7 @@ mod harness_updates;
 mod inbox_media;
 mod jira;
 mod link_preview;
+mod local_submissions;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
@@ -226,7 +229,8 @@ fn should_request_quit(code: Option<i32>) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let context = tauri::generate_context!();
+    let mut context = tauri::generate_context!();
+    development::configure(context.config_mut());
     #[cfg(all(debug_assertions, target_os = "macos"))]
     {
         let version = context.package_info().version.to_string();
@@ -237,7 +241,8 @@ pub fn run() {
             .bundle_version
             .as_deref()
             .unwrap_or(&version);
-        macos::ensure_dev_bundle(&version, bundle_version);
+        macos::ensure_dev_bundle(&version, bundle_version)
+            .expect("Failed to prepare the isolated development app");
     }
     #[cfg(target_os = "macos")]
     macos::register_spellcheck_default();
@@ -252,6 +257,7 @@ pub fn run() {
         let _ = window::show_hidden_or_open_new(app);
     }));
     let app = builder
+        .plugin(development::plugin(context.config()))
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
@@ -260,7 +266,7 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_filter(window::is_workspace_window)
-                // The launch window is sized while hidden and revealed on Ready.
+                // Size the launch window while hidden; HTML reveals it once painted.
                 .skip_initial_state("main")
                 .build(),
         )
@@ -273,6 +279,12 @@ pub fn run() {
         .manage(window_transfer::WindowTransferState::new())
         .manage(ticket_links::PendingTicketLinks::default())
         .setup(|app| {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "vorkspace Dev: profile {} at {}",
+                app.config().identifier,
+                app.path().app_data_dir()?.display()
+            );
             ticket_links::init(app.handle());
             #[cfg(any(windows, target_os = "linux"))]
             {
@@ -315,6 +327,16 @@ pub fn run() {
             menu::dispatch(app, event.id().as_ref());
         })
         .invoke_handler(tauri::generate_handler![
+            local_submissions::local_submission_reserve,
+            local_submissions::local_submission_dispatch,
+            local_submissions::local_submission_settle,
+            local_submissions::local_submission_get,
+            local_submissions::local_submission_list,
+            composer_drafts::composer_draft_cache_attachment,
+            composer_drafts::composer_draft_get,
+            composer_drafts::composer_draft_set,
+            fs::read_editor_text_file,
+            fs::write_editor_text_file,
             remote::remote_machines,
             remote::remote_connect,
             remote::remote_disconnect,
@@ -548,6 +570,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             menu::autosave_set_enabled,
             open_new_window,
+            window::reveal_launch_window,
             window::hide_window,
             window::destroy_window,
             window::quit_poll_reply,
@@ -636,7 +659,6 @@ pub fn run() {
                 #[cfg(debug_assertions)]
                 macos::prefer_bundle_dock_icon();
             }
-            window::ensure_launch_window_visible(handle);
         }
         tauri::RunEvent::WindowEvent {
             label,
@@ -670,6 +692,8 @@ pub fn run() {
         tauri::RunEvent::Exit => {
             handle.state::<remote::RemoteConnections>().shutdown();
             reap_harness_children(handle);
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            macos::cleanup_dev_bundle();
         }
         _ => {}
     });

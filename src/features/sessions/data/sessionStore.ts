@@ -1,3 +1,7 @@
+import {
+  listLocalSubmissions,
+  restoreLocalSubmissions,
+} from "../../../integrations/harness/core/localSubmissions";
 import { invoke } from "@tauri-apps/api/core";
 import { isMonoSession } from "../../monos/model/mono";
 import { sanitizeMonoSpawnedSessions } from "../../monos/model/monoSpawnedSessions";
@@ -7,6 +11,7 @@ import {
 } from "../../../integrations/harness/core/preview";
 import { codexCommandPresentation } from "../../../integrations/harness/providers/codex/codexProtocol";
 import { persistableAttachment } from "../model/attachments";
+import { discardComposerDraft } from "../model/draftCache";
 import { ARTIFACT_KINDS } from "../../artifacts/artifacts";
 import type { ContextUsage } from "../model/contextUsage";
 import {
@@ -214,9 +219,7 @@ function sanitizeMonoSessionCompletion(
   };
 }
 
-function sanitizeMonoPeerMessage(
-  value: unknown,
-): Block["monoPeerMessage"] {
+function sanitizeMonoPeerMessage(value: unknown): Block["monoPeerMessage"] {
   if (!value || typeof value !== "object") return undefined;
   const peer = value as NonNullable<Block["monoPeerMessage"]>;
   if (
@@ -649,8 +652,35 @@ export async function getSession(sessionId: string): Promise<Session | null> {
     },
   );
   if (!record) return null;
-  const session = recordToSession(record);
-  if (session.monoTranscript) monoSavedBlocks.set(sessionId, session.blocks);
+  let session = recordToSession(record);
+  const persistedBlocks = session.blocks;
+  if (
+    typeof window !== "undefined" &&
+    "__TAURI_INTERNALS__" in window &&
+    !isRemoteProjectPath(session.cwd)
+  ) {
+    try {
+      session = restoreLocalSubmissions(
+        session,
+        await listLocalSubmissions(session.id),
+      );
+    } catch {
+      session = {
+        ...session,
+        localSubmissionUncertain: true,
+        blocks: [
+          ...session.blocks,
+          {
+            id: "local-submissions-unavailable",
+            role: "system",
+            notice: "error",
+            text: "Local send receipts could not be checked. Automatic continuation is paused; review this conversation before sending another message.",
+          },
+        ],
+      };
+    }
+  }
+  if (session.monoTranscript) monoSavedBlocks.set(sessionId, persistedBlocks);
   if (session.harness === "claude" && session.providerSessionId) {
     const toolIds = shellPlaceholderIds(session.blocks);
     if (toolIds.length) {
@@ -802,6 +832,7 @@ export async function deleteSession(
     await enqueueSessionWrite(sessionId, () =>
       invoke<void>("session_delete", { sessionId, imagePaths }),
     );
+    discardComposerDraft(sessionId);
     monoSavedBlocks.delete(sessionId);
     const tombstone = setTimeout(
       () => deletedSessionIds.delete(sessionId),
@@ -819,7 +850,11 @@ export async function discardDraftSessionRecord(
   sessionId: string,
 ): Promise<void> {
   await enqueueSessionWrite(sessionId, () =>
-    invoke<void>("session_delete", { sessionId, imagePaths: [] }),
+    invoke<void>("session_delete", {
+      sessionId,
+      imagePaths: [],
+      preserveComposer: true,
+    }),
   );
   monoSavedBlocks.delete(sessionId);
 }
@@ -957,6 +992,8 @@ function sanitizeBlock(
   const turnModel = sanitizeTurnModel(block.turnModel);
   if (block.role === "user" && turnModel) next.turnModel = turnModel;
   if (block.role === "user" && block.draft) next.draft = true;
+  if (block.role === "user" && block.localSubmissionOwned === true)
+    next.localSubmissionOwned = true;
   if (block.role === "user" && block.monocode) next.monocode = true;
   if (
     block.role === "user" &&

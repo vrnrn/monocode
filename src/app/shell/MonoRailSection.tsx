@@ -23,7 +23,6 @@ import {
   findMono,
   listMonos,
   MONO_STATUS_LABEL,
-  nextMonoLook,
   monoLook,
   monoProjectsPhrase,
   monosSnapshot,
@@ -111,7 +110,6 @@ export function MonoRailSection({
     return (
       <div className="mb-2 shrink-0" data-mono-rail>
         <MonoIntroCard
-          look={nextMonoLook(monos)}
           onCreate={onCreate}
           onHide={() => saveMonosEnabled(false)}
         />

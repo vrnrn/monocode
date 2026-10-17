@@ -1,11 +1,17 @@
-import { leafIds, newTab, type WorkspaceTab } from "../../workspace/model/layout";
-import type { DockSide, ProjectTerminalDock } from "../../projects/model/projectTerminal";
+import {
+  leafIds,
+  newTab,
+  type WorkspaceTab,
+} from "../../workspace/model/layout";
+import type {
+  DockSide,
+  ProjectTerminalDock,
+} from "../../projects/model/projectTerminal";
 import { sessionNeedsInput, type Session } from "./session";
 import { stopStreaming } from "../../../integrations/harness/core/apply";
 import type { ProjectReturnMemory } from "../../projects/model/projectReturn";
 
-export const INTERRUPT_MESSAGE =
-  "Turn interrupted when vorkspace quit.";
+export const INTERRUPT_MESSAGE = "Turn interrupted when vorkspace quit.";
 
 export const CONTINUE_PROMPT = "Continue from where you left off.";
 
@@ -116,10 +122,22 @@ export function wasTurnInterrupted(session: Session): boolean {
 export function canAutoContinue(session: Session): boolean {
   return (
     !session.worktreeRemoved &&
+    !session.localSubmissionUncertain &&
+    !session.localSubmissionReplayBlocked &&
     !!session.providerSessionId &&
     !session.busy &&
-    lastBlockIsInterrupt(session)
+    lastBlockIsInterrupt(session) &&
+    !latestUserOwnsLocalSubmission(session)
   );
+}
+
+function latestUserOwnsLocalSubmission(session: Session): boolean {
+  for (let index = session.blocks.length - 1; index >= 0; index -= 1) {
+    const block = session.blocks[index];
+    if (block.role === "user" && !block.draft)
+      return block.localSubmissionOwned === true;
+  }
+  return false;
 }
 
 function lastBlockIsInterrupt(session: Session): boolean {

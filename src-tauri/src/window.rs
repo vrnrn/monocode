@@ -12,6 +12,7 @@ use tauri::window::{Effect, EffectsBuilder};
 use tauri::{AppHandle, Emitter, EventTarget, Manager, WebviewWindow, WebviewWindowBuilder};
 
 static WINDOW_COUNTER: AtomicU32 = AtomicU32::new(1);
+static LAUNCH_REVEALED: AtomicBool = AtomicBool::new(false);
 
 /// The floating quick composer. It is a webview window but not a workspace:
 /// it has no sessions, takes no part in quitting, and is never shown by the
@@ -241,30 +242,37 @@ pub fn show_hidden_or_open_new(app: &AppHandle) -> Result<(), String> {
     if windows.is_empty() {
         return open_new_window(app);
     }
+    let revealed = LAUNCH_REVEALED.load(Ordering::SeqCst);
+    let windows: Vec<_> = windows
+        .iter()
+        .filter(|window| !launch_window_should_wait(window.label(), revealed))
+        .collect();
     for window in &windows {
         let _ = window.unminimize();
         let _ = window.show();
     }
-    windows
-        .first()
-        .ok_or_else(|| "missing window".to_string())?
-        .set_focus()
-        .map_err(|err| err.to_string())
+    if let Some(window) = windows.first() {
+        window.set_focus().map_err(|err| err.to_string())?;
+    }
+    Ok(())
 }
 
-/// window-state can restore a window as hidden after a quit-while-hidden.
-pub fn ensure_launch_window_visible(app: &AppHandle) {
-    let windows = workspace_windows(app);
-    if windows.is_empty() {
-        return;
+fn launch_window_should_wait(label: &str, revealed: bool) -> bool {
+    label == "main" && !revealed
+}
+
+/// The HTML bootstrap calls this after decoding the splash artwork. A reload
+/// must not reveal a deliberately hidden window or a background session.
+#[tauri::command]
+pub fn reveal_launch_window(window: WebviewWindow) -> Result<(), String> {
+    if window.label() != "main" || LAUNCH_REVEALED.swap(true, Ordering::SeqCst) {
+        return Ok(());
     }
-    let any_visible = windows
-        .iter()
-        .any(|window| window.is_visible().unwrap_or(false));
-    if any_visible {
-        return;
+    if let Err(err) = window.show() {
+        LAUNCH_REVEALED.store(false, Ordering::SeqCst);
+        return Err(err.to_string());
     }
-    let _ = show_hidden_or_open_new(app);
+    window.set_focus().map_err(|err| err.to_string())
 }
 
 pub fn allow_exit() -> bool {
@@ -626,6 +634,14 @@ pub fn confirm_quit(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_visibility_waits_for_content_without_blocking_other_workspaces() {
+        assert!(launch_window_should_wait("main", false));
+        assert!(!launch_window_should_wait("main", true));
+        assert!(!launch_window_should_wait("window-2", false));
+        assert!(!launch_window_should_wait("quick-session-123", false));
+    }
 
     #[test]
     fn floating_mono_windows_are_excluded_from_workspace_lifecycle() {

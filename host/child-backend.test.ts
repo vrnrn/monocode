@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { HostChildBackend } from "./child-backend";
+import { HostChildBackend, HostOutputFramer } from "./child-backend";
 import { REMOTE_PROVIDERS } from "../src/features/connections/model/protocol";
 
 it("resolves every provider and runs only allowed provider commands", async () => {
@@ -106,12 +106,14 @@ it("runs the resolved Claude version fallback in headless mode", async () => {
   }
 });
 
-it.each([false, true])("stops a provider tree (ignores SIGTERM: %s)", async (stubborn) => {
-  const directory = mkdtempSync(join(tmpdir(), "monocode-provider-tree-"));
-  const file = join(directory, "provider.cjs");
-  writeFileSync(
-    file,
-    `const { spawn } = require('node:child_process');
+it.each([false, true])(
+  "stops a provider tree (ignores SIGTERM: %s)",
+  async (stubborn) => {
+    const directory = mkdtempSync(join(tmpdir(), "monocode-provider-tree-"));
+    const file = join(directory, "provider.cjs");
+    writeFileSync(
+      file,
+      `const { spawn } = require('node:child_process');
 const child = spawn(process.execPath, ['-e', ${JSON.stringify(`${stubborn ? "process.on('SIGTERM', () => {});" : ""} console.log('ready'); setInterval(() => {}, 1000)`)}], { stdio: ['ignore', 'pipe', 'ignore'] });
 child.stdout.once('data', () => console.log(JSON.stringify({ child: child.pid })));
 setInterval(() => {}, 1000);
@@ -215,3 +217,89 @@ setInterval(() => {}, 1000);
     });
   }
 }, 10_000);
+
+it("frames split UTF-8 and final tails by bytes with injectable tiny budgets", () => {
+  const framer = new HostOutputFramer(8);
+  const lines: string[] = [];
+  const utf8 = Buffer.from("éé\r\ntail");
+  for (const byte of utf8)
+    framer.push(Buffer.from([byte]), (line) => lines.push(line));
+  framer.end((line) => lines.push(line));
+  expect(lines).toEqual(["éé", "tail"]);
+  for (const input of ["ééé", "123456", "123456\n"]) {
+    const oversized = new HostOutputFramer(5);
+    const receive = vi.fn();
+    expect(() => oversized.push(Buffer.from(input), receive)).toThrow(
+      "5 byte limit",
+    );
+    expect(receive).not.toHaveBeenCalled();
+  }
+});
+
+it("delivers ordered protocol records and its final tail before exit", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "monocode-output-tail-"));
+  const file = join(directory, "provider.cjs");
+  writeFileSync(
+    file,
+    `process.stdout.write('approval\\ncompletion\\nfinal tail')`,
+  );
+  const backend = new HostChildBackend();
+  const events: string[] = [];
+  await backend.listen<{ line: string }>("harness-stdout", ({ payload }) =>
+    events.push(payload.line),
+  );
+  await backend.listen<{ code: number }>("harness-exit", ({ payload }) =>
+    events.push(`exit:${payload.code}`),
+  );
+  try {
+    await backend.invoke("harness_spawn", {
+      sessionId: "tail",
+      command: file,
+      args: [],
+      cwd: directory,
+    });
+    await vi.waitFor(() =>
+      expect(events).toEqual([
+        "approval",
+        "completion",
+        "final tail",
+        "exit:0",
+      ]),
+    );
+  } finally {
+    await backend.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("stops an oversized unterminated record with an explicit failed exit", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "monocode-output-overflow-"));
+  const file = join(directory, "provider.cjs");
+  writeFileSync(
+    file,
+    `process.stdout.write('é'.repeat(20)); setInterval(() => {}, 1000)`,
+  );
+  const backend = new HostChildBackend({}, 32);
+  const receive = vi.fn();
+  const exited = vi.fn();
+  await backend.listen("harness-stdout", receive);
+  await backend.listen("harness-exit", exited);
+  try {
+    await backend.invoke("harness_spawn", {
+      sessionId: "overflow",
+      command: file,
+      args: [],
+      cwd: directory,
+    });
+    await vi.waitFor(() => expect(exited).toHaveBeenCalledOnce());
+    expect(exited.mock.calls[0][0].payload).toMatchObject({
+      code: 1,
+      error: expect.stringContaining("32 byte limit"),
+    });
+    expect(receive).not.toHaveBeenCalled();
+    await backend.kill("overflow");
+  } finally {
+    await backend.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

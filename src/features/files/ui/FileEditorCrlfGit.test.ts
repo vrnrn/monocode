@@ -65,7 +65,7 @@ describe("CRLF editor Git boundaries", () => {
     document.body.append(container);
     root = createRoot(container);
     bridge.invoke = (command, args) => {
-      if (command === "read_text_file") return disk();
+      if (command === "read_editor_text_file") return { path: args?.path, content: disk(), hash: disk() };
       if (command === "stat_files") return [];
       if (command === "git_diff_files") {
         const status = git(["status", "--porcelain", "--", filename]);

@@ -100,7 +100,7 @@ const ticketLinkSanitize: PluggableList[number] = [
     ...schema,
     protocols: {
       ...schema.protocols,
-      href: [...schema.protocols.href, "vorkspace", "monocode"],
+      href: [...schema.protocols.href, "vorkspace", "monocode", "vorkspace-dev"],
     },
   },
 ];
@@ -112,7 +112,7 @@ const MARKDOWN_HARDEN: Pluggable = [
     // relative note URLs reach that component without changing link parsing.
     allowedImagePrefixes: ["*"],
     allowedLinkPrefixes: ["*"],
-    allowedProtocols: ["vorkspace:", "monocode:"],
+    allowedProtocols: ["vorkspace:", "monocode:", "vorkspace-dev:"],
     allowDataImages: true,
     imageBlockPolicy: "remove" as const,
   },
@@ -143,7 +143,7 @@ const INBOX_MEDIA_REHYPE_PLUGINS: PluggableList = [
       defaultOrigin: "https://inbox.invalid",
       allowedImagePrefixes: INBOX_MEDIA_PREFIXES,
       allowedLinkPrefixes: ["*"],
-      allowedProtocols: ["vorkspace:", "monocode:"],
+      allowedProtocols: ["vorkspace:", "monocode:", "vorkspace-dev:"],
       allowDataImages: true,
       imageBlockPolicy: "remove" as const,
     },

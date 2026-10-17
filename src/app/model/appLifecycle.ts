@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { ask, message } from "@tauri-apps/plugin-dialog";
 import {
   bindHarnessSession,
   forgetHarnessSession,
@@ -16,14 +16,20 @@ import {
   workspaceFromResumed,
   type ResumedWorkspace,
 } from "../../features/sessions/model/inFlight";
-import { leafIds, type WorkspaceTab } from "../../features/workspace/model/layout";
+import {
+  leafIds,
+  type WorkspaceTab,
+} from "../../features/workspace/model/layout";
 import { killPty } from "../../platform/tauri/pty";
 import {
   projectTerminalFileIds,
   type DockSide,
   type ProjectTerminalDock,
 } from "../../features/projects/model/projectTerminal";
-import { sessionWorkCwd, type Session } from "../../features/sessions/model/session";
+import {
+  sessionWorkCwd,
+  type Session,
+} from "../../features/sessions/model/session";
 import { sessionChildHarnesses } from "../../features/sessions/model/handoff";
 import {
   getSession,
@@ -43,8 +49,29 @@ import {
 } from "../../features/workspace/model/workspaceSnapshot";
 import { loadWindowTransfer } from "./windowTransferBootstrap";
 import type { WindowTransferPayload } from "./windowTransfer";
-import { lastProjectPath, normalizeProjectPath, sameProjectPath } from "../../features/projects/model/recents";
+import {
+  lastProjectPath,
+  normalizeProjectPath,
+  sameProjectPath,
+} from "../../features/projects/model/recents";
 import type { ProjectReturnMemory } from "../../features/projects/model/projectReturn";
+import { flushComposerDrafts } from "../../features/sessions/model/draftCache";
+
+async function flushDraftsBeforeQuit(): Promise<void> {
+  try {
+    await flushComposerDrafts();
+  } catch (error) {
+    const detail =
+      error && typeof error === "object" && "message" in error
+        ? String(error.message)
+        : String(error);
+    await message(
+      `An unsent message could not be saved. Open its chat and resolve the draft notice before quitting.\n\n${detail}`,
+      { title: "Message not saved", kind: "error" },
+    ).catch(() => undefined);
+    throw error;
+  }
+}
 
 export type { ResumedWorkspace };
 export { hasInFlightSessions };
@@ -131,6 +158,11 @@ export async function handleQuitRequested(): Promise<boolean> {
       quitting = false;
       return false;
     }
+  }
+  try {
+    await flushDraftsBeforeQuit();
+  } catch {
+    return false;
   }
   const { resumed } = await loadBootWorkspace();
   const pending = resumed ?? bootingResumed;
@@ -320,7 +352,8 @@ async function loadResumedWorkspaceOnce(): Promise<ResumedWorkspace | null> {
         // Idle transcripts already came from disk. Rewriting every open chat
         // here serialized/indexed the entire workspace before first paint.
         .filter(
-          (session) => interrupted.has(session.id) && shouldPersistSession(session),
+          (session) =>
+            interrupted.has(session.id) && shouldPersistSession(session),
         )
         .map((session) => upsertSession(session).catch(() => null)),
     );
@@ -387,12 +420,14 @@ export async function persistQuitState(
   lastDockSide?: DockSide,
   keepTab?: (tab: WorkspaceTab) => boolean,
 ): Promise<void> {
+  if (mode === "quit") await flushDraftsBeforeQuit();
+  else await flushComposerDrafts().catch(() => undefined);
   const refs = inFlightRefs(sessions, tabs);
   const interrupted = new Set(refs.map((ref) => ref.sessionId));
   // A quit ends the process, so a swallowed write is work that never comes
   // back: let it reject and let the caller call the quit off. An unload is a
   // reload, where best effort is enough and failing loudly helps nobody.
-  const write = <T,>(pending: Promise<T>): Promise<T | null> =>
+  const write = <T>(pending: Promise<T>): Promise<T | null> =>
     mode === "quit" ? pending : pending.catch(() => null);
 
   await Promise.all(
@@ -425,7 +460,9 @@ export async function persistQuitState(
   }
 }
 
-async function persistBootingResume(workspace: ResumedWorkspace): Promise<void> {
+async function persistBootingResume(
+  workspace: ResumedWorkspace,
+): Promise<void> {
   await Promise.all(
     workspace.sessions
       .filter(shouldPersistSession)
@@ -443,12 +480,10 @@ async function persistBootingResume(workspace: ResumedWorkspace): Promise<void> 
     ),
   ).catch(() => undefined);
   await replaceInFlightSessions(
-    workspace.sessions
-      .filter(wasTurnInterrupted)
-      .map((session) => ({
-        sessionId: session.id,
-        cwd: session.cwd,
-      })),
+    workspace.sessions.filter(wasTurnInterrupted).map((session) => ({
+      sessionId: session.id,
+      cwd: session.cwd,
+    })),
   ).catch(() => undefined);
 }
 

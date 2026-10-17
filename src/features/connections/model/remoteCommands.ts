@@ -1,6 +1,7 @@
-import { setRemoteCommandRunner } from "../../../platform/tauri/fs";
+import { EDITOR_HOST_UPDATE_MESSAGE, EditorSaveUnavailableError, setRemoteCommandRunner } from "../../../platform/tauri/fs";
 import { remoteMachineFor, remoteRequest } from "./connections";
 import { parseRemotePath, remotePath } from "./remoteProjects";
+import { WORKSPACE_EDITOR_SAVE_CAPABILITY, type HostDescriptor } from "./protocol";
 
 /** File commands a connected machine answers exactly as this computer does
  * (see host/workspace-commands.ts). */
@@ -8,9 +9,11 @@ const HOST_COMMANDS = new Set([
   "list_dir",
   "list_project_files",
   "read_text_file",
+  "read_editor_text_file",
   "read_binary_file",
   "read_file_preview",
   "write_text_file",
+  "write_editor_text_file",
   "stat_files",
   "create_path",
   "rename_path",
@@ -99,17 +102,42 @@ export async function runRemoteCommand(
   if (!machine)
     throw new Error("This project’s machine isn’t connected on this computer.");
   let result: unknown;
+  const editorRead = command === "read_editor_text_file";
+  const editorWrite = command === "write_editor_text_file";
+  const legacyEditorRead = async () => ({
+    path: args.path,
+    content: await remoteRequest<string>(machine.id, "workspace.run", {
+      command: "read_text_file", args: hostArgs,
+    }),
+    hash: null,
+    saveDisabledReason: EDITOR_HOST_UPDATE_MESSAGE,
+  });
+  if (editorRead || editorWrite) {
+    const host = await remoteRequest<HostDescriptor>(machine.id, "environment.describe");
+    if (host.environmentId !== env) throw new Error("Host identity changed. Reconnect this machine before continuing.");
+    if (!host.capabilities?.includes(WORKSPACE_EDITOR_SAVE_CAPABILITY)) {
+      if (editorRead) return legacyEditorRead();
+      throw new EditorSaveUnavailableError();
+    }
+  }
   try {
     result = await remoteRequest(machine.id, "workspace.run", {
       command,
       args: hostArgs,
     });
   } catch (reason) {
-    if (/Unsupported (host method|remote operation|workspace command)/i.test(String(reason)))
+    if (/Unsupported (host method|remote operation|workspace command)/i.test(String(reason))) {
+      if (editorRead) return legacyEditorRead();
+      if (editorWrite) throw new EditorSaveUnavailableError();
       throw new Error(OUTDATED);
+    }
     throw reason;
   }
   const fromHost = (path: string) => remotePath(env, path);
+  if ((command === "read_editor_text_file" || command === "write_editor_text_file") && result && typeof result === "object") {
+    const receipt = result as { path: string };
+    return { ...receipt, path: fromHost(receipt.path) };
+  }
   if (command === "git_locate_files" && Array.isArray(result))
     return result.map((entry: { root: string; relative: string } | null) =>
       entry ? { ...entry, root: fromHost(entry.root) } : null,

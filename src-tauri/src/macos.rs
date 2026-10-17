@@ -708,10 +708,8 @@ pub(crate) fn install_dock_menu(app: &AppHandle) {
 /// paints Tauri's embedded icns edge-to-edge. Wrap that binary in a real
 /// `.app` so macOS uses the supplied ICNS, which already has its own padding.
 #[cfg(debug_assertions)]
-pub(crate) fn ensure_dev_bundle(version: &str, bundle_version: &str) {
-    if let Err(err) = relaunch_from_dev_bundle(version, bundle_version) {
-        eprintln!("vorkspace: macos dev bundle: {err}");
-    }
+pub(crate) fn ensure_dev_bundle(version: &str, bundle_version: &str) -> Result<(), String> {
+    relaunch_from_dev_bundle(version, bundle_version)
 }
 
 /// Tauri sets `applicationIconImage` on Ready in dev, which undoes the bundle
@@ -763,48 +761,177 @@ fn relaunch_from_dev_bundle(version: &str, bundle_version: &str) -> Result<(), S
     use std::process::Command;
 
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    if let Some((app, app_name)) = existing_bundle_root_from_exe(&exe) {
-        write_dev_bundle_icons(&app, &app_name, version, bundle_version)?;
-        return Ok(());
+    let source_bundle = existing_bundle_root_from_exe(&exe);
+    if let Some((app, app_name)) = &source_bundle {
+        // Never rewrite a running bundle: a changed plist would disagree with
+        // both its signature and the identity cached by AppKit at launch.
+        if dev_bundle_is_current(app, app_name, version, bundle_version) {
+            return Ok(());
+        }
     }
     let app_name = dev_bundle_name_from_env(DEV_BUNDLE_DEFAULT_NAME);
+    let base = if source_bundle.is_some() {
+        std::env::temp_dir()
+    } else {
+        exe.parent().ok_or("missing exe parent")?.to_path_buf()
+    };
+    let staging = base.join(format!("{DEV_BUNDLE_ROOT_PREFIX}{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&staging).map_err(|e| e.to_string())?;
+    let app = staging.join(dev_bundle_dir_name(&app_name));
+    let result = (|| -> Result<(), String> {
+        std::fs::write(staging.join(DEV_BUNDLE_OWNER_FILE), DEV_BUNDLE_ID)
+            .map_err(|e| e.to_string())?;
+        let macos_dir = app.join("Contents/MacOS");
+        std::fs::create_dir_all(&macos_dir).map_err(|e| e.to_string())?;
+        if let Some((source, _)) = source_bundle {
+            copy_dev_bundle_resources(
+                &source.join("Contents/Resources"),
+                &app.join("Contents/Resources"),
+            )?;
+        }
+        write_dev_bundle_icons(&app, &app_name, version, bundle_version)?;
+        let bundled = macos_dir.join("vorkspace");
+        // A copy, not a hard link: signing must never rewrite the executing file.
+        std::fs::copy(&exe, &bundled).map_err(|e| e.to_string())?;
+        let mut perms = std::fs::metadata(&bundled)
+            .map_err(|e| e.to_string())?
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&bundled, perms).map_err(|e| e.to_string())?;
+        let signed = Command::new("/usr/bin/codesign")
+            .args(["--force", "--sign", "-", "--identifier", DEV_BUNDLE_ID])
+            .arg(&app)
+            .status()
+            .map_err(|e| e.to_string())?;
+        if !signed.success() || !dev_bundle_is_current(&app, &app_name, version, bundle_version) {
+            return Err("Could not prepare a consistently signed development bundle.".into());
+        }
+        let registered = Command::new(DEV_LSREGISTER)
+            .arg("-f")
+            .arg(&app)
+            .status()
+            .map_err(|e| e.to_string())?;
+        if !registered.success() {
+            return Err("Could not register the development app's URL scheme.".into());
+        }
+        let error = Command::new(&bundled)
+            .args(std::env::args_os().skip(1))
+            .exec();
+        Err(error.to_string())
+    })();
+    // A successful exec does not return. Only this invocation's freshly
+    // created directory is removed on preparation/exec failure.
+    let _ = Command::new(DEV_LSREGISTER).arg("-u").arg(&app).status();
+    let _ = std::fs::remove_dir_all(staging);
+    result
+}
 
-    let app = exe
-        .parent()
-        .ok_or("missing exe parent")?
-        .join(dev_bundle_dir_name(&app_name));
-    let macos_dir = app.join("Contents/MacOS");
-    std::fs::create_dir_all(&macos_dir).map_err(|e| e.to_string())?;
-    write_dev_bundle_icons(&app, &app_name, version, bundle_version)?;
+#[cfg(debug_assertions)]
+const DEV_BUNDLE_ROOT_PREFIX: &str = ".vorkspace-dev-";
+#[cfg(debug_assertions)]
+const DEV_BUNDLE_OWNER_FILE: &str = ".vorkspace-development-owner";
+#[cfg(debug_assertions)]
+const DEV_LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
-    let bundled = macos_dir.join("vorkspace");
-    let _ = std::fs::remove_file(&bundled);
-    // A copy, not a hard link: re-signing below rewrites the file, and the
-    // linked original is the executable running this code.
-    std::fs::copy(&exe, &bundled).map_err(|e| e.to_string())?;
-    let mut perms = std::fs::metadata(&bundled)
-        .map_err(|e| e.to_string())?
-        .permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&bundled, perms).map_err(|e| e.to_string())?;
-
-    // The linker's ad-hoc signature carries a `monocode-<hash>` identifier.
-    // UNUserNotificationCenter refuses authorization, without prompting,
-    // unless the signing identifier matches CFBundleIdentifier.
-    let signed = Command::new("/usr/bin/codesign")
-        .args(["--force", "--sign", "-", "--identifier", DEV_BUNDLE_ID])
-        .arg(&app)
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false);
-    if !signed {
-        eprintln!("vorkspace: macos dev bundle: codesign failed; notifications stay off");
+#[cfg(debug_assertions)]
+fn dev_bundle_is_current(app: &Path, app_name: &str, version: &str, bundle_version: &str) -> bool {
+    use std::process::Command;
+    if std::fs::read(app.join("Contents/Info.plist"))
+        .ok()
+        .as_deref()
+        != Some(dev_bundle_plist(app_name, version, bundle_version).as_slice())
+        || std::fs::read(app.join("Contents/Resources/AppIcon.icns"))
+            .ok()
+            .as_deref()
+            != Some(DEV_ICNS)
+    {
+        return false;
     }
+    let identity = Command::new("/usr/bin/codesign")
+        .args(["--display", "--verbose=4"])
+        .arg(app)
+        .output();
+    let matches_identity = identity.is_ok_and(|output| {
+        output.status.success()
+            && String::from_utf8_lossy(&output.stderr)
+                .lines()
+                .any(|line| line == format!("Identifier={DEV_BUNDLE_ID}"))
+    });
+    matches_identity
+        && Command::new("/usr/bin/codesign")
+            .args(["--verify", "--strict"])
+            .arg(app)
+            .status()
+            .is_ok_and(|status| status.success())
+}
 
-    let err = Command::new(&bundled)
-        .args(std::env::args_os().skip(1))
-        .exec();
-    Err(err.to_string())
+#[cfg(debug_assertions)]
+fn copy_dev_bundle_resources(source: &Path, destination: &Path) -> Result<(), String> {
+    use std::os::unix::fs::symlink;
+    if !source.exists() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(destination).map_err(|e| e.to_string())?;
+    for entry in std::fs::read_dir(source).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let target = destination.join(entry.file_name());
+        let kind = entry.file_type().map_err(|e| e.to_string())?;
+        if kind.is_symlink() {
+            symlink(
+                std::fs::read_link(entry.path()).map_err(|e| e.to_string())?,
+                target,
+            )
+            .map_err(|e| e.to_string())?;
+        } else if kind.is_dir() {
+            copy_dev_bundle_resources(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            std::fs::copy(entry.path(), target).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(debug_assertions)]
+fn owned_dev_bundle_root(exe: &Path) -> Option<std::path::PathBuf> {
+    let (app, _) = existing_bundle_root_from_exe(exe)?;
+    let root = app.parent()?;
+    let suffix = root
+        .file_name()?
+        .to_str()?
+        .strip_prefix(DEV_BUNDLE_ROOT_PREFIX)?;
+    uuid::Uuid::parse_str(suffix).ok()?;
+    if std::fs::symlink_metadata(root)
+        .ok()?
+        .file_type()
+        .is_symlink()
+        || std::fs::read_to_string(root.join(DEV_BUNDLE_OWNER_FILE))
+            .ok()?
+            .as_str()
+            != DEV_BUNDLE_ID
+    {
+        return None;
+    }
+    Some(root.to_path_buf())
+}
+
+#[cfg(debug_assertions)]
+pub(crate) fn cleanup_dev_bundle() {
+    let Some(root) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| owned_dev_bundle_root(&exe))
+    else {
+        return;
+    };
+    // Unregister only this managed copy; never remove an installed/source app.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some((app, _)) = existing_bundle_root_from_exe(&exe) {
+            let _ = std::process::Command::new(DEV_LSREGISTER)
+                .arg("-u")
+                .arg(app)
+                .status();
+        }
+    }
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[cfg(debug_assertions)]
@@ -830,13 +957,13 @@ fn write_dev_bundle_icons(
     Ok(())
 }
 
-/// Must match `CFBundleIdentifier` in the generated dev bundle plist and tauri.conf.json.
+/// The development app name and identity match the generated dev bundle plist.
 #[cfg(debug_assertions)]
-const DEV_BUNDLE_DEFAULT_NAME: &str = "vorkspace";
+const DEV_BUNDLE_DEFAULT_NAME: &str = "vorkspace Dev";
 #[cfg(debug_assertions)]
 const DEV_BUNDLE_NAME_ENV: &str = "MONOCODE_DEV_APP_NAME";
 #[cfg(debug_assertions)]
-const DEV_BUNDLE_ID: &str = "com.monocode.desktop";
+const DEV_BUNDLE_ID: &str = crate::development::APP_IDENTIFIER;
 #[cfg(debug_assertions)]
 const DEV_ICNS: &[u8] = include_bytes!("../icons/icon.icns");
 #[cfg(debug_assertions)]
@@ -887,6 +1014,7 @@ fn dev_bundle_plist(app_name: &str, version: &str, bundle_version: &str) -> Vec<
     let app_name = escape_plist_text(app_name);
     let version = escape_plist_text(version);
     let bundle_version = escape_plist_text(bundle_version);
+    let link_scheme = crate::development::LINK_SCHEME;
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -901,7 +1029,12 @@ fn dev_bundle_plist(app_name: &str, version: &str, bundle_version: &str) -> Vec<
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.monocode.desktop</string>
+	<string>{DEV_BUNDLE_ID}</string>
+	<key>CFBundleURLTypes</key>
+	<array><dict>
+		<key>CFBundleURLName</key><string>{DEV_BUNDLE_ID}</string>
+		<key>CFBundleURLSchemes</key><array><string>{link_scheme}</string></array>
+	</dict></array>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -991,6 +1124,77 @@ mod tests {
     fn existing_bundle_root_from_exe_rejects_bundle_roots_without_a_usable_name() {
         let (root, exe) = test_bundle_exe_path(".app");
         assert_eq!(existing_bundle_root_from_exe(&exe), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dev_bundle_advertises_only_the_development_url_scheme() {
+        let plist = String::from_utf8(dev_bundle_plist("vorkspace Dev", "1.2.3", "1.2.3")).unwrap();
+        assert!(plist.contains("<key>CFBundleURLTypes</key>"));
+        assert!(plist.contains(
+            "<key>CFBundleURLSchemes</key><array><string>vorkspace-dev</string></array>"
+        ));
+        assert!(!plist.contains("<string>vorkspace</string></array>"));
+        assert!(!plist.contains("<string>monocode</string>"));
+    }
+
+    #[test]
+    fn mismatched_dev_bundle_is_rejected_without_modifying_the_source() {
+        let (root, exe) = test_bundle_exe_path("vorkspace.app");
+        let (app, name) = existing_bundle_root_from_exe(&exe).unwrap();
+        let source_plist = b"production bundle plist";
+        std::fs::write(app.join("Contents/Info.plist"), source_plist).unwrap();
+        std::fs::write(&exe, b"original executable").unwrap();
+        assert!(!dev_bundle_is_current(&app, &name, "1.2.3", "1.2.3"));
+        assert_eq!(
+            std::fs::read(app.join("Contents/Info.plist")).unwrap(),
+            source_plist
+        );
+        assert_eq!(std::fs::read(&exe).unwrap(), b"original executable");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dev_bundle_cleanup_recognizes_only_owned_uuid_directories() {
+        let (root, exe) = test_bundle_exe_path("vorkspace Dev.app");
+        std::fs::write(root.join(DEV_BUNDLE_OWNER_FILE), DEV_BUNDLE_ID).unwrap();
+        assert_eq!(owned_dev_bundle_root(&exe), None);
+        let managed = root.join(format!("{DEV_BUNDLE_ROOT_PREFIX}{}", uuid::Uuid::new_v4()));
+        let app = managed.join("vorkspace Dev.app");
+        let managed_exe = app.join("Contents/MacOS/vorkspace");
+        std::fs::create_dir_all(managed_exe.parent().unwrap()).unwrap();
+        std::fs::write(app.join("Contents/Info.plist"), b"plist").unwrap();
+        assert_eq!(owned_dev_bundle_root(&managed_exe), None);
+        std::fs::write(managed.join(DEV_BUNDLE_OWNER_FILE), DEV_BUNDLE_ID).unwrap();
+        assert_eq!(owned_dev_bundle_root(&managed_exe), Some(managed.clone()));
+        std::fs::write(managed.join(DEV_BUNDLE_OWNER_FILE), "unrelated app").unwrap();
+        assert_eq!(owned_dev_bundle_root(&managed_exe), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn copied_dev_bundle_resources_keep_nested_files_and_symlinks_without_changing_source() {
+        use std::os::unix::fs::symlink;
+        let (root, exe) = test_bundle_exe_path("source.app");
+        let (app, _) = existing_bundle_root_from_exe(&exe).unwrap();
+        let resources = app.join("Contents/Resources");
+        std::fs::create_dir_all(resources.join("nested")).unwrap();
+        std::fs::write(resources.join("nested/helper.mjs"), b"helper").unwrap();
+        symlink("nested/helper.mjs", resources.join("helper-link")).unwrap();
+        let destination = root.join("copy/Resources");
+        copy_dev_bundle_resources(&resources, &destination).unwrap();
+        assert_eq!(
+            std::fs::read(destination.join("nested/helper.mjs")).unwrap(),
+            b"helper"
+        );
+        assert_eq!(
+            std::fs::read_link(destination.join("helper-link")).unwrap(),
+            PathBuf::from("nested/helper.mjs")
+        );
+        assert_eq!(
+            std::fs::read(resources.join("nested/helper.mjs")).unwrap(),
+            b"helper"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 

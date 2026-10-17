@@ -2,8 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { PROJECT_MASCOTS } from "../../projects/model/projectMascots";
-import { MonoIntroCard, monoIntroCrowd } from "./MonoIntro";
+import { MonoIntroCard } from "./MonoIntro";
 
 let root: Root;
 let container: HTMLElement;
@@ -19,21 +18,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const look = { mascot: "cat", color: "hsl(142 55% 50%)" };
-
 function button(label: string) {
   return [...document.body.querySelectorAll("button")].find(
     (entry) => entry.textContent === label,
   )!;
 }
-
-it("brings every other mascot to line up behind the user's mono", () => {
-  const crowd = monoIntroCrowd(look);
-  const names = [look.mascot, ...crowd.map((mascot) => mascot.name)];
-
-  expect(new Set(names).size).toBe(PROJECT_MASCOTS.length);
-  expect(crowd.map((mascot) => mascot.color)).not.toContain(look.color);
-});
 
 it("creates the first mono or hides monos", () => {
   const onCreate = vi.fn();
@@ -41,7 +30,6 @@ it("creates the first mono or hides monos", () => {
   act(() =>
     root.render(
       createElement(MonoIntroCard, {
-        look,
         onCreate,
         onHide,
       }),
@@ -49,9 +37,6 @@ it("creates the first mono or hides monos", () => {
   );
 
   expect(document.body.textContent).toContain("Meet Monos");
-  expect(
-    document.body.querySelectorAll("[data-mono-intro-stage] svg"),
-  ).toHaveLength(PROJECT_MASCOTS.length);
 
   act(() => button("Create mono").click());
   expect(onCreate).toHaveBeenCalledOnce();

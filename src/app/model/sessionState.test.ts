@@ -1,3 +1,5 @@
+import { ownLocalSubmissionTurn } from "../../integrations/harness/core/localSubmissions";
+import { sanitizeSessionForPersist } from "../../features/sessions/data/sessionStore";
 // @vitest-environment happy-dom
 import { act, createElement, StrictMode, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -244,5 +246,49 @@ it.each([false, true])(
     expect(recipient.blocks[0].streaming).toBe(false);
     expect(recipient.queuedMessages).toEqual([followUp]);
     expect(canDispatchQueuedHead(recipient)).toBe(true);
+  },
+);
+
+it.each([false, true])(
+  "keeps admission ownership in ref and rendered state across concurrent updates (strict=%s)",
+  (strict) => {
+    const state = mountSessions(strict);
+    act(() => {
+      state().update((sessions) =>
+        sessions.map((session) =>
+          session.id === "blank"
+            ? {
+                ...session,
+                blocks: [
+                  {
+                    id: "previous-turn",
+                    role: "user",
+                    text: "Original request",
+                  },
+                ],
+              }
+            : session,
+        ),
+      );
+      state().rename("Pending title");
+      // An edited replacement is not visible yet. Marking only a storage copy
+      // would lose this guard when the ordinary rendered state saves again.
+      state().update((sessions) =>
+        sessions.map((session) =>
+          session.id === "blank"
+            ? ownLocalSubmissionTurn(session, "edited-replacement")
+            : session,
+        ),
+      );
+      const checkpoint = sanitizeSessionForPersist(state().current()[0]);
+      expect(checkpoint.blocks[0].localSubmissionOwned).toBe(true);
+      flushBackground(state().queue);
+    });
+    expect(state().sessions[0].title).toBe("Pending title");
+    expect(state().sessions[0].blocks[0].localSubmissionOwned).toBe(true);
+    expect(
+      sanitizeSessionForPersist(state().sessions[0]).blocks[0]
+        .localSubmissionOwned,
+    ).toBe(true);
   },
 );

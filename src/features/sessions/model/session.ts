@@ -321,6 +321,9 @@ export type Block = {
   sentAt?: number;
   /** Stable model label for this turn. Present on newly created user blocks. */
   turnModel?: TurnModel;
+  /** Local admission owns this user turn, including before a receipt exists.
+   * Persisted permanently so interrupted restores require an explicit send. */
+  localSubmissionOwned?: boolean;
   /** Provider turn boundary used to replace this user message, when known. */
   providerTurnId?: string;
   /** User turn saved to the session but not submitted to the harness yet. */
@@ -434,6 +437,10 @@ export const RUNTIME_MODE_HINT: Record<RuntimeMode, string> = {
 export type WorkspaceMode = "current" | "worktree";
 
 export type Session = {
+  /** Restored local attempts are never resumed automatically. */
+  localSubmissionUncertain?: boolean;
+  /** A restored receipt owns this work; stale quit markers cannot replay it. */
+  localSubmissionReplayBlocked?: boolean;
   /** Saved and accessible by id, but omitted from the normal session sidebar. */
   sidebarHidden?: boolean;
   /** Receipt for an acknowledged floating-composer handoff. */

@@ -1,5 +1,6 @@
 import type {
   AgentStepKind,
+  Block,
   Attachment,
   InterjectionMeta,
   RuntimeMode,
@@ -182,6 +183,24 @@ export type HarnessSessionInput = {
 };
 
 export type SendTurnInput = HarnessSessionInput & {
+  /** One durable local dispatch linked to its existing visible user row. */
+  submission?: {
+    attemptId: string;
+    userTurnId: string;
+    userTurn?: Block;
+    /** Temporary Inbox/ephemeral conversations stay only in memory. */
+    persist?: boolean;
+  };
+  /** Save the recoverable session owner before reserving a local receipt.
+   * This hook must not perform provider I/O. */
+  beforeAdmission?: () => Promise<void>;
+  /** Provider rewind belongs inside the same durable dispatch boundary. */
+  beforeDispatch?: () => Promise<void>;
+  /** Checkpoint provider effects before the durable receipt settles. */
+  afterDispatch?: (completed: boolean, error?: string) => Promise<void>;
+  /** Caller generation fence, checked again after asynchronous admission. */
+  isCurrent?: () => boolean;
+  submissionScope?: { providerTurnId?: string };
   text: string;
   attachments?: Attachment[];
   /** Called once the provider has accepted the user turn. */

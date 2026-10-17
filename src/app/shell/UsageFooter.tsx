@@ -445,7 +445,6 @@ export function UsageChips({
         <UsageProviderChip
           limits={codex}
           now={now}
-          project={project}
           variant={variant}
           {...codexAccountProps}
           onConsumeReset={consumeCodexReset}

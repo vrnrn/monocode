@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="/vorkspace.png" />
+    <link
+      rel="preload"
+      as="image"
+      href="/vorkspace-splash.png"
+      fetchpriority="high"
+    />
     <title>vorkspace</title>
     <script>
       (function () {
@@ -76,8 +82,7 @@
         background: var(--color-background-base);
       }
 
-      /* Opaque cover until React paints. The logo is in HTML so it is
-         visible during the Dock bounce, before the bundle runs. */
+      /* Keep startup artwork independent of the app bundle and its styles. */
       #boot-splash {
         position: fixed;
         inset: 0;
@@ -85,6 +90,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        overflow: hidden;
         pointer-events: none;
         transition: opacity 0.16s ease;
       }
@@ -94,18 +100,25 @@
       }
 
       #boot-splash img {
-        width: 72px;
-        height: 72px;
-        object-fit: contain;
         display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #boot-splash {
+          transition: none;
+        }
       }
     </style>
   </head>
   <body>
     <div id="boot-splash" aria-hidden="true">
-      <img src="/vorkspace.png" alt="" />
+      <img src="/vorkspace-splash.png" alt="" fetchpriority="high" />
     </div>
     <div id="root"></div>
+    <script type="module" async vite-ignore src="/src/bootSplash.ts"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

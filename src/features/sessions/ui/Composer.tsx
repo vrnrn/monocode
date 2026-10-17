@@ -97,7 +97,6 @@ import {
   type SlashToken,
 } from "../../skills/model/skills";
 import { AccessPicker } from "./AccessPicker";
-import { ComposerRunner } from "./ComposerRunner";
 import { ContextMeter } from "./ContextMeter";
 import { AttachmentChip } from "./AttachmentChip";
 import { BranchPicker } from "../../source-control/ui/BranchPicker";
@@ -124,8 +123,6 @@ import { consumeQuoteRequest, type QuoteRequest } from "../model/quoteDraft";
 import { useTabGroupLogos } from "../../projects/hooks/useTabGroupLogos";
 import { useProjectBranchesState } from "../../source-control/hooks/useProjectBranches";
 import {
-  COMPOSER_RUNNER_CHANGE_EVENT,
-  loadComposerRunner,
   loadModelControls,
   loadNotesEnabled,
   subscribeModelControls,
@@ -189,6 +186,8 @@ import {
   type McpTag,
 } from "../model/mcpPicker";
 import { getComposerMcpTags, setComposerMcpTags } from "../model/draftCache";
+import { useDurableComposerDraft } from "../hooks/useDurableComposerDraft";
+import { ComposerDraftRecovery } from "./ComposerDraftRecovery";
 import { type McpConnection } from "../../settings/model/mcp";
 import {
   getCachedMcpSettings,
@@ -217,6 +216,8 @@ type Props = {
   cwd?: string;
   executionCwd: string;
   sessionId?: string;
+  /** Temporary Inbox/ephemeral composers keep their existing memory-only scope. */
+  persistDraft?: boolean;
   branch?: string;
   recents?: RecentProject[];
   hideProjectPicker?: boolean;
@@ -343,6 +344,7 @@ export function Composer({
   cwd = "~",
   executionCwd,
   sessionId,
+  persistDraft = true,
   branch,
   recents = [],
   hideProjectPicker = false,
@@ -484,6 +486,8 @@ export function Composer({
   const [selectedMcp, setSelectedMcp] = useState<McpTag[]>(() =>
     sessionId ? getComposerMcpTags(sessionId) : [],
   );
+  const selectedMcpRef = useRef(selectedMcp);
+  selectedMcpRef.current = selectedMcp;
   const mcpInsertAt = useRef<number | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
@@ -508,11 +512,7 @@ export function Composer({
   const [mention, setMention] = useState<MentionToken | null>(null);
   const [mentionActive, setMentionActive] = useState(0);
   const [resendEdited, setResendEdited] = useState(false);
-  const [runnerEnabled, setRunnerEnabled] = useState(loadComposerRunner);
   const autocorrect = useComposerAutocorrect();
-  const [runnerLive, setRunnerLive] = useState(
-    () => busy && loadComposerRunner(),
-  );
   const groupLogos = useTabGroupLogos();
   const projectLogoPath = resolveTabGroupLogo(projectKey(cwd), groupLogos);
 
@@ -631,6 +631,55 @@ export function Composer({
     },
     [inboxCard, noteCard, handoffCard],
   );
+  const durableDraft = useDurableComposerDraft({
+    sessionId: persistDraft ? sessionId : undefined,
+    cwd,
+    enabled,
+    read: () => {
+      const el = ref.current;
+      const text = el?.value ?? draft;
+      return {
+        cwd,
+        text,
+        selectionStart: Math.min(
+          el?.selectionStart ?? text.length,
+          text.length,
+        ),
+        selectionEnd: Math.min(el?.selectionEnd ?? text.length, text.length),
+        attachments: attachmentsRef.current,
+        mcpTags: selectedMcpRef.current,
+      };
+    },
+    restore: (payload) => {
+      pasteGenerationRef.current++;
+      draftRevisionRef.current++;
+      positionedInitialDraft.current = true;
+      const restoredIds = new Set(payload.attachments.map((file) => file.id));
+      for (const file of attachmentsRef.current) {
+        if (
+          !restoredIds.has(file.id) &&
+          !borrowedAttachmentIdsRef.current.delete(file.id)
+        ) {
+          revokeAttachment(file);
+        }
+      }
+      if (ref.current) {
+        ref.current.value = payload.text;
+        ref.current.setSelectionRange(
+          payload.selectionStart,
+          payload.selectionEnd,
+        );
+        resizeComposer(ref.current);
+      }
+      setDraft(payload.text);
+      onDraftChange?.(payload.text);
+      attachmentsRef.current = payload.attachments;
+      setAttachments(payload.attachments);
+      selectedMcpRef.current = payload.mcpTags;
+      setSelectedMcp(payload.mcpTags);
+      syncHasValue(payload.text, payload.attachments);
+    },
+  });
 
   // A leading mode command in the text shows the same pill as picking the mode.
   const operatorActive =
@@ -812,21 +861,6 @@ export function Composer({
     syncHasValue(ref.current?.value ?? "", []);
   }, [harness, syncHasValue]);
   useEffect(() => {
-    const refresh = () => setRunnerEnabled(loadComposerRunner());
-    window.addEventListener(COMPOSER_RUNNER_CHANGE_EVENT, refresh);
-    return () =>
-      window.removeEventListener(COMPOSER_RUNNER_CHANGE_EVENT, refresh);
-  }, []);
-
-  useEffect(() => {
-    if (!runnerEnabled) {
-      setRunnerLive(false);
-      return;
-    }
-    if (busy) setRunnerLive(true);
-  }, [busy, runnerEnabled]);
-
-  useEffect(() => {
     setSkillActive(0);
   }, [slash?.query, cwd]);
 
@@ -920,6 +954,7 @@ export function Composer({
       return;
     }
     draftResetTokenRef.current = draftResetToken;
+    durableDraft.clear();
     pasteGenerationRef.current += 1;
     draftRevisionRef.current += 1;
     if (ref.current) {
@@ -1202,6 +1237,7 @@ export function Composer({
   );
 
   const exitEditMode = useCallback(() => {
+    durableDraft.clear();
     draftRevisionRef.current += 1;
     pasteGenerationRef.current += 1;
     if (ref.current) {
@@ -1227,7 +1263,12 @@ export function Composer({
     setSelectedMcp([]);
     syncHasValue("", []);
     ref.current?.focus();
-  }, [onDraftChange, onEditingLastTurnChange, syncHasValue]);
+  }, [
+    durableDraft.clear,
+    onDraftChange,
+    onEditingLastTurnChange,
+    syncHasValue,
+  ]);
 
   const recallLastTurn = useCallback(() => {
     if (!editLastTurnSupported || !lastTurnRecall) return;
@@ -1311,12 +1352,14 @@ export function Composer({
         files,
       );
       if (accepted === false || !ref.current) return;
+      durableDraft.clear();
       pasteGenerationRef.current += 1;
       ref.current.value = "";
       ref.current.style.height = "auto";
       setDraft("");
       onDraftChange?.("");
       setAttachments([]);
+      attachmentsRef.current = [];
       setDraftSelected(false);
       setSelectedMcp([]);
       setPlusOpen(false);
@@ -1339,6 +1382,7 @@ export function Composer({
     ) {
       const accepted = onBtwCommand(btwCommand.text);
       if (accepted === false) return;
+      durableDraft.clear();
       pasteGenerationRef.current += 1;
       if (ref.current) {
         ref.current.value = "";
@@ -1362,6 +1406,7 @@ export function Composer({
     if (isCompactCommand(value)) {
       if (!onCompactContext?.()) return;
       if (!ref.current) return;
+      durableDraft.clear();
       pasteGenerationRef.current += 1;
       ref.current.value = "";
       ref.current.style.height = "auto";
@@ -1403,6 +1448,7 @@ export function Composer({
       borrowedAttachmentIdsRef.current,
     );
     const resendSelectedMcp = selectedMcp;
+    durableDraft.clear();
     onDraftChange?.("");
     const accepted = onSubmit(
       mcpContextText(
@@ -1436,6 +1482,7 @@ export function Composer({
     // intact so resolving the blocker never destroys their work.
     if (accepted === false) {
       restoreDraft(text, files);
+      durableDraft.capture();
       return;
     }
     pasteGenerationRef.current += 1;
@@ -2021,6 +2068,11 @@ export function Composer({
               {pasteError}
             </p>
           ) : null}
+          <ComposerDraftRecovery
+            sessionId={sessionId}
+            issue={durableDraft.issue}
+            current={draft}
+          />
 
           {inboxCard ? (
             <InboxMiniCard card={inboxCard} onDismiss={onInboxCardDismiss} />
@@ -2087,7 +2139,10 @@ export function Composer({
               onScroll={(e) => syncHighlightScroll(e.currentTarget)}
               onClick={(e) => syncTokensFromTextarea(e.currentTarget)}
               onKeyUp={(e) => syncTokensFromTextarea(e.currentTarget)}
-              onSelect={(e) => syncTokensFromTextarea(e.currentTarget)}
+              onSelect={(e) => {
+                syncTokensFromTextarea(e.currentTarget);
+                durableDraft.capture();
+              }}
               onInput={(e) => {
                 const el = e.currentTarget;
                 if (enterBtwFromPrefix(el)) return;
@@ -2111,6 +2166,7 @@ export function Composer({
                 }
                 syncHasValue(el.value, attachments);
                 syncTokensFromTextarea(el);
+                durableDraft.capture();
               }}
             />
           </div>
@@ -2405,15 +2461,6 @@ export function Composer({
             </div>
           </div>
         </div>
-        {runnerLive && runnerEnabled && !remote ? (
-          <ComposerRunner
-            boxRef={boxRef}
-            cwd={cwd}
-            busy={busy}
-            enabled={enabled}
-            onExited={() => setRunnerLive(false)}
-          />
-        ) : null}
       </div>
     </div>
   );

@@ -61,3 +61,7 @@ Desktop.ini
 
 # Patches for review, never pushed
 /.work/
+
+# Local visual checks and design detector cache
+/output/
+/.impeccable/hook.cache.json

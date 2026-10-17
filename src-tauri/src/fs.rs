@@ -8,6 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
@@ -5956,6 +5957,120 @@ fn read_text_file_sync(path: &str) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|_| "File is not valid UTF-8.".into())
 }
 
+#[derive(Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorTextFile {
+    path: String,
+    content: String,
+    hash: String,
+}
+
+#[derive(Serialize, Debug, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum EditorTextSaveResult {
+    Saved { path: String, hash: String },
+    Conflict { path: String, hash: Option<String> },
+}
+
+fn text_hash(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+/// The digest covers the exact bytes returned, before editor line normalization.
+#[tauri::command]
+pub async fn read_editor_text_file(path: String) -> Result<EditorTextFile, String> {
+    tauri::async_runtime::spawn_blocking(move || read_editor_text_file_sync(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn read_editor_text_file_sync(path: &str) -> Result<EditorTextFile, String> {
+    let content = read_text_file_sync(path)?;
+    Ok(EditorTextFile {
+        path: path.into(),
+        hash: text_hash(content.as_bytes()),
+        content,
+    })
+}
+
+fn disk_text_hash(path: &Path) -> Result<Option<String>, String> {
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("{}: {error}", path.display())),
+    };
+    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+        return Ok(None);
+    }
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer).map_err(|e| e.to_string())?;
+        if count == 0 {
+            return Ok(Some(format!("{:x}", digest.finalize())));
+        }
+        digest.update(&buffer[..count]);
+    }
+}
+
+// Serialize editor commands from our own windows. External programs do not
+// participate: the final hash check and rename are not filesystem CAS.
+static EDITOR_TEXT_SAVE_LOCK: Mutex<()> = Mutex::new(());
+
+#[tauri::command]
+pub async fn write_editor_text_file(
+    path: String,
+    content: String,
+    expected_hash: String,
+) -> Result<EditorTextSaveResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        write_editor_text_file_sync(&path, &content, &expected_hash)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn write_editor_text_file_sync(
+    path: &str,
+    content: &str,
+    expected_hash: &str,
+) -> Result<EditorTextSaveResult, String> {
+    let _guard = EDITOR_TEXT_SAVE_LOCK.lock().map_err(|e| e.to_string())?;
+    let requested = expand_home(path);
+    let mut observed = disk_text_hash(&requested)?;
+    if observed.as_deref() != Some(expected_hash) {
+        return Ok(EditorTextSaveResult::Conflict {
+            path: path.into(),
+            hash: observed,
+        });
+    }
+    let destination = match std::fs::canonicalize(&requested) {
+        Ok(destination) => destination,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Ok(EditorTextSaveResult::Conflict {
+                path: path.into(),
+                hash: None,
+            });
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let published = write_text_file_checked_sync(path, content, || {
+        observed = disk_text_hash(&requested)?;
+        Ok(observed.as_deref() == Some(expected_hash)
+            && std::fs::canonicalize(&requested).ok().as_ref() == Some(&destination))
+    })?;
+    if !published {
+        return Ok(EditorTextSaveResult::Conflict {
+            path: path.into(),
+            hash: observed,
+        });
+    }
+    Ok(EditorTextSaveResult::Saved {
+        path: path.into(),
+        hash: text_hash(content.as_bytes()),
+    })
+}
+
 /// Atomically replace a text file from a temporary file in the same directory.
 #[tauri::command]
 pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
@@ -5965,6 +6080,14 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
 }
 
 fn write_text_file_sync(path: &str, content: &str) -> Result<(), String> {
+    write_text_file_checked_sync(path, content, || Ok(true)).map(|_| ())
+}
+
+fn write_text_file_checked_sync(
+    path: &str,
+    content: &str,
+    mut before_publish: impl FnMut() -> Result<bool, String>,
+) -> Result<bool, String> {
     if content.len() as u64 > MAX_TEXT_FILE_BYTES {
         return Err(format!(
             "File is too large to save (maximum {} MB).",
@@ -6016,7 +6139,7 @@ fn write_text_file_sync(path: &str, content: &str) -> Result<(), String> {
 
     let (temporary_path, mut file) =
         temporary.ok_or_else(|| "Could not create a temporary save file.".to_string())?;
-    let write_result = (|| -> Result<(), String> {
+    let write_result = (|| -> Result<bool, String> {
         file.write_all(content.as_bytes())
             .map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
@@ -6025,14 +6148,17 @@ fn write_text_file_sync(path: &str, content: &str) -> Result<(), String> {
                 .map_err(|e| e.to_string())?;
         }
         drop(file);
+        if !before_publish()? {
+            return Ok(false);
+        }
         std::fs::rename(&temporary_path, &destination).map_err(|e| e.to_string())?;
         if let Ok(dir) = std::fs::File::open(parent) {
             let _ = dir.sync_all();
         }
-        Ok(())
+        Ok(true)
     })();
 
-    if write_result.is_err() {
+    if !matches!(write_result, Ok(true)) {
         let _ = std::fs::remove_file(&temporary_path);
     }
     write_result
@@ -6722,6 +6848,123 @@ mod tests {
             .collect();
         assert_eq!(names, vec![std::ffi::OsString::from("example.rs")]);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn editor_text_conflict_preserves_external_content_and_reports_deleted_files() {
+        let dir = tmp("editor-conflict");
+        let path = dir.0.join("notes.txt");
+        let path = path.to_string_lossy();
+        std::fs::write(path.as_ref(), "alpha\r\nbeta\r\n").unwrap();
+        let baseline = read_editor_text_file_sync(&path).unwrap();
+        assert_eq!(baseline.content, "alpha\r\nbeta\r\n");
+        assert_eq!(baseline.hash, text_hash(b"alpha\r\nbeta\r\n"));
+        assert_ne!(baseline.hash, text_hash(b"alpha\nbeta\n"));
+
+        // No watcher is involved in save admission.
+        std::fs::write(path.as_ref(), "external\n").unwrap();
+        assert_eq!(
+            write_editor_text_file_sync(&path, "local\r\n", &baseline.hash).unwrap(),
+            EditorTextSaveResult::Conflict {
+                path: path.to_string(),
+                hash: Some(text_hash(b"external\n")),
+            }
+        );
+        assert_eq!(
+            std::fs::read_to_string(path.as_ref()).unwrap(),
+            "external\n"
+        );
+        std::fs::remove_file(path.as_ref()).unwrap();
+        assert_eq!(
+            write_editor_text_file_sync(&path, "local\r\n", &baseline.hash).unwrap(),
+            EditorTextSaveResult::Conflict {
+                path: path.to_string(),
+                hash: None
+            }
+        );
+        assert!(!Path::new(path.as_ref()).exists());
+        assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn editor_text_success_advances_baseline_and_rejects_later_external_edits() {
+        let dir = tmp("editor-baseline");
+        let path = dir.0.join("notes.txt");
+        let path = path.to_string_lossy();
+        std::fs::write(path.as_ref(), "first\n").unwrap();
+        let baseline = read_editor_text_file_sync(&path).unwrap();
+        let saved = write_editor_text_file_sync(&path, "second\r\n", &baseline.hash).unwrap();
+        let EditorTextSaveResult::Saved { hash, .. } = saved else {
+            panic!("expected save receipt")
+        };
+        assert_eq!(hash, text_hash(b"second\r\n"));
+        assert_eq!(std::fs::read(path.as_ref()).unwrap(), b"second\r\n");
+        assert!(matches!(
+            write_editor_text_file_sync(&path, "third\r\n", &hash).unwrap(),
+            EditorTextSaveResult::Saved { .. }
+        ));
+
+        // A receipt describes the publication; an external writer can edit
+        // afterward. The next save must still detect that changed baseline.
+        std::fs::write(path.as_ref(), "after publication\n").unwrap();
+        assert!(matches!(
+            write_editor_text_file_sync(&path, "fourth\n", &text_hash(b"third\r\n")).unwrap(),
+            EditorTextSaveResult::Conflict { .. }
+        ));
+        assert_eq!(
+            std::fs::read_to_string(path.as_ref()).unwrap(),
+            "after publication\n"
+        );
+        assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn editor_text_rechecks_before_publication_and_removes_unpublished_temporary_file() {
+        let dir = tmp("editor-before-publication");
+        let path = dir.0.join("notes.txt");
+        std::fs::write(&path, "baseline\n").unwrap();
+        let expected = text_hash(b"baseline\n");
+        let published = write_text_file_checked_sync(&path.to_string_lossy(), "local\n", || {
+            // Simulate an external edit after temporary content is prepared.
+            std::fs::write(&path, "external during preparation\n").unwrap();
+            Ok(disk_text_hash(&path)?.as_deref() == Some(expected.as_str()))
+        })
+        .unwrap();
+        assert!(!published);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "external during preparation\n"
+        );
+        assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn editor_text_save_follows_external_symlinks_and_preserves_mode_and_crlf() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = tmp("editor-symlink");
+        let target = dir.0.join("outside.txt");
+        let project = dir.0.join("project");
+        std::fs::create_dir(&project).unwrap();
+        let link = project.join("link.txt");
+        std::fs::write(&target, "old\r\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o751)).unwrap();
+        symlink(&target, &link).unwrap();
+        let baseline = read_editor_text_file_sync(&link.to_string_lossy()).unwrap();
+        assert!(matches!(
+            write_editor_text_file_sync(&link.to_string_lossy(), "new\r\n", &baseline.hash)
+                .unwrap(),
+            EditorTextSaveResult::Saved { .. }
+        ));
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read(&target).unwrap(), b"new\r\n");
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o751
+        );
     }
 
     #[test]
