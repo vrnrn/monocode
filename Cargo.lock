@@ -5419,6 +5419,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-quartz-core",
  "objc2-user-notifications",
+ "objc2-web-kit",
  "open",
  "png 0.18.1",
  "portable-pty",

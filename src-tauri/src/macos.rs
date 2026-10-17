@@ -46,6 +46,7 @@ use objc2_app_kit::{
     NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowOrderingMode,
 };
 use objc2_foundation::{NSDictionary, NSEdgeInsets, NSNumber, NSSize, NSString, NSUserDefaults};
+use objc2_web_kit::{WKWebViewConfiguration, WKWebsiteDataStore};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tauri::{AppHandle, Manager, WebviewWindow, WindowEvent};
 
@@ -92,6 +93,29 @@ pub fn register_spellcheck_default() {
         NSDictionary::from_slices(&[&*key], &[enabled.as_ref()]);
     // SAFETY: The dictionary contains a string key and a property-list boolean.
     unsafe { NSUserDefaults::standardUserDefaults().registerDefaults(&defaults) };
+}
+
+/// Name the renderer in Activity Monitor without changing its origin or storage.
+/// WebKit copies this configuration when creating the webview, so set the name
+/// before building every window. Its private naming SPI is optional at runtime.
+pub fn webview_configuration(app: &AppHandle) -> tauri::Result<Retained<WKWebViewConfiguration>> {
+    let mtm = MainThreadMarker::new()
+        .ok_or_else(|| std::io::Error::other("Webviews must be configured on the main thread"))?;
+    let product = app.config().product_name.as_deref().unwrap_or("vorkspace");
+    let name = NSString::from_str(&format!("{product} Web Content"));
+    // SAFETY: All WebKit objects stay on the main thread. Preserve Wry's default
+    // persistent datastore; supplying a configuration bypasses Wry's selection.
+    // Only send the private selector when this WebKit version implements it.
+    unsafe {
+        let configuration = WKWebViewConfiguration::new(mtm);
+        configuration.setWebsiteDataStore(&WKWebsiteDataStore::defaultDataStore(mtm));
+        let supported: bool =
+            msg_send![&*configuration, respondsToSelector: sel!(_setProcessDisplayName:)];
+        if supported {
+            let _: () = msg_send![&*configuration, _setProcessDisplayName: &*name];
+        }
+        Ok(configuration)
+    }
 }
 
 pub fn install(window: &WebviewWindow) {

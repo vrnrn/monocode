@@ -234,6 +234,20 @@ fn should_request_quit(code: Option<i32>) -> bool {
 pub fn run() {
     let mut context = tauri::generate_context!();
     development::configure(context.config_mut());
+    // The renderer's display name must be configured before WebKit starts.
+    // Build the Mac launch window first in setup instead of auto-creating it.
+    #[cfg(target_os = "macos")]
+    let launch_window = context
+        .config_mut()
+        .app
+        .windows
+        .iter_mut()
+        .find(|window| window.label == "main" && window.create)
+        .map(|window| {
+            let config = window.clone();
+            window.create = false;
+            config
+        });
     #[cfg(all(debug_assertions, target_os = "macos"))]
     {
         let version = context.package_info().version.to_string();
@@ -281,7 +295,13 @@ pub fn run() {
         .manage(remote::RemoteConnections::default())
         .manage(window_transfer::WindowTransferState::new())
         .manage(ticket_links::PendingTicketLinks::default())
-        .setup(|app| {
+        .setup(move |app| {
+            #[cfg(target_os = "macos")]
+            if let Some(config) = &launch_window {
+                tauri::WebviewWindowBuilder::from_config(app.handle(), config)?
+                    .with_webview_configuration(macos::webview_configuration(app.handle())?)
+                    .build()?;
+            }
             #[cfg(debug_assertions)]
             eprintln!(
                 "vorkspace Dev: profile {} at {}",
