@@ -8,7 +8,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args),
 }));
 
-const { getSession } = await import("./sessionStore");
+const { getSession, readSession, repairSession, applySessionRepair } =
+  await import("./sessionStore");
 
 /** A saved Codex session holding the one row this PR repairs. */
 function codexRecord(): SessionRecord {
@@ -40,7 +41,9 @@ function codexRecord(): SessionRecord {
 }
 
 describe("restoring a session whose repair cannot be persisted", () => {
-  beforeEach(() => invoke.mockReset());
+  beforeEach(() => {
+    invoke.mockReset();
+  });
 
   it("restores sidebar visibility when a hidden session is opened by id", async () => {
     const record = codexRecord();
@@ -127,4 +130,94 @@ it("retains local admission ownership through hydrate and later ordinary persist
   });
   expect(savedAgain.blocks[2].localSubmissionOwned).toBe(true);
   expect(canAutoContinue(markTurnInterrupted(restored!))).toBe(false);
+});
+
+describe("progressive session restoration", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+  });
+
+  it("returns saved text without reading provider logs or writing repairs", async () => {
+    const record = { ...codexRecord(), harness: "claude" } as SessionRecord;
+    invoke.mockResolvedValue(record);
+    const session = await readSession("s1");
+    expect(session?.blocks[1].text).toBe("Shell");
+    expect(invoke.mock.calls.map(([cmd]) => cmd)).toEqual(["session_get"]);
+  });
+
+  it("does not mutate or persist a conversation while repairing it for a visible caller", async () => {
+    invoke.mockResolvedValueOnce(codexRecord());
+    const source = (await readSession("s1"))!;
+    const repaired = await repairSession(source, { persist: false });
+    expect(source.blocks[1].text).toBe("Shell");
+    expect(repaired.blocks[1].text).toBe("Find files");
+    expect(invoke.mock.calls.map(([cmd]) => cmd)).toEqual(["session_get"]);
+    const renamed = { ...source, title: "Renamed while loading" };
+    expect(applySessionRepair(renamed, source, repaired)).toMatchObject({
+      title: "Renamed while loading",
+      blocks: repaired.blocks,
+    });
+  });
+
+  it("discards late repairs after streaming, editing, or a provider change", async () => {
+    invoke.mockResolvedValueOnce(codexRecord());
+    const source = (await readSession("s1"))!;
+    const repaired = await repairSession(source, { persist: false });
+    for (const current of [
+      {
+        ...source,
+        blocks: [
+          ...source.blocks,
+          { id: "new", role: "assistant" as const, text: "Live output" },
+        ],
+      },
+      { ...source, blocks: source.blocks.slice(0, 1) },
+      { ...source, providerSessionId: "new-provider-session" },
+      { ...source, harness: "claude" as const },
+    ])
+      expect(applySessionRepair(current, source, repaired)).toBe(current);
+  });
+
+  it.each([false, true])(
+    "checks local send safety before exposing saved text (receipt read fails=%s)",
+    async (fails) => {
+      vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+      const record = codexRecord();
+      invoke.mockImplementation((command: string) => {
+        if (command === "session_get") return Promise.resolve(record);
+        if (command === "local_submission_list")
+          return fails
+            ? Promise.reject(new Error("receipt store unavailable"))
+            : Promise.resolve([
+                {
+                  attemptId: "pending",
+                  sessionId: record.id,
+                  userTurnId: "b0",
+                  signature: "saved-payload",
+                  phase: "uncertain",
+                  outcome: null,
+                  error: null,
+                },
+              ]);
+        throw new Error(`Unexpected command: ${command}`);
+      });
+      try {
+        const source = (await readSession(record.id))!;
+        expect(source.blocks[1].text).toBe("Shell");
+        expect(source.localSubmissionUncertain).toBe(true);
+        expect(canAutoContinue(markTurnInterrupted(source))).toBe(false);
+        const repaired = await repairSession(source, { persist: false });
+        const published = applySessionRepair(source, source, repaired);
+        expect(published.blocks[1].text).toBe("Find files");
+        expect(published.localSubmissionUncertain).toBe(true);
+        expect(canAutoContinue(markTurnInterrupted(published))).toBe(false);
+        expect(invoke.mock.calls.map(([command]) => command)).toEqual([
+          "session_get",
+          "local_submission_list",
+        ]);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
 });

@@ -49,6 +49,10 @@ I’m pausing new harnesses until the current ones share the same patterns - ses
 
 When the pause lifts, this section goes away.
 
+## Upstream changes
+
+This fork imports upstream bug fixes and features as patches while retaining its detached history. Read the reviewed baseline, commit dispositions and preservation rules in [Upstream patch imports](docs/upstream-imports.md) before preparing the next import.
+
 ## Pull requests
 
 Keep a PR to one thing, and say what changed and why. The [PR template](.github/pull_request_template.md) covers the rest. If it changes the UI, a before/after screenshot helps a lot.

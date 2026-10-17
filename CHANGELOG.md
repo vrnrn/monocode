@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Resource pressure controls show agent/tool processes, and Settings → Chat can disable smooth text reveal. Adapted from upstream MonoCode PR #1045 by Nick (hardbeat920).
+
+### Changed
+
+- Large conversations use per-session streaming updates, worker-based code highlighting and diff preparation, and deferred tool output to reduce UI work. Background indexing and agent tools receive lower scheduling priority where supported.
+
+### Fixed
+
+- Reader position survives reply completion, file-pane resizing and cached tab restores. Notification sounds suspend their audio context after playback.
+
 ## [0.13.6] - 2026-10-17
 
 ### Added
