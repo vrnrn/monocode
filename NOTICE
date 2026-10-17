@@ -1,4 +1,9 @@
-MonoCode is not affiliated with, endorsed by, or sponsored by the makers of the
+vorkspace is based on MonoCode, created by Nick (hardbeat920).
+Original project: https://github.com/hardbeat920/monocode
+
+The original MIT license and copyright notice are retained in LICENSE.
+
+vorkspace is not affiliated with, endorsed by, or sponsored by the makers of the
 agent harnesses it can drive.
 
 Provider marks that appear in the UI (including Claude, Codex, Cursor, GitHub, GitLab, Linear, Grok, OpenCode, Pi, omp, fx, Hermes, Nous Research, Devin, and Cognition) are trademarks of their respective owners and are used only to identify those products.

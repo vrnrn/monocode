@@ -3,10 +3,10 @@ import { test } from "node:test";
 import { verifyMacRelease } from "./verify-macos-release.mjs";
 
 function release() {
-  const name = "MonoCode_aarch64.app.tar.gz";
+  const name = "vorkspace_aarch64.app.tar.gz";
   const entry = {
     signature: "test-signature",
-    url: `https://github.com/vrnrn/monocode/releases/download/mac-v0.13.1/${name}`,
+    url: `https://github.com/vrnrn/vorkspace/releases/download/mac-v0.13.1/${name}`,
   };
   return {
     feed: {
@@ -18,7 +18,7 @@ function release() {
     },
     assets: [
       "latest.json",
-      "MonoCode_0.13.1_aarch64.dmg",
+      "vorkspace_0.13.1_aarch64.dmg",
       name,
       `${name}.sig`,
     ].map((name) => ({ name })),
@@ -73,9 +73,9 @@ test("rejects an Intel entry in the Apple Silicon feed", () => {
 test("rejects upstream URLs, another version, and unsigned asset paths", () => {
   for (const url of [
     "https://github.com/hardbeat920/monocode/releases/download/mac-v0.13.1/MonoCode_aarch64.app.tar.gz",
-    "https://github.com/vrnrn/monocode/releases/download/mac-v0.13.0/MonoCode_aarch64.app.tar.gz",
-    "https://example.com/MonoCode_aarch64.app.tar.gz",
-    "https://github.com/vrnrn/monocode/releases/download/mac-v0.13.1/missing_aarch64.app.tar.gz",
+    "https://github.com/vrnrn/vorkspace/releases/download/mac-v0.13.0/vorkspace_aarch64.app.tar.gz",
+    "https://example.com/vorkspace_aarch64.app.tar.gz",
+    "https://github.com/vrnrn/vorkspace/releases/download/mac-v0.13.1/missing_aarch64.app.tar.gz",
   ]) {
     const { feed, assets } = release();
     feed.platforms["darwin-aarch64"].url = url;

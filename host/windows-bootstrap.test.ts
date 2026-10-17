@@ -65,7 +65,10 @@ async function install(badChecksum: boolean) {
     fixtureDirectory,
     badChecksum ? "broken" : "host with spaces ' $ 日本語",
   );
-  const checksum = join(fixtureDirectory, badChecksum ? "bad.sha256" : "good.sha256");
+  const checksum = join(
+    fixtureDirectory,
+    badChecksum ? "bad.sha256" : "good.sha256",
+  );
   writeFileSync(
     checksum,
     `${badChecksum ? "0".repeat(64) : createHash("sha256").update(readFileSync(archive)).digest("hex")}  host.zip\n`,
@@ -76,7 +79,7 @@ async function install(badChecksum: boolean) {
     badChecksum ? "bad.downloads" : "downloads",
   );
   const overrides = `
-function Download-MonoCode([string] $Url, [string] $Destination) {
+function Download-vorkspace([string] $Url, [string] $Destination) {
   $source = if ($Url.EndsWith('.sha256')) { ${psQuote(checksum)} } else { ${psQuote(archive)} }
   Copy-Item -LiteralPath $source -Destination $Destination
   Add-Content -LiteralPath ${psQuote(downloads)} -Value 'download'
@@ -84,7 +87,7 @@ function Download-MonoCode([string] $Url, [string] $Destination) {
 ${
   windows
     ? ""
-    : `function Protect-MonoCodeDirectory([string] $Path) { }
+    : `function Protect-vorkspaceDirectory([string] $Path) { }
 function Expand-Archive([string] $LiteralPath, [string] $DestinationPath) {
   Microsoft.PowerShell.Archive\\Expand-Archive -LiteralPath $LiteralPath -DestinationPath $DestinationPath
   & chmod +x (Join-Path $DestinationPath 'node.exe')
@@ -126,7 +129,7 @@ it.skipIf(!shell)(
     const fixture = await install(false);
     const result = await fixture.run();
     expect(JSON.parse(result.stdout)).toEqual({ port: 3774, pid: 123 });
-    expect(existsSync(join(fixture.base, "bin", "monocode-host.cmd"))).toBe(
+    expect(existsSync(join(fixture.base, "bin", "vorkspace-host.cmd"))).toBe(
       true,
     );
     const pointer = readFileSync(join(fixture.base, "runtime-path"), "utf8");
@@ -138,7 +141,12 @@ it.skipIf(!shell)(
       readFileSync(fixture.downloads, "utf8").trim().split(/\r?\n/),
     ).toHaveLength(2);
     if (windows) {
-      const launcher = join(fixture.base, "bin", "monocode-host.cmd");
+      expect(
+        readFileSync(join(fixture.base, "bin", "monocode-host.cmd"), "utf8"),
+      ).toBe(
+        readFileSync(join(fixture.base, "bin", "vorkspace-host.cmd"), "utf8"),
+      );
+      const launcher = join(fixture.base, "bin", "vorkspace-host.cmd");
       const versionResult = await run(
         `& ${psQuote(launcher)} --version; if ($LASTEXITCODE -ne 0) { exit 1 }`,
       );
@@ -154,7 +162,19 @@ it.skipIf(!shell)(
     const fixture = await install(false);
     await fixture.run();
     const oldRuntime = readFileSync(join(fixture.base, "runtime-path"), "utf8");
+    const oldLauncher = readFileSync(
+      join(fixture.base, "bin", "monocode-host.cmd"),
+      "utf8",
+    );
     await fixture.run(true);
+    const launcher = readFileSync(
+      join(fixture.base, "bin", "monocode-host.cmd"),
+      "utf8",
+    );
+    expect(launcher).not.toBe(oldLauncher);
+    expect(launcher).toBe(
+      readFileSync(join(fixture.base, "bin", "vorkspace-host.cmd"), "utf8"),
+    );
     expect(readFileSync(join(fixture.base, "runtime-path"), "utf8")).not.toBe(
       oldRuntime,
     );

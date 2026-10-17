@@ -164,6 +164,9 @@ it.each([
   async ({ response, run, expected }) => {
     output = JSON.stringify(response);
     await expect(run()).resolves.toEqual(expected);
+    expect(sent.find((request) => request.method === "initialize")?.params).toMatchObject({
+      clientInfo: { name: "vorkspace-text", title: "vorkspace" },
+    });
     expect(threadStarts()).toHaveLength(1);
     expect(threadStarts()[0].params).toMatchObject({ ephemeral: true });
     expect(sent.some((request) => request.method === "thread/resume")).toBe(

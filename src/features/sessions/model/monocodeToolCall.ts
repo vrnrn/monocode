@@ -95,7 +95,7 @@ export function monoCodeToolCall(block: Block): MonoCodeToolCall | undefined {
   const command = candidate?.trim().replace(/^Run(?:ning)?\s+command:\s*/i, "");
   if (!command) return undefined;
   const words = shellWords(command);
-  if (!words || !/(?:^|[/\\])monocode(?:\.exe)?$/i.test(words[0] ?? ""))
+  if (!words || !/(?:^|[/\\])(?:vorkspace|monocode)(?:\.exe)?$/i.test(words[0] ?? ""))
     return undefined;
   if (words[1] !== "app") return undefined;
   const action = words[2] ?? "--help";
@@ -116,7 +116,7 @@ export function monoCodeToolCall(block: Block): MonoCodeToolCall | undefined {
   return { action, label: ACTION_LABELS[action], command };
 }
 
-/** A group of only MonoCode calls can be named for the app, not the shell. */
+/** A group of only vorkspace calls can be named for the app, not the shell. */
 export function monoCodeWorkSummary(
   steps: Block[],
   live: boolean,
@@ -130,5 +130,5 @@ export function monoCodeWorkSummary(
   if (calls.length === 0 || calls.some((block) => !monoCodeToolCall(block))) {
     return undefined;
   }
-  return live ? "Using MonoCode" : "Used MonoCode";
+  return live ? "Using vorkspace" : "Used vorkspace";
 }

@@ -67,10 +67,10 @@ export function sessionConversationPage(
       user: capped(
         user.monoSessionCompletion
           ? user.monoSessionCompletion.sessionCount
-            ? `MonoCode: results from ${user.monoSessionCompletion.sessionCount} sessions`
-            : `MonoCode: session ${user.monoSessionCompletion.status}: ${user.monoSessionCompletion.title}`
+            ? `vorkspace: results from ${user.monoSessionCompletion.sessionCount} sessions`
+            : `vorkspace: session ${user.monoSessionCompletion.status}: ${user.monoSessionCompletion.title}`
           : user.monoPeerMessage
-            ? `MonoCode peer message from ${user.monoPeerMessage.fromName}: ${user.monoPeerMessage.text}`
+            ? `vorkspace peer message from ${user.monoPeerMessage.fromName}: ${user.monoPeerMessage.text}`
             : operatorUserPrompt(user),
         maxChars,
       ),

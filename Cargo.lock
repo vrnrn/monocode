@@ -2527,52 +2527,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "monocode"
-version = "0.13.2"
-dependencies = [
- "arboard",
- "base64 0.22.1",
- "block2",
- "junction",
- "keyring",
- "libc",
- "notify-rust",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "objc2-quartz-core",
- "objc2-user-notifications",
- "open",
- "png 0.18.1",
- "portable-pty",
- "raw-window-handle",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-deep-link",
- "tauri-plugin-dialog",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-opener",
- "tauri-plugin-process",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "tauri-plugin-window-state",
- "tauri-winrt-notification 0.8.1",
- "time",
- "toml 0.9.12+spec-1.1.0",
- "unicode-normalization",
- "ureq",
- "url",
- "uuid",
- "windows 0.62.2",
- "windows-sys 0.61.2",
- "zstd",
-]
-
-[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5448,6 +5402,52 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vorkspace"
+version = "0.13.3"
+dependencies = [
+ "arboard",
+ "base64 0.22.1",
+ "block2",
+ "junction",
+ "keyring",
+ "libc",
+ "notify-rust",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-quartz-core",
+ "objc2-user-notifications",
+ "open",
+ "png 0.18.1",
+ "portable-pty",
+ "raw-window-handle",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-deep-link",
+ "tauri-plugin-dialog",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-opener",
+ "tauri-plugin-process",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tauri-plugin-window-state",
+ "tauri-winrt-notification 0.8.1",
+ "time",
+ "toml 0.9.12+spec-1.1.0",
+ "unicode-normalization",
+ "ureq",
+ "url",
+ "uuid",
+ "windows 0.62.2",
+ "windows-sys 0.61.2",
+ "zstd",
+]
 
 [[package]]
 name = "vswhom"

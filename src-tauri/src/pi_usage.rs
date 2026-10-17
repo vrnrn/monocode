@@ -215,7 +215,7 @@ fn request_usage(provider: PiUsageProvider, credentials: &PiOAuth, url: &str) ->
     let mut request = agent
         .get(url)
         .set("Authorization", &format!("Bearer {}", credentials.access))
-        .set("User-Agent", "monocode");
+        .set("User-Agent", "vorkspace");
     match provider {
         PiUsageProvider::Anthropic => request = request.set("anthropic-beta", "oauth-2025-04-20"),
         PiUsageProvider::OpenaiCodex => {

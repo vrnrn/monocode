@@ -165,18 +165,18 @@ export type HarnessSessionInput = {
   modelSettings?: Record<string, string>;
   providerAccountId?: string;
   runtimeMode: RuntimeMode;
-  /** Keep provider context in memory; MonoCode owns the saved transcript. */
+  /** Keep provider context in memory; vorkspace owns the saved transcript. */
   ephemeral?: boolean;
-  /** Persist Codex context in MonoCode's private Mono store. */
+  /** Persist Codex context in vorkspace's private Mono store. */
   codexStore?: "mono";
   intent?: TurnIntent;
   /**
-   * This session drives MonoCode's control CLI, which reaches the app over
+   * This session drives vorkspace's control CLI, which reaches the app over
    * loopback. Sandboxes deny network by default, so a lead that cannot open
    * that socket cannot supervise its agents at all.
    */
   controlsAgents?: boolean;
-  /** Grants this normal turn access to MonoCode's scoped app CLI. */
+  /** Grants this normal turn access to vorkspace's scoped app CLI. */
   appAccess?: boolean;
   onEvent: (event: HarnessEvent) => void;
 };

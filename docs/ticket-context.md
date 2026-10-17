@@ -7,12 +7,12 @@ Choose a **Default Mono** for Jira and GitLab in Settings → Integrations. **Se
 Copy context writes a reference such as:
 
 ```text
-monocode://context/jira?url=https%3A%2F%2Fdemo.atlassian.net%2Fbrowse%2FDEMO-42
+vorkspace://context/jira?url=https%3A%2F%2Fdemo.atlassian.net%2Fbrowse%2FDEMO-42
 ```
 
-Paste it into a project or Mono message, including a remote project chat. When submitted, MonoCode fetches the current description and comments using the connected integration. Queued Mono messages resolve when delivered. The visible message retains the reference; provider input receives the source material separately. Failed lookups report an error rather than sending incomplete context. These links work for other MonoCode installations with access to the same ticket; they contain no credentials or copied ticket body. Pasting into an unrelated application stores the link; that application cannot resolve MonoCode context itself.
+Paste it into a project or Mono message, including a remote project chat. When submitted, vorkspace fetches the current description and comments using the connected integration. Queued Mono messages resolve when delivered. The visible message retains the reference; provider input receives the source material separately. Failed lookups report an error rather than sending incomplete context. These links work for other vorkspace installations with access to the same ticket; they contain no credentials or copied ticket body. Pasting into an unrelated application stores the link; that application cannot resolve vorkspace context itself.
 
-Opening a native link brings MonoCode forward and opens a new unsent project chat with the ticket attached. Markdown links in MonoCode open the same flow. Native protocol registration ships in the desktop bundle; macOS needs a rebuilt installed bundle to handle links from other applications. No message is automatically submitted by opening a link.
+Opening a native link brings vorkspace forward and opens a new unsent project chat with the ticket attached. Markdown links in vorkspace open the same flow. Native protocol registration ships in the desktop bundle; macOS needs a rebuilt installed bundle to handle links from other applications. No message is automatically submitted by opening a link.
 
 Jira links must match the connected site's origin and base path. GitLab links must match the connected host. A merge request link ends in `/-/merge_requests/<number>`. The fetched context for a merge request also lists its source and target branches. GitHub uses the authenticated GitHub CLI for the explicit repository. Lookups fail if the account cannot access the ticket. At most eight unique tickets resolve per message; large descriptions and comment histories are bounded and marked as truncated.
 

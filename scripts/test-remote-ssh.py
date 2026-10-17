@@ -19,7 +19,7 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SYSTEM = {"Darwin": "darwin", "Linux": "linux"}[platform.system()]
 ARCH = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x64"}[platform.machine()]
-LAUNCHER = ROOT / "build" / "host-packages" / f"{SYSTEM}-{ARCH}" / "monocode-host"
+LAUNCHER = ROOT / "build" / "host-packages" / f"{SYSTEM}-{ARCH}" / "vorkspace-host"
 
 
 def free_port():
@@ -49,9 +49,9 @@ def main():
                 raise RuntimeError(daemon.stderr.read().decode())
             # Exercise the actual desktop executable's non-GUI askpass mode.
             # Only trust the fingerprint of the disposable key created above.
-            desktop = ROOT / "target/debug/monocode"
+            desktop = ROOT / "target/debug/vorkspace"
             if not desktop.is_file():
-                raise RuntimeError("Run cargo build --bin monocode first")
+                raise RuntimeError("Run cargo build --bin vorkspace first")
             fingerprint = subprocess.check_output(["ssh-keygen", "-lf", str(folder / "host.pub")], text=True).split()[1]
             with socket.socket() as prompts:
                 prompts.bind(("127.0.0.1", 0))

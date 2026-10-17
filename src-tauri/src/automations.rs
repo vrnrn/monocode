@@ -834,7 +834,7 @@ fn recover_runs(
         if run.status == "running" {
             run.status = "cancelled".into();
             run.completed_at = Some(now);
-            run.error = Some("Interrupted when MonoCode last stopped.".into());
+            run.error = Some("Interrupted when vorkspace last stopped.".into());
             apply_run_summary(&mut automation, &run);
             write_run(&tx, &run)?;
             write_automation(&tx, &automation)?;
@@ -1273,7 +1273,7 @@ mod tests {
                         assert_eq!(run.status, "cancelled");
                         assert_eq!(
                             run.error.as_deref(),
-                            Some("Interrupted when MonoCode last stopped.")
+                            Some("Interrupted when vorkspace last stopped.")
                         );
                         assert_eq!(run.completed_at, Some(20));
                     }

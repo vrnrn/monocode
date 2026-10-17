@@ -15,7 +15,7 @@ export type TicketProvider = "jira" | "github" | "gitlab";
 export const OPEN_TICKET_CONTEXT_EVENT = "monocode:open-ticket-context";
 
 export function hasTicketContextLinks(text: string): boolean {
-  return /monocode:\/\/context\//i.test(text);
+  return /(?:vorkspace|monocode):\/\/context\//i.test(text);
 }
 
 export function requestOpenTicketContext(link: string): void {
@@ -51,7 +51,7 @@ export function supportsTicketContext(
 export function ticketContextLink(
   item: Pick<InboxItem, "provider" | "url">,
 ): string {
-  const link = new URL(`monocode://context/${item.provider}`);
+  const link = new URL(`vorkspace://context/${item.provider}`);
   link.searchParams.set("url", item.url);
   if (!parseTicketContextLink(link.href))
     throw new Error("This ticket has no valid context link.");
@@ -62,7 +62,7 @@ export function parseTicketContextLink(value: string): TicketReference | null {
   try {
     const link = new URL(value);
     if (
-      link.protocol !== "monocode:" ||
+      !["vorkspace:", "monocode:"].includes(link.protocol) ||
       link.host !== "context" ||
       link.username ||
       link.password ||
@@ -209,7 +209,7 @@ export async function applyTicketContextToTurn(
 ): Promise<string> {
   const links = [
     ...new Set(
-      (text.match(/monocode:\/\/context\/[^\s<>"`]+/gi) ?? []).map((link) =>
+      (text.match(/(?:vorkspace|monocode):\/\/context\/[^\s<>"`]+/gi) ?? []).map((link) =>
         link.replace(/[),.;!?]+$/, ""),
       ),
     ),
@@ -222,7 +222,7 @@ export async function applyTicketContextToTurn(
       const ref = parseTicketContextLink(link.replace(/[),.;!?]+$/, ""));
       if (!ref)
         throw new Error(
-          "Invalid MonoCode ticket context link. Copy it again from the ticket.",
+          "Invalid vorkspace ticket context link. Copy it again from the ticket.",
         );
       try {
         const data = await providers[ref.provider](ref, cwd);

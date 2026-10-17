@@ -4,7 +4,7 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { HarnessId } from "../../sessions/model/session";
 
 /**
- * Harnesses with an npm version feed and a self-updater MonoCode can run.
+ * Harnesses with an npm version feed and a self-updater vorkspace can run.
  */
 export const UPDATABLE_HARNESSES: ReadonlySet<HarnessId> = new Set([
   "claude",

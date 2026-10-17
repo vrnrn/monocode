@@ -73,10 +73,10 @@ describe("tool error disclosure", () => {
   });
 });
 
-describe("MonoCode CLI disclosure", () => {
+describe("vorkspace CLI disclosure", () => {
   it("shows a compact row without a disclosure for a successful call", () => {
     const command =
-      "/repo/target/debug/MonoCode.app/Contents/MacOS/monocode app notes.list";
+      "/repo/target/debug/vorkspace.app/Contents/MacOS/monocode app notes.list";
     const blocks: Block[] = [
       { id: "user", role: "user", text: "/monocode list notes" },
       {
@@ -99,8 +99,8 @@ describe("MonoCode CLI disclosure", () => {
     );
     expect(row?.querySelector("button")).toBeNull();
     expect(row?.querySelector("pre")).toBeNull();
-    expect(row?.textContent).toContain("Ranmonocode app notes.list");
-    expect(row?.querySelector('img[src="/monocode.png"]')).not.toBeNull();
+    expect(row?.textContent).toContain("Ranvorkspace app notes.list");
+    expect(row?.querySelector('img[src="/vorkspace.png"]')).not.toBeNull();
     expect(row?.querySelector(".bg-content\\/6")).not.toBeNull();
     expect(container.textContent).not.toContain("Contents/MacOS/monocode");
     expect(container.textContent).not.toContain('"title":"Ideas"');
@@ -121,7 +121,7 @@ describe("MonoCode CLI disclosure", () => {
     );
 
     const trigger = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Show error details for MonoCode: List notes"]',
+      'button[aria-label="Show error details for vorkspace: List notes"]',
     );
     expect(trigger?.getAttribute("aria-expanded")).toBe("false");
     expect(container.textContent).not.toContain("Connection refused");

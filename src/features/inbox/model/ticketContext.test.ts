@@ -84,12 +84,12 @@ it("does not contact integrations for ordinary text", async () => {
   expect(invoke).not.toHaveBeenCalled();
 });
 it.each([
-  "monocode://context/jira?url=https%3A%2F%2Fuser%3Asecret%40demo.atlassian.net%2Fbrowse%2FDEMO-42",
-  "monocode://context/github?url=https%3A%2F%2Fevil.example%2Facme%2Fdemo%2Fissues%2F42",
-  "monocode://context/jira?url=http%3A%2F%2Fdemo.atlassian.net%2Fbrowse%2FDEMO-42",
-  "monocode://context/github?url=https%3A%2F%2Fgithub.com%2Facme%2Fdemo%2Fpull%2F42",
-  "monocode://context/gitlab?url=https%3A%2F%2Fgitlab.example.com%2Facme%2Fdemo%2F-%2Fmerge_requests%2F42%2Fdiffs",
-  "monocode://context/jira?url=https%3A%2F%2Fdemo.atlassian.net%2Fbrowse%2FDEMO-42%3Ftoken%3Dsecret",
+  "vorkspace://context/jira?url=https%3A%2F%2Fuser%3Asecret%40demo.atlassian.net%2Fbrowse%2FDEMO-42",
+  "vorkspace://context/github?url=https%3A%2F%2Fevil.example%2Facme%2Fdemo%2Fissues%2F42",
+  "vorkspace://context/jira?url=http%3A%2F%2Fdemo.atlassian.net%2Fbrowse%2FDEMO-42",
+  "vorkspace://context/github?url=https%3A%2F%2Fgithub.com%2Facme%2Fdemo%2Fpull%2F42",
+  "vorkspace://context/gitlab?url=https%3A%2F%2Fgitlab.example.com%2Facme%2Fdemo%2F-%2Fmerge_requests%2F42%2Fdiffs",
+  "vorkspace://context/jira?url=https%3A%2F%2Fdemo.atlassian.net%2Fbrowse%2FDEMO-42%3Ftoken%3Dsecret",
 ])("rejects unsupported or credential-bearing references: %s", (value) =>
   expect(parseTicketContextLink(value)).toBeNull(),
 );
@@ -150,7 +150,7 @@ it("asks the agent to work on a GitLab merge request", () => {
     labels: [],
   } as unknown as InboxItem);
   expect(card.prompt).toContain("Work on this GitLab merge request:");
-  expect(card.prompt).toContain("monocode://context/gitlab?url=");
+  expect(card.prompt).toContain("vorkspace://context/gitlab?url=");
 });
 it("fails closed for a different Jira site", async () => {
   const other = ticketContextLink({
@@ -211,4 +211,12 @@ it("creates the same portable context card for project and Mono composers", () =
   expect(card.prompt).toContain(link("jira"));
   expect(card.prompt).toContain("Demo ticket");
   expect(card.prompt).not.toContain("Older body");
+});
+
+it("emits vorkspace links while accepting legacy monocode references", async () => {
+  const current = link("jira");
+  const legacy = current.replace("vorkspace:", "monocode:");
+  expect(current).toMatch(/^vorkspace:\/\/context\//);
+  expect(parseTicketContextLink(legacy)).toEqual(parseTicketContextLink(current));
+  expect(await applyTicketContextToTurn(`Review ${legacy}`, "/tmp/demo")).toContain("Initial description");
 });

@@ -39,7 +39,7 @@ export function refreshCodexCatalog(): Promise<void> {
       if (models.length > 0) setHarnessModels("codex", models);
     })
     .catch((error: unknown) => {
-      console.debug("[monocode] codex catalog", error);
+      console.debug("[vorkspace] codex catalog", error);
     })
     .finally(() => {
       inflight = null;
@@ -84,8 +84,8 @@ export async function discoverCodexModels(
           "initialize",
           {
             clientInfo: {
-              name: "monocode",
-              title: "MonoCode",
+              name: "vorkspace",
+              title: "vorkspace",
               version: "0.1.0",
             },
             capabilities: { experimentalApi: true },

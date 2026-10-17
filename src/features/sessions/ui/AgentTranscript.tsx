@@ -4507,10 +4507,10 @@ function ActivityToolRow({
 }
 
 function MonoCodeMark({ className = "size-4" }: { className?: string }) {
-  return <img src="/monocode.png" alt="" className={`shrink-0 ${className}`} />;
+  return <img src="/vorkspace.png" alt="" className={`shrink-0 ${className}`} />;
 }
 
-/** MonoCode commands read like the other activity rows; failures expose their output. */
+/** vorkspace commands read like the other activity rows; failures expose their output. */
 function MonoCodeCallRow({
   block,
   call,
@@ -4526,7 +4526,7 @@ function MonoCodeCallRow({
   const [errorOpen, setErrorOpen] = useState(false);
   const hasError = state === "rejected" && !!output;
   const pendingApproval = needsApproval(block);
-  const command = `monocode app ${call.action}`;
+  const command = `vorkspace app ${call.action}`;
   const verb = pendingApproval
     ? "Run"
     : state === "pending"
@@ -4561,7 +4561,7 @@ function MonoCodeCallRow({
         <button
           type="button"
           aria-expanded={errorOpen}
-          aria-label={`${errorOpen ? "Hide" : "Show"} error details for MonoCode: ${call.label}`}
+          aria-label={`${errorOpen ? "Hide" : "Show"} error details for vorkspace: ${call.label}`}
           onClick={() => setErrorOpen((value) => !value)}
           className="flex w-full min-w-0 items-center gap-1.5 py-1 text-left"
         >

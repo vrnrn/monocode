@@ -1387,7 +1387,7 @@ describe("claude subagents", () => {
       summary: "Found the tokens",
     });
     // The notification wakes Claude for a follow-up turn; that turn's result
-    // is what ends the MonoCode turn.
+    // is what ends the vorkspace turn.
     await new Promise((r) => setTimeout(r, 30));
     expect(settled).toBe(false);
     emitFollowUpTurn("The explorer found the tokens.");

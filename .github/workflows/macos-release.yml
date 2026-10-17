@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   release:
-    if: github.repository == 'vrnrn/monocode'
+    if: github.repository == 'vrnrn/vorkspace'
     runs-on: macos-latest
     permissions:
       contents: write
@@ -60,6 +60,9 @@ jobs:
       - run: npm ci
       - run: node --test scripts/verify-macos-release.test.mjs
       - run: npm run check:web
+      # Remote hosts use bundled Node runtimes, independently of desktop targets.
+      - run: npm run test:host
+      - run: npm run host:package -- --all
 
       # Apple ad hoc signing is separate from the mandatory updater signature.
       # This personal build does not require an Apple Developer certificate.
@@ -72,20 +75,25 @@ jobs:
           APPLE_SIGNING_IDENTITY: "-"
         with:
           tagName: ${{ env.RELEASE_TAG }}
-          releaseName: "MonoCode __VERSION__ (Mac)"
-          releaseBody: "Personal Apple Silicon Mac build from vrnrn/monocode. Uses ad hoc Apple signing and signed in-app updates. See CHANGELOG.md for changes."
+          releaseName: "vorkspace __VERSION__ (Mac)"
+          releaseBody: "Personal Apple Silicon Mac build from vrnrn/vorkspace. Uses ad hoc Apple signing and signed in-app updates. See CHANGELOG.md for changes."
           releaseDraft: true
           prerelease: false
           args: --target aarch64-apple-darwin --bundles app,dmg
+
+      - name: Upload remote host packages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$RELEASE_TAG" --clobber build/host-packages/*.tar.gz build/host-packages/*.zip build/host-packages/*.sha256
 
       - name: Verify app and updater feed before publication
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          APP="target/aarch64-apple-darwin/release/bundle/macos/MonoCode.app"
+          APP="target/aarch64-apple-darwin/release/bundle/macos/vorkspace.app"
           codesign --verify --deep --strict "$APP"
-          test "$(lipo -archs "$APP/Contents/MacOS/monocode")" = arm64
+          test "$(lipo -archs "$APP/Contents/MacOS/vorkspace")" = arm64
           gh release download "$RELEASE_TAG" --pattern latest.json --dir "$RUNNER_TEMP/feed"
           gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/assets.json"
           node scripts/verify-macos-release.mjs "$RELEASE_TAG" "$RUNNER_TEMP/feed/latest.json" "$RUNNER_TEMP/assets.json"

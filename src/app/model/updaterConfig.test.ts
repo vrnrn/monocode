@@ -50,8 +50,8 @@ describe("updater", () => {
       currentVersion: "0.1.23",
     });
     expect(message).toHaveBeenCalledWith(
-      expect.stringContaining("https://github.com/hardbeat920/monocode/releases/latest"),
-      { title: "MonoCode" },
+      expect.stringContaining("https://github.com/vrnrn/vorkspace/releases/latest"),
+      { title: "vorkspace" },
     );
   });
 
@@ -68,10 +68,10 @@ describe("updater", () => {
 
   it.each(["deb", "rpm"] as const)("names one %s installer and the releases URL", (kind) => {
     const hint = packageManagerHint(kind);
-    expect(hint).toContain("https://github.com/hardbeat920/monocode/releases/latest");
+    expect(hint).toContain("https://github.com/vrnrn/vorkspace/releases/latest");
     expect(hint).not.toMatch(/[*<>]/);
     expect(hint).toContain("Replace the file name");
-    expect(hint).toContain(kind === "deb" ? "sudo apt install ./MonoCode_X.Y.Z_amd64.deb" : "sudo dnf install ./MonoCode-X.Y.Z-1.x86_64.rpm");
+    expect(hint).toContain(kind === "deb" ? "sudo apt install ./vorkspace_X.Y.Z_amd64.deb" : "sudo dnf install ./vorkspace-X.Y.Z-1.x86_64.rpm");
   });
 
   it.each([
@@ -88,7 +88,7 @@ describe("updater", () => {
     });
     expect(check).not.toHaveBeenCalled();
     expect(message).toHaveBeenCalledWith(expect.stringContaining(hint), {
-      title: "MonoCode",
+      title: "vorkspace",
     });
   });
 
@@ -124,7 +124,7 @@ describe("updater", () => {
     });
     expect(message).toHaveBeenCalledWith(
       expect.stringContaining("aren't available for this install yet"),
-      { title: "MonoCode" },
+      { title: "vorkspace" },
     );
   });
 });

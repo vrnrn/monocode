@@ -40,7 +40,7 @@ export function verifyMacRelease(tag, feed, assets, version) {
   assert.equal(url.origin, "https://github.com");
   assert.equal(url.search, "");
   assert.equal(url.hash, "");
-  const prefix = `/vrnrn/monocode/releases/download/${tag}/`;
+  const prefix = `/vrnrn/vorkspace/releases/download/${tag}/`;
   assert(
     url.pathname.startsWith(prefix),
     "Updater must download this fork's tagged release",

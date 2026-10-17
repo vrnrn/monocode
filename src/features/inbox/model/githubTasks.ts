@@ -286,12 +286,12 @@ export function githubStatus(): Promise<GithubStatus> {
   return invoke<GithubStatus>("git_github_status");
 }
 
-/** Whether the active GitHub CLI account has starred MonoCode. */
+/** Whether the active GitHub CLI account has starred vorkspace. */
 export function githubMonocodeStarStatus(): Promise<GithubStarStatus> {
   return invoke<GithubStarStatus>("github_monocode_star_status");
 }
 
-/** Star MonoCode for the active GitHub CLI account. */
+/** Star vorkspace for the active GitHub CLI account. */
 export function starMonocodeOnGithub(): Promise<void> {
   return invoke<void>("github_star_monocode");
 }
