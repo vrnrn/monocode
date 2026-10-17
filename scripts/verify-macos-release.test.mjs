@@ -16,7 +16,7 @@ function release() {
         "darwin-aarch64-app": { ...entry },
       },
     },
-    name: "vorkspace 0.13.1 (Mac)",
+    name: "vorkspace 0.13.1",
     assets: [
       "latest.json",
       "vorkspace_0.13.1_aarch64.dmg",
@@ -82,15 +82,15 @@ test("rejects non-Mac packages and unrelated release assets", () => {
   }
 });
 
-test("requires the versioned Mac release title", () => {
+test("rejects platform suffixes and mismatched release versions", () => {
   for (const name of [
-    "vorkspace 0.13.1",
+    "vorkspace 0.13.1 (Mac)",
     "vorkspace 0.13.1 (Windows)",
-    "vorkspace 0.13.0 (Mac)",
+    "vorkspace 0.13.0",
   ]) {
     assert.throws(
       () => verify({ ...release(), name }),
-      /title must identify the Mac build/,
+      /title must match the app version without a platform suffix/,
     );
   }
 });

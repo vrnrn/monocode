@@ -79,7 +79,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: "-"
         with:
           tagName: ${{ env.RELEASE_TAG }}
-          releaseName: "vorkspace __VERSION__ (Mac)"
+          releaseName: "vorkspace __VERSION__"
           releaseBody: "Personal Apple Silicon Mac build from vrnrn/vorkspace. Uses ad hoc Apple signing and signed in-app updates. See CHANGELOG.md for changes."
           releaseDraft: true
           prerelease: false
