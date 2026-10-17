@@ -58,7 +58,7 @@ jobs:
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
       - run: npm ci
-      - run: node --test scripts/verify-macos-release.test.mjs
+      - run: node --test scripts/*.test.mjs scripts/*.test.cjs
       - run: npm run check:web
       # Remote hosts use bundled Node runtimes, independently of desktop targets.
       - run: npm run test:host
@@ -81,10 +81,10 @@ jobs:
           prerelease: false
           args: --target aarch64-apple-darwin --bundles app,dmg
 
-      - name: Upload remote host packages
+      - name: Upload remote host packages and migration helper
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$RELEASE_TAG" --clobber build/host-packages/*.tar.gz build/host-packages/*.zip build/host-packages/*.sha256
+        run: gh release upload "$RELEASE_TAG" --clobber build/host-packages/*.tar.gz build/host-packages/*.zip build/host-packages/*.sha256 scripts/migrate-monocode-to-vorkspace.sh LICENSE.vorkspace
 
       - name: Verify app and updater feed before publication
         env:
