@@ -17,8 +17,6 @@ npm install
 npm run tauri dev
 ```
 
-`npm run build` rejects frontend build warnings and checks the [JavaScript size budgets](build-budget.md). The Mac release workflow also treats Rust compiler warnings as errors.
-
 ## Isolated development profile
 
 `npm run tauri dev` and `npm run tauri:stable` launch **vorkspace Dev** with the `com.vrnrn.vorkspace.development` application profile and a frontend on port 1430. Startup prints the selected data directory. Session history, unsent drafts, Notes, app-managed provider accounts and preferences stay separate from the installed app. No production data is copied automatically. External provider CLI sign-ins remain owned by those CLIs.

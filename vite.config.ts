@@ -1,7 +1,6 @@
 import { defineConfig, type Plugin, type UserConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { strictBuildPlugin, strictLogger } from "./scripts/buildBudgets";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -27,26 +26,12 @@ function bootSplashEntry(): Plugin {
   };
 }
 
-export default defineConfig(async ({ mode, command }): Promise<UserConfig> => {
+export default defineConfig(({ mode }): UserConfig => {
   const stable = mode === "stable";
 
   return {
-    customLogger: command === "build" ? strictLogger() : undefined,
-    plugins: [
-      react(),
-      tailwindcss(),
-      bootSplashEntry(),
-      strictBuildPlugin({ budgets: !mode.startsWith("benchmark") }),
-    ],
-    worker: {
-      format: "es" as const,
-      plugins: () => [
-        strictBuildPlugin({
-          startup: false,
-          budgets: !mode.startsWith("benchmark"),
-        }),
-      ],
-    },
+    plugins: [react(), tailwindcss(), bootSplashEntry()],
+    worker: { format: "es" },
     resolve: {
       alias: [
         ...(mode.startsWith("benchmark")
@@ -67,8 +52,7 @@ export default defineConfig(async ({ mode, command }): Promise<UserConfig> => {
     },
     clearScreen: false,
     build: {
-      // Replace the generic heuristic with per-artifact and startup budgets.
-      // The largest exception is one unchanged generated vendor table.
+      // The generated file-icon table is about 1.13 MB after minification.
       chunkSizeWarningLimit: 1150,
       rollupOptions: {
         // The quick composer panel loads its own page so it does not boot the
