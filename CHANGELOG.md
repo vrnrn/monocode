@@ -9,17 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Resource pressure controls show agent/tool processes, and Settings → Chat can disable smooth text reveal. Adapted from upstream MonoCode PR #1045 by Nick (hardbeat920).
+
 - Unsent messages, cursor selection, attachment references, and MCP tags recover after restart. Drafts remain separate from explicitly saved draft turns, and conflicting copies can be compared before choosing which to keep.
 - Local provider sends keep durable attempt receipts. Interrupted sends with an unconfirmed outcome are shown in the conversation and are never automatically replayed.
 - Development runs use a separate app identity, data profile, browser origin, and deep-link scheme.
 
 ### Changed
 
+- Large conversations use per-session streaming updates, worker-based code highlighting and diff preparation, and deferred tool output to reduce UI work. Background indexing and agent tools receive lower scheduling priority where supported.
+
 - Removed terminal games, the composer runner, decorative empty-state graphics, the Mono parade, and celebration effects.
 - Startup uses the supplied artwork while the workspace prepares.
 - Provider output queues have byte and record limits. A limit failure ends the run with an explicit error while preserving already admitted output.
 
 ### Fixed
+
+- Reader position survives reply completion, file-pane resizing and cached tab restores. Notification sounds suspend their audio context after playback.
 
 - File saves detect external edits and preserve the unsaved draft for an explicit reload or overwrite decision. Typing during a save remains unsaved until the newer revision is written.
 - Older remote hosts keep files readable and show an update requirement before editing and saving.
