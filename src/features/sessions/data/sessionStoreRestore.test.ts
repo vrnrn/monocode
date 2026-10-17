@@ -41,7 +41,9 @@ function codexRecord(): SessionRecord {
 }
 
 describe("restoring a session whose repair cannot be persisted", () => {
-  beforeEach(() => invoke.mockReset());
+  beforeEach(() => {
+    invoke.mockReset();
+  });
 
   it("restores sidebar visibility when a hidden session is opened by id", async () => {
     const record = codexRecord();
@@ -131,7 +133,9 @@ it("retains local admission ownership through hydrate and later ordinary persist
 });
 
 describe("progressive session restoration", () => {
-  beforeEach(() => invoke.mockReset());
+  beforeEach(() => {
+    invoke.mockReset();
+  });
 
   it("returns saved text without reading provider logs or writing repairs", async () => {
     const record = { ...codexRecord(), harness: "claude" } as SessionRecord;
@@ -177,7 +181,7 @@ describe("progressive session restoration", () => {
   it.each([false, true])(
     "checks local send safety before exposing saved text (receipt read fails=%s)",
     async (fails) => {
-      vi.stubGlobal("__TAURI_INTERNALS__", {});
+      vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
       const record = codexRecord();
       invoke.mockImplementation((command: string) => {
         if (command === "session_get") return Promise.resolve(record);
