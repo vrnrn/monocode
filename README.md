@@ -51,14 +51,6 @@ npm run tauri dev
 
 Small, focused contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
-## Contributors
-
-Thanks to everyone who contributes to vorkspace and to its original MonoCode foundation!
-
-[![vorkspace contributors](https://contrib.rocks/image?repo=vrnrn/vorkspace)](https://github.com/vrnrn/vorkspace/graphs/contributors)
-
-Contributor image by [contrib.rocks](https://contrib.rocks).
-
 ## License
 
-[MIT](LICENSE). Provider names and logos are trademarks of their owners. See [NOTICE](NOTICE).
+The original MonoCode code is covered by its [MIT license](LICENSE). vorkspace changes are covered by the [vorkspace MIT license](LICENSE.vorkspace). Provider names and logos are trademarks of their owners. See [NOTICE](NOTICE).
