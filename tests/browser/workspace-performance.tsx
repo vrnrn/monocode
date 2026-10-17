@@ -157,6 +157,7 @@ const fixtureInvoke = async (
       "git_diff_files",
       "git_file_diff",
       "read_text_file",
+      "read_editor_text_file",
       "resource_usage",
       "resource_processes",
       "resource_stop_tool",
@@ -171,6 +172,33 @@ const fixtureInvoke = async (
   const cwd = String(args.cwd ?? projectRoot);
   if (command === "list_project_files") return filesFor(cwd);
   if (command === "read_text_file") return source;
+  // The fork's editor carries a disk baseline so a later save can detect an
+  // external edit. Exercise that contract instead of the upstream string read.
+  if (command === "read_editor_text_file") {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(source),
+    );
+    return {
+      path: args.path,
+      content: source,
+      hash: Array.from(new Uint8Array(digest), (byte) =>
+        byte.toString(16).padStart(2, "0"),
+      ).join(""),
+    };
+  }
+  if (command === "composer_draft_get")
+    return {
+      sessionId: args.sessionId,
+      revision: 0,
+      cleared: true,
+      text: "",
+      selectionStart: 0,
+      selectionEnd: 0,
+      attachments: [],
+      mcpTags: [],
+      missingAttachments: [],
+    };
   if (command === "git_diff_stats")
     return { files: 1, additions: 1, deletions: 1 };
   if (command === "git_diff_index" || command === "git_diff_files")
