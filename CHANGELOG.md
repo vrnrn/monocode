@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.6] - 2026-10-17
+
 ### Added
 
 - Resource pressure controls show agent/tool processes, and Settings → Chat can disable smooth text reveal. Adapted from upstream MonoCode PR #1045 by Nick (hardbeat920).
