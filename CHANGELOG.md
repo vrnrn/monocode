@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.6] - 2026-10-17
+
 ### Added
 
 - Unsent messages, cursor selection, attachment references, and MCP tags recover after restart. Drafts remain separate from explicitly saved draft turns, and conflicting copies can be compared before choosing which to keep.
