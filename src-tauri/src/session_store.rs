@@ -1608,14 +1608,11 @@ fn search_sessions_with_connection(
             )
             .map_err(|e| e.to_string())?
         } else if incremental::indexed(conn, &id).map_err(|e| e.to_string())? {
-            incremental::matching_blocks(
-                conn,
-                &id,
-                &pattern,
-                MAX_SEARCH_BUFFER_BYTES,
-                MAX_MESSAGE_HITS - messages.len(),
-            )
-            .map_err(|e| e.to_string())?
+            let (blocks, budget_exhausted) =
+                incremental::matching_blocks(conn, &id, &pattern, MAX_SEARCH_BUFFER_BYTES)
+                    .map_err(|e| e.to_string())?;
+            truncated |= budget_exhausted;
+            blocks
         } else {
             let Ok(blocks) = serde_json::from_str::<Value>(&blocks_raw) else {
                 continue;

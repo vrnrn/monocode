@@ -504,15 +504,14 @@ export async function upsertSession(
           ? session.orchestrationLeadId
           : undefined;
       const same =
+        baseline?.persisted.has(source) &&
         byId.get(source.id) === source &&
         (index !== firstUser || baseline?.lead === lead);
-      // Omitted ephemeral blocks have no stored identity. Recheck them only
-      // when their reference changes, just like ordinary immutable blocks.
+      // Identity reuse applies only to blocks actually confirmed in storage.
+      // Hydration may add notices that still need their first durable write.
       if (same) {
-        if (baseline?.persisted.has(source)) {
-          ids.push(source.id);
-          persisted.add(source);
-        }
+        ids.push(source.id);
+        persisted.add(source);
         continue;
       }
       const owned = lead
@@ -711,7 +710,8 @@ export async function readSession(sessionId: string): Promise<Session | null> {
     },
   );
   if (!record) return null;
-  let session = recordToSession(record);
+  const persisted = new WeakSet<Block>();
+  let session = recordToSession(record, persisted);
   const persistedBlocks = session.blocks;
   if (
     typeof window !== "undefined" &&
@@ -744,7 +744,7 @@ export async function readSession(sessionId: string): Promise<Session | null> {
     ordinarySaved.set(sessionId, {
       revision: record.persistenceRevision,
       blocks: new WeakRef(persistedBlocks),
-      persisted: new WeakSet(persistedBlocks),
+      persisted,
       lead: session.orchestrationLeadId,
     });
   else ordinarySaved.delete(sessionId);
@@ -1630,12 +1630,17 @@ function normalizeSummary(summary: SessionSummary): SessionSummary {
   };
 }
 
-function recordToSession(record: SessionRecord): Session {
+function recordToSession(
+  record: SessionRecord,
+  persisted?: WeakSet<Block>,
+): Session {
   const blocks = Array.isArray(record.blocks)
     ? record.blocks
         .map((block) => sanitizeBlock(block, { hydrate: true }))
         .filter((block): block is Block => block != null)
     : [];
+  // Capture true stored identities before synthetic provider notices are added.
+  for (const block of blocks) persisted?.add(block);
   const choice = isHarnessId(record.harness)
     ? { harness: record.harness, model: record.model }
     : defaultSessionChoice(record.cwd);

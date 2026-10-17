@@ -203,30 +203,40 @@ pub(crate) fn save(
     Ok(result)
 }
 
+/// Raw JSON matches are candidates, not semantic message hits. Bound their
+/// combined bytes here; the caller applies its hit limit after `block_hits`.
 pub(crate) fn matching_blocks(
     conn: &Connection,
     id: &str,
     pattern: &str,
     budget: usize,
-    limit: usize,
-) -> rusqlite::Result<Value> {
-    let mut query = conn.prepare("SELECT block_json FROM ordinary_blocks WHERE session_id=?1 AND octet_length(block_json)<=?3 AND LOWER(block_json) LIKE LOWER(?2) ESCAPE '\\' ORDER BY position LIMIT ?4")?;
-    let rows = query.query_map(params![id, pattern, budget as i64, limit as i64], |r| {
-        r.get::<_, String>(0)
+) -> rusqlite::Result<(Value, bool)> {
+    let mut query = conn.prepare(
+        "SELECT CASE WHEN octet_length(block_json)<=?3 THEN block_json END
+        FROM ordinary_blocks WHERE session_id=?1 AND CASE WHEN octet_length(block_json)<=?3
+        THEN LOWER(block_json) LIKE LOWER(?2) ESCAPE '\\' ELSE 1 END ORDER BY position",
+    )?;
+    let rows = query.query_map(params![id, pattern, budget as i64], |r| {
+        r.get::<_, Option<String>>(0)
     })?;
     let mut bytes = 0;
     let mut matches = Vec::new();
+    let mut truncated = false;
     for raw in rows {
-        let raw = raw?;
+        let Some(raw) = raw? else {
+            truncated = true;
+            continue;
+        };
         bytes += raw.len();
         if bytes > budget {
+            truncated = true;
             break;
         }
         if let Ok(block) = serde_json::from_str(&raw) {
             matches.push(block);
         }
     }
-    Ok(Value::Array(matches))
+    Ok((Value::Array(matches), truncated))
 }
 
 #[cfg(test)]
@@ -437,5 +447,39 @@ mod tests {
             get_session(&conn, "legacy").unwrap().unwrap().blocks,
             newer.blocks
         );
+    }
+    #[test]
+    fn search_limits_semantic_hits_instead_of_raw_json_candidates() {
+        let store = SessionStore::open_in_memory().unwrap();
+        let conn = store.conn.lock().unwrap();
+        let mut blocks = vec![json!({"id":"u","role":"user","text":"request"})];
+        for index in 0..MAX_MESSAGE_HITS {
+            blocks.push(json!({"id":format!("meta{index}"),"role":"tool"}));
+        }
+        blocks.push(json!({"id":"answer","role":"assistant","text":"use this tool"}));
+        let ids = blocks
+            .iter()
+            .map(|b| b["id"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        save(&conn, &session("search", Value::Array(blocks)), &ids, None).unwrap();
+        let found = search_sessions(
+            &conn,
+            &SessionSearchOptions {
+                query: "tool".into(),
+                cwd: None,
+                include_archived: false,
+                search_owner: "candidate-filter".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(found.hits.iter().filter(|h| h.kind == "message").count(), 1);
+        assert!(found
+            .hits
+            .iter()
+            .any(|h| h.block_id.as_deref() == Some("answer")));
+        assert!(!found.truncated);
+        let (candidates, limited) = matching_blocks(&conn, "search", "%tool%", 8).unwrap();
+        assert!(limited);
+        assert!(candidates.as_array().unwrap().is_empty());
     }
 }
