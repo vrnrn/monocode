@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.5] - 2026-10-16
+
+### Fixed
+
+- Open the main window maximized, sizing it before it appears to prevent the smaller-window flash and expansion during launch.
+
 ## [0.13.4] - 2026-10-16
 
 ### Fixed
