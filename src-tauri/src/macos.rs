@@ -38,7 +38,7 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSAutoresizingMaskOptions, NSBezierPath, NSColor, NSImage, NSImageResizingMode,
-    NSMenu, NSMenuItem, NSRequestUserAttentionType, NSTitlebarSeparatorStyle,
+    NSMenu, NSMenuItem, NSRequestUserAttentionType, NSScreen, NSTitlebarSeparatorStyle,
     NSUserInterfaceItemIdentification, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
     NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowOrderingMode,
 };
@@ -111,6 +111,18 @@ pub fn install(window: &WebviewWindow) {
         }
         _ => {}
     });
+}
+
+/// Size the hidden launch window before its first frame. Tao's maximize path
+/// queues an animated AppKit zoom, which can run after the window is shown.
+pub fn maximize_for_launch(window: &WebviewWindow) -> Result<(), &'static str> {
+    let native = ns_window(window).ok_or("missing native launch window")?;
+    let screen = native
+        .screen()
+        .or_else(|| MainThreadMarker::new().and_then(NSScreen::mainScreen))
+        .ok_or("missing screen for launch window")?;
+    native.setFrame_display_animate(screen.visibleFrame(), false, false);
+    Ok(())
 }
 
 /// Slack-style red count on the Dock icon. `count` is this window's pending

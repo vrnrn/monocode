@@ -260,6 +260,8 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_filter(window::is_workspace_window)
+                // The launch window is sized while hidden and revealed on Ready.
+                .skip_initial_state("main")
                 .build(),
         )
         .register_uri_scheme_protocol(artifacts::HTML_SCHEME, |ctx, request| {
@@ -300,6 +302,12 @@ pub fn run() {
                     let _ = window.set_decorations(false);
                     let _ = window.set_shadow(true);
                 }
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                #[cfg(target_os = "macos")]
+                macos::maximize_for_launch(&window)?;
+                #[cfg(not(target_os = "macos"))]
+                window.maximize()?;
             }
             Ok(())
         })
