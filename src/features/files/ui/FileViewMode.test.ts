@@ -6,8 +6,8 @@ import { newEditorPane, newFileTab } from "../../workspace/model/layout";
 import { FilePane } from "./FilePane";
 
 const invoke = vi.hoisted(() =>
-  vi.fn(async (command: string) => {
-    if (command === "read_text_file") return "# Title\n\nBody";
+  vi.fn(async (command: string, args?: Record<string, unknown>) => {
+    if (command === "read_editor_text_file") return { path: args?.path, content: "# Title\n\nBody", hash: "title-baseline" };
     if (command === "git_diff_files") return { files: [] };
     if (command === "git_file_diff")
       return {

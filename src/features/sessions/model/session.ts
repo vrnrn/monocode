@@ -434,6 +434,10 @@ export const RUNTIME_MODE_HINT: Record<RuntimeMode, string> = {
 export type WorkspaceMode = "current" | "worktree";
 
 export type Session = {
+  /** Restored local attempts are never resumed automatically. */
+  localSubmissionUncertain?: boolean;
+  /** A restored receipt owns this work; stale quit markers cannot replay it. */
+  localSubmissionReplayBlocked?: boolean;
   /** Saved and accessible by id, but omitted from the normal session sidebar. */
   sidebarHidden?: boolean;
   /** Receipt for an acknowledged floating-composer handoff. */

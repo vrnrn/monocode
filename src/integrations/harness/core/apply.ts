@@ -444,6 +444,7 @@ function lastMatchingBlock(
 }
 
 type UserTurnExtra = {
+  id?: string;
   secondOpinion?: Block["secondOpinion"];
   noteCard?: Block["noteCard"];
   ciContext?: string;
@@ -457,6 +458,7 @@ type UserTurnExtra = {
 
 function userTurnFields(extra?: UserTurnExtra) {
   return {
+    ...(extra?.id ? { id: extra.id } : {}),
     ...(extra?.secondOpinion ? { secondOpinion: extra.secondOpinion } : {}),
     ...(extra?.noteCard ? { noteCard: extra.noteCard } : {}),
     ...(extra?.ciContext ? { ciContext: extra.ciContext } : {}),
@@ -490,6 +492,8 @@ export function appendUser(
   attachments: Attachment[] = [],
   extra?: UserTurnExtra,
 ): Session {
+  if (extra?.id && session.blocks.some((block) => block.id === extra.id))
+    return session;
   session = settlePendingApprovals(session);
   return appendBlock(
     { ...session, busy: true, turnReady: false },

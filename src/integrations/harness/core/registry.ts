@@ -1,3 +1,9 @@
+import {
+  LocalSubmissionUncertainError,
+  runLocalSubmission,
+  submissionPayload,
+} from "./localSubmissions";
+import { hasHeadlessChildBackend } from "./child";
 import type {
   Block,
   HarnessId,
@@ -145,6 +151,13 @@ const idleParkTimers = new Map<
 const sessionOperationTails = new Map<string, Promise<void>>();
 const sessionSteerTails = new Map<string, Promise<void>>();
 const activeTurnSessions = new Set<string>();
+const cancellationEpochs = new Map<string, number>();
+function invalidatePendingTurns(sessionId: string) {
+  cancellationEpochs.set(
+    sessionId,
+    (cancellationEpochs.get(sessionId) ?? 0) + 1,
+  );
+}
 
 function queueSessionOperation<T>(
   sessionId: string,
@@ -269,36 +282,106 @@ export function listHarnesses(): HarnessAdapter[] {
   return [...adapters.values()];
 }
 
-export function sendHarnessTurn(input: SendTurnInput & { harness: HarnessId }) {
-  return queueSessionOperation(input.sessionId, async () => {
-    const adapter = requireHarness(input.harness);
-    if (!adapter.live) {
-      throw new Error(`${input.harness} is not connected yet`);
-    }
-    cancelIdlePark(input.sessionId);
-    const controlled = typeof isTauri === "function" && isTauri();
-    if (controlled)
-      await invoke("control_authorize_turn", {
-        sessionId: input.sessionId,
-        cwd: input.cwd,
-        appAccess: input.appAccess === true,
-      });
-    activeTurnSessions.add(input.sessionId);
+export function sendHarnessTurn(
+  input: SendTurnInput & { harness: HarnessId },
+): Promise<void> {
+  const epoch = cancellationEpochs.get(input.sessionId) ?? 0;
+  const assertCurrent = () => {
+    if (
+      (cancellationEpochs.get(input.sessionId) ?? 0) !== epoch ||
+      input.isCurrent?.() === false
+    )
+      throw new Error("Local send was cancelled or replaced before dispatch");
+  };
+  const dispatch = async () => {
+    let completed = false;
+    let failure: string | undefined;
     try {
-      await adapter.sendTurn({
-        ...input,
-        onAccepted: () => {
-          input.onEvent({ type: "turn.ready" });
-          input.onAccepted?.();
-        },
+      assertCurrent();
+      await input.beforeDispatch?.();
+      assertCurrent();
+      await queueSessionOperation(input.sessionId, async () => {
+        assertCurrent();
+        const adapter = requireHarness(input.harness);
+        if (!adapter.live)
+          throw new Error(`${input.harness} is not connected yet`);
+        cancelIdlePark(input.sessionId);
+        const controlled = typeof isTauri === "function" && isTauri();
+        if (controlled)
+          await invoke("control_authorize_turn", {
+            sessionId: input.sessionId,
+            cwd: input.cwd,
+            appAccess: input.appAccess === true,
+          });
+        activeTurnSessions.add(input.sessionId);
+        try {
+          assertCurrent();
+          let reportedError: string | undefined;
+          await adapter.sendTurn({
+            ...input,
+            onEvent: (event) => {
+              if (event.type === "session.error") reportedError = event.message;
+              input.onEvent(event);
+            },
+            onAccepted: () => {
+              input.onEvent({ type: "turn.ready" });
+              input.onAccepted?.();
+            },
+          });
+          if (reportedError) throw new Error(reportedError);
+        } finally {
+          activeTurnSessions.delete(input.sessionId);
+          if (controlled)
+            await invoke("control_turn_finished", {
+              sessionId: input.sessionId,
+            });
+          if ((cancellationEpochs.get(input.sessionId) ?? 0) === epoch)
+            scheduleIdlePark(input.harness, input.sessionId);
+        }
       });
+      completed = true;
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+      throw error;
     } finally {
-      activeTurnSessions.delete(input.sessionId);
-      if (controlled)
-        await invoke("control_turn_finished", { sessionId: input.sessionId });
-      scheduleIdlePark(input.harness, input.sessionId);
+      try {
+        await input.afterDispatch?.(completed, failure);
+      } catch (error) {
+        throw new LocalSubmissionUncertainError(
+          `The local send result could not be checkpointed. The provider may have received it; its outcome is uncertain and it will not be replayed. ${String(error)}`,
+        );
+      }
     }
-  });
+  };
+
+  if (
+    typeof isTauri !== "function" ||
+    !isTauri() ||
+    hasHeadlessChildBackend() ||
+    input.ephemeral === true ||
+    input.submission?.persist === false
+  )
+    return dispatch();
+  const {
+    onEvent: _onEvent,
+    onAccepted: _onAccepted,
+    beforeDispatch: _beforeDispatch,
+    afterDispatch: _afterDispatch,
+    isCurrent: _isCurrent,
+    ...payload
+  } = input;
+  const userTurnId = input.submission?.userTurnId ?? crypto.randomUUID();
+  const attemptId = input.submission?.attemptId ?? userTurnId;
+  return runLocalSubmission(
+    {
+      attemptId,
+      userTurnId,
+      sessionId: input.sessionId,
+      payloadJson: submissionPayload(payload),
+      userTurn: input.submission?.userTurn,
+    },
+    dispatch,
+  ).then(() => undefined);
 }
 
 export function canCompactHarnessContext(id: HarnessId): boolean {
@@ -373,6 +456,7 @@ export async function cancelHarnessTurn(
   harness: HarnessId,
   sessionId: string,
 ): Promise<void> {
+  invalidatePendingTurns(sessionId);
   const adapter = getHarness(harness);
   if (!adapter?.live) return;
   cancelIdlePark(sessionId);
@@ -410,6 +494,7 @@ export async function stopHarnessSession(
   harness: HarnessId,
   sessionId: string,
 ): Promise<void> {
+  invalidatePendingTurns(sessionId);
   cancelIdlePark(sessionId);
   const adapter = getHarness(harness);
   if (!adapter?.live) return;
@@ -420,6 +505,7 @@ export async function forgetHarnessSession(
   harness: HarnessId,
   sessionId: string,
 ): Promise<void> {
+  invalidatePendingTurns(sessionId);
   cancelIdlePark(sessionId);
   const adapter = getHarness(harness);
   if (!adapter) return;

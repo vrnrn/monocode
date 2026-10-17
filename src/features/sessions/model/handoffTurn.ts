@@ -6,11 +6,16 @@ import {
   sendHarnessTurn,
 } from "../../../integrations/harness/core/registry";
 import { mergeStream } from "../../../integrations/harness/core/streamText";
-import type { HarnessId } from "./session";
+import type { Block, HarnessId } from "./session";
 
 const HANDOFF_TIMEOUT_MS = 45_000;
 
 export async function requestOutgoingHandoff(input: {
+  userTurnId?: string;
+  userTurn?: Block;
+  isCurrent?: () => boolean;
+  persist?: boolean;
+  afterDispatch?: () => Promise<void>;
   harness: HarnessId;
   sessionId: string;
   cwd: string;
@@ -25,6 +30,18 @@ export async function requestOutgoingHandoff(input: {
   }, HANDOFF_TIMEOUT_MS);
   try {
     await sendHarnessTurn({
+      isCurrent: input.isCurrent,
+      afterDispatch: input.afterDispatch,
+      ...(input.userTurnId
+        ? {
+            submission: {
+              attemptId: `${input.userTurnId}:handoff`,
+              userTurnId: input.userTurnId,
+              userTurn: input.userTurn,
+              persist: input.persist,
+            },
+          }
+        : {}),
       harness: input.harness,
       sessionId: input.sessionId,
       cwd: input.cwd,

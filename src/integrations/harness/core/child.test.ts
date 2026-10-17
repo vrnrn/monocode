@@ -326,3 +326,115 @@ describe("child bridge", () => {
     release();
   });
 });
+
+describe("provider output admission", () => {
+  it("bounds pre-watch UTF-8 bytes and items without evicting admitted records", async () => {
+    const { ChildOutputBuffer } = await loadChild();
+    const bytes = new ChildOutputBuffer(10, 4);
+    expect(bytes.push("éé")).toBe(true);
+    expect(bytes.push("x")).toBe(false);
+    expect(bytes.lines).toEqual(["éé"]);
+    const items = new ChildOutputBuffer(2, 10);
+    expect(items.push("")).toBe(true);
+    expect(items.push("")).toBe(true);
+    expect(items.push("")).toBe(false);
+    expect(items.lines).toEqual(["", ""]);
+    expect(new ChildOutputBuffer(2, 3).push("😀")).toBe(false);
+  });
+
+  it("reports pre-watch overflow after the admitted prefix without waiting for stop", async () => {
+    installResolvedListeners();
+    mocks.invoke.mockImplementation((command: string) =>
+      command === "harness_spawn"
+        ? Promise.resolve(42)
+        : new Promise(() => undefined),
+    );
+    const child = await loadChild();
+    const release = await child.acquireHarnessBridge();
+    await child.spawnChild("overflow", "agent", [], "/tmp");
+    const emit = (name: string, payload: unknown) =>
+      mocks.handlers.get(name)?.({ payload: payload as never });
+    const prefix = Array.from({ length: 1000 }, (_, i) => `record ${i}`);
+    emit("harness-stdout", {
+      sessionId: "overflow",
+      lines: [...prefix, "lost approval", "completion"],
+    });
+    expect(mocks.invoke).toHaveBeenCalledWith("harness_kill", {
+      sessionId: "overflow",
+    });
+    const events: string[] = [];
+    child.watchChild(
+      "overflow",
+      (line) => events.push(line),
+      (code) => events.push(`exit:${code}`),
+      (line) => events.push(`error:${line}`),
+    );
+    expect(events.slice(0, 1000)).toEqual(prefix);
+    expect(events[1000]).toContain("error:Provider output exceeded");
+    expect(events[1001]).toBe("exit:1");
+    emit("harness-exit", { sessionId: "overflow", code: 0, pid: 42 });
+    emit("harness-stdout", { sessionId: "overflow", line: "late completion" });
+    expect(events).toHaveLength(1002);
+    release();
+  });
+
+  it("replays an unwatched final tail before its already received exit", async () => {
+    installResolvedListeners();
+    mocks.invoke.mockResolvedValue(42);
+    const child = await loadChild();
+    const release = await child.acquireHarnessBridge();
+    await child.spawnChild("early-exit", "agent", [], "/tmp");
+    mocks.handlers.get("harness-stdout")?.({
+      payload: {
+        sessionId: "early-exit",
+        lines: ["approval", "completion", "tail"],
+      } as never,
+    });
+    mocks.handlers.get("harness-exit")?.({
+      payload: { sessionId: "early-exit", pid: 42, code: 0 } as never,
+    });
+    const events: string[] = [];
+    child.watchChild(
+      "early-exit",
+      (line) => events.push(line),
+      (code) => events.push(`exit:${code}`),
+    );
+    expect(events).toEqual(["approval", "completion", "tail", "exit:0"]);
+    release();
+  });
+
+  it("keeps an output failure received before spawn resolves and reports it before exit", async () => {
+    installResolvedListeners();
+    const spawned = deferred<number>();
+    mocks.invoke.mockReturnValue(spawned.promise);
+    const child = await loadChild();
+    const release = await child.acquireHarnessBridge();
+    const spawning = child.spawnChild("early-error", "agent", [], "/tmp");
+    mocks.handlers.get("harness-stdout")?.({
+      payload: { sessionId: "early-error", line: "admitted" } as never,
+    });
+    mocks.handlers.get("harness-exit")?.({
+      payload: {
+        sessionId: "early-error",
+        pid: 42,
+        code: 0,
+        error: "Provider output record exceeds limit",
+      } as never,
+    });
+    spawned.resolve(42);
+    await spawning;
+    const events: string[] = [];
+    child.watchChild(
+      "early-error",
+      (line) => events.push(line),
+      (code) => events.push(`exit:${code}`),
+      (line) => events.push(line),
+    );
+    expect(events).toEqual([
+      "admitted",
+      "Provider output record exceeds limit",
+      "exit:1",
+    ]);
+    release();
+  });
+});

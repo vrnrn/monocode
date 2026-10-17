@@ -48,30 +48,129 @@ struct HarnessExit {
     session_id: String,
     code: Option<i32>,
     pid: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
 }
 
 /// Each `emit` is a JS eval in every window, and a streaming agent prints a
 /// line per token. Coalesce to about one hop per frame, like `pty-data`.
 const OUTPUT_COALESCE: Duration = Duration::from_millis(16);
-/// A huge tool result shouldn't hold back the lines queued behind it.
 const OUTPUT_BATCH_BYTES: usize = 1 << 20;
-/// How long an exit waits for its last output. A grandchild that inherited
-/// stdout can hold the pipe open after the agent itself has gone.
+/// Per child, including the batch currently being emitted. Separate item and
+/// byte limits also bound empty records and unusually large tool results.
+const OUTPUT_QUEUE_BYTES: usize = 16 << 20;
+const OUTPUT_QUEUE_ITEMS: usize = 4096;
+const OUTPUT_RECORD_BYTES: usize = 8 << 20;
+/// A grandchild can inherit stdout after the provider exits. After this grace
+/// period the run fails explicitly; queued records still drain before exit.
 const OUTPUT_DRAIN_WAIT: Duration = Duration::from_millis(500);
 
-/// Hands `emit` batches of the items sent on the returned channel. After an
-/// idle stretch the first item goes out at once; a burst then waits out the
-/// rest of the window. The receiver fires once everything sent has gone out.
-fn spawn_output_batcher<F>(mut emit: F) -> (mpsc::Sender<String>, mpsc::Receiver<()>)
+#[derive(Default)]
+struct OutputUsage {
+    bytes: usize,
+    items: usize,
+    closed: bool,
+}
+
+struct OutputReservation {
+    usage: Arc<Mutex<OutputUsage>>,
+    bytes: usize,
+}
+
+impl Drop for OutputReservation {
+    fn drop(&mut self) {
+        let mut usage = self.usage.lock().unwrap_or_else(|e| e.into_inner());
+        usage.bytes -= self.bytes;
+        usage.items -= 1;
+    }
+}
+
+struct OutputRecord {
+    line: String,
+    reservation: OutputReservation,
+}
+
+struct OutputSender {
+    tx: mpsc::Sender<OutputRecord>,
+    usage: Arc<Mutex<OutputUsage>>,
+    max_bytes: usize,
+    max_items: usize,
+}
+
+impl OutputSender {
+    /// Admission never waits for the consumer. On pressure the caller fails
+    /// and terminates the run, so cancellation cannot deadlock behind stdout.
+    fn send(&self, line: String) -> Result<(), String> {
+        let bytes = line.len();
+        {
+            let mut usage = self.usage.lock().unwrap_or_else(|e| e.into_inner());
+            if usage.closed {
+                return Err("Provider output delivery has stopped".into());
+            }
+            if bytes > self.max_bytes {
+                return Err(format!(
+                    "Provider output record exceeds the {} byte queue budget",
+                    self.max_bytes
+                ));
+            }
+            if usage.items >= self.max_items || bytes > self.max_bytes - usage.bytes {
+                return Err(format!(
+                    "Provider output queue exceeded its {} byte / {} record budget; run stopped",
+                    self.max_bytes, self.max_items
+                ));
+            }
+            usage.bytes += bytes;
+            usage.items += 1;
+        }
+        self.tx
+            .send(OutputRecord {
+                line,
+                reservation: OutputReservation {
+                    usage: self.usage.clone(),
+                    bytes,
+                },
+            })
+            .map_err(|_| "Provider output consumer disconnected; run stopped".to_string())
+    }
+}
+
+fn spawn_output_batcher<F>(emit: F) -> (OutputSender, mpsc::Receiver<Result<(), String>>)
 where
-    F: FnMut(Vec<String>) + Send + 'static,
+    F: FnMut(Vec<String>) -> Result<(), String> + Send + 'static,
 {
-    let (tx, rx) = mpsc::channel::<String>();
+    spawn_output_batcher_with_limits(OUTPUT_QUEUE_BYTES, OUTPUT_QUEUE_ITEMS, emit)
+}
+
+fn spawn_output_batcher_with_limits<F>(
+    max_bytes: usize,
+    max_items: usize,
+    mut emit: F,
+) -> (OutputSender, mpsc::Receiver<Result<(), String>>)
+where
+    F: FnMut(Vec<String>) -> Result<(), String> + Send + 'static,
+{
+    let (tx, rx) = mpsc::channel::<OutputRecord>();
     let (done_tx, done_rx) = mpsc::channel();
+    let usage = Arc::new(Mutex::new(OutputUsage::default()));
+    let receiver_usage = usage.clone();
     thread::spawn(move || {
         let mut last_emit: Option<Instant> = None;
-        while let Ok(first) = rx.recv() {
-            let mut bytes = first.len();
+        loop {
+            let first = match rx.recv_timeout(OUTPUT_COALESCE) {
+                Ok(first) => first,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if receiver_usage
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .closed
+                    {
+                        break;
+                    }
+                    continue;
+                }
+            };
+            let mut bytes = first.line.len();
             let mut batch = vec![first];
             if let Some(deadline) = last_emit.map(|at| at + OUTPUT_COALESCE) {
                 while bytes < OUTPUT_BATCH_BYTES {
@@ -80,7 +179,7 @@ where
                     };
                     match rx.recv_timeout(wait) {
                         Ok(item) => {
-                            bytes += item.len();
+                            bytes += item.line.len();
                             batch.push(item);
                         }
                         Err(_) => break,
@@ -89,15 +188,92 @@ where
             }
             while bytes < OUTPUT_BATCH_BYTES {
                 let Ok(item) = rx.try_recv() else { break };
-                bytes += item.len();
+                bytes += item.line.len();
                 batch.push(item);
             }
-            emit(batch);
+            let (lines, reservations): (Vec<_>, Vec<_>) = batch
+                .into_iter()
+                .map(|item| (item.line, item.reservation))
+                .unzip();
+            let emitted = emit(lines);
+            drop(reservations);
+            if let Err(error) = emitted {
+                // Drop queued records and disconnect senders before reporting.
+                drop(rx);
+                let _ = done_tx.send(Err(error));
+                return;
+            }
             last_emit = Some(Instant::now());
         }
-        let _ = done_tx.send(());
+        let _ = done_tx.send(Ok(()));
     });
-    (tx, done_rx)
+    (
+        OutputSender {
+            tx,
+            usage,
+            max_bytes,
+            max_items,
+        },
+        done_rx,
+    )
+}
+
+/// Bound framing before allocating the whole record. `BufRead::lines` can
+/// otherwise grow indefinitely for a provider that never writes a newline.
+fn read_output_lines<R, F>(mut reader: R, max_bytes: usize, mut receive: F) -> Result<(), String>
+where
+    R: BufRead,
+    F: FnMut(String) -> Result<(), String>,
+{
+    let mut record = Vec::new();
+    loop {
+        let available = reader
+            .fill_buf()
+            .map_err(|error| format!("Could not read provider output: {error}"))?;
+        if available.is_empty() {
+            if !record.is_empty() {
+                receive(
+                    String::from_utf8(record)
+                        .map_err(|_| "Provider output is not valid UTF-8".to_string())?,
+                )?;
+            }
+            return Ok(());
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let take = newline.unwrap_or(available.len());
+        if take > max_bytes.saturating_sub(record.len()) {
+            return Err(format!(
+                "Provider output record exceeds the {max_bytes} byte limit; run stopped"
+            ));
+        }
+        record.extend_from_slice(&available[..take]);
+        reader.consume(take + usize::from(newline.is_some()));
+        if newline.is_some() {
+            if record.last() == Some(&b'\r') {
+                record.pop();
+            }
+            receive(
+                String::from_utf8(std::mem::take(&mut record))
+                    .map_err(|_| "Provider output is not valid UTF-8".to_string())?,
+            )?;
+        }
+    }
+}
+
+fn record_output_failure(failure: &Mutex<Option<String>>, error: String) -> bool {
+    let mut failure = failure.lock().unwrap_or_else(|e| e.into_inner());
+    if failure.is_some() {
+        false
+    } else {
+        *failure = Some(error);
+        true
+    }
+}
+
+fn fail_output(failure: &Mutex<Option<String>>, pid: u32, error: String) {
+    if record_output_failure(failure, error) {
+        terminate(pid);
+    }
 }
 
 #[derive(Serialize)]
@@ -884,22 +1060,31 @@ pub fn harness_spawn(
         return Err(SPAWN_CANCELLED.to_string());
     }
 
+    let output_failure = Arc::new(Mutex::new(None));
     let stdout_app = app.clone();
     let stdout_id = session_id.clone();
+    let emit_failure = output_failure.clone();
     let (stdout_tx, stdout_drained) = spawn_output_batcher(move |lines| {
-        let _ = stdout_app.emit(
-            STDOUT_EVENT,
-            HarnessLines {
-                session_id: stdout_id.clone(),
-                lines,
-            },
-        );
+        stdout_app
+            .emit(
+                STDOUT_EVENT,
+                HarnessLines {
+                    session_id: stdout_id.clone(),
+                    lines,
+                },
+            )
+            .map_err(|error| {
+                let error = format!("Could not deliver provider output: {error}");
+                fail_output(&emit_failure, pid, error.clone());
+                error
+            })
     });
+    let output_usage = stdout_tx.usage.clone();
     let wait_store = codex_store.clone();
     let stdout_store = codex_store;
+    let read_failure = output_failure.clone();
     thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            let Ok(line) = line else { break };
+        let result = read_output_lines(BufReader::new(stdout), OUTPUT_RECORD_BYTES, |line| {
             if let Some(store) = &stdout_store {
                 if line.contains("\"turn/completed\"")
                     || line.contains("\"item/started\"")
@@ -908,25 +1093,39 @@ pub fn harness_spawn(
                     store.sync_auth();
                 }
             }
-            if stdout_tx.send(line).is_err() {
-                break;
-            }
+            stdout_tx.send(line)
+        });
+        if let Err(error) = result {
+            fail_output(&read_failure, pid, error);
         }
     });
 
     let stderr_app = app.clone();
     let stderr_id = session_id.clone();
+    let stderr_stopped = Arc::new(Mutex::new(false));
+    let stderr_gate = stderr_stopped.clone();
+    let (stderr_done_tx, stderr_done_rx) = mpsc::channel();
+    let stderr_failure = output_failure.clone();
     thread::spawn(move || {
-        for line in BufReader::new(stderr).lines() {
-            let Ok(line) = line else { break };
-            let _ = stderr_app.emit(
-                STDERR_EVENT,
-                HarnessLine {
-                    session_id: stderr_id.clone(),
-                    line,
-                },
-            );
+        let result = read_output_lines(BufReader::new(stderr), OUTPUT_RECORD_BYTES, |line| {
+            let stopped = stderr_gate.lock().unwrap_or_else(|e| e.into_inner());
+            if *stopped {
+                return Err("Provider diagnostic delivery has stopped".into());
+            }
+            stderr_app
+                .emit(
+                    STDERR_EVENT,
+                    HarnessLine {
+                        session_id: stderr_id.clone(),
+                        line,
+                    },
+                )
+                .map_err(|error| format!("Could not deliver provider diagnostics: {error}"))
+        });
+        if let Err(error) = result {
+            fail_output(&stderr_failure, pid, error);
         }
+        let _ = stderr_done_tx.send(());
     });
 
     let wait_app = app.clone();
@@ -934,20 +1133,60 @@ pub fn harness_spawn(
     let wait_pid = pid;
     thread::spawn(move || {
         let code = child.wait().ok().and_then(|status| status.code());
-        // Deliver the final batched lines before the exit that follows them.
-        let _ = stdout_drained.recv_timeout(OUTPUT_DRAIN_WAIT);
+        // A normal exit includes its final tail. An inherited pipe that fails
+        // to close is an explicit failure, never a successful truncated run.
+        match stdout_drained.recv_timeout(OUTPUT_DRAIN_WAIT) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                record_output_failure(&output_failure, error);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                record_output_failure(
+                    &output_failure,
+                    "Provider output did not drain before exit; run stopped".into(),
+                );
+                // An escaped descendant may keep the reader blocked forever.
+                // Close admission independently of that pipe, then flush the
+                // already admitted prefix before publishing the failed exit.
+                output_usage
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .closed = true;
+                let _ = stdout_drained.recv();
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                record_output_failure(
+                    &output_failure,
+                    "Provider output consumer disconnected".into(),
+                );
+            }
+        }
+        if stderr_done_rx.recv_timeout(OUTPUT_DRAIN_WAIT).is_err() {
+            // Closing the gate also joins any currently executing diagnostic
+            // emit, so diagnostics cannot overtake the final failed exit.
+            *stderr_stopped.lock().unwrap_or_else(|e| e.into_inner()) = true;
+            record_output_failure(
+                &output_failure,
+                "Provider diagnostics did not drain before exit; run stopped".into(),
+            );
+        }
         if let Some(store) = wait_store {
             store.sync_auth();
         }
         if let Some(host) = wait_app.try_state::<HarnessHost>() {
-            if host.remove_if_pid(&wait_id, wait_pid).is_some() {}
+            host.remove_if_pid(&wait_id, wait_pid);
         }
+        let error = output_failure
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let _ = wait_app.emit(
             EXIT_EVENT,
             HarnessExit {
                 session_id: wait_id,
-                code,
+                code: if error.is_some() { Some(1) } else { code },
                 pid: wait_pid,
+                error,
             },
         );
     });
@@ -3283,10 +3522,13 @@ mod output_batcher_tests {
 
     type Batches = Arc<Mutex<Vec<Vec<String>>>>;
 
-    fn collect() -> (mpsc::Sender<String>, mpsc::Receiver<()>, Batches) {
+    fn collect() -> (OutputSender, mpsc::Receiver<Result<(), String>>, Batches) {
         let batches = Arc::new(Mutex::new(Vec::new()));
         let sink = batches.clone();
-        let (tx, drained) = spawn_output_batcher(move |batch| sink.lock().unwrap().push(batch));
+        let (tx, drained) = spawn_output_batcher(move |batch| {
+            sink.lock().unwrap().push(batch);
+            Ok(())
+        });
         (tx, drained, batches)
     }
 
@@ -3305,14 +3547,18 @@ mod output_batcher_tests {
     fn a_burst_shares_one_event_and_drains_before_done() {
         let (tx, drained, batches) = collect();
         tx.send("lead".into()).unwrap();
-        while batches.lock().unwrap().is_empty() {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while batches.lock().unwrap().is_empty() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(1));
         }
         for i in 0..100 {
             tx.send(format!("line {i}")).unwrap();
         }
         drop(tx);
-        drained.recv_timeout(Duration::from_secs(5)).unwrap();
+        drained
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
         let batches = batches.lock().unwrap();
         assert!(batches.len() <= 3, "{} batches", batches.len());
         let lines: Vec<String> = batches.iter().flatten().cloned().collect();
@@ -3328,10 +3574,156 @@ mod output_batcher_tests {
         tx.send("x".repeat(OUTPUT_BATCH_BYTES)).unwrap();
         tx.send("after".into()).unwrap();
         drop(tx);
-        drained.recv_timeout(Duration::from_secs(5)).unwrap();
+        drained
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
         let batches = batches.lock().unwrap();
         assert_eq!(batches.len(), 2);
         assert_eq!(batches[1], vec!["after".to_string()]);
+    }
+
+    type StalledBatcher = (
+        OutputSender,
+        mpsc::Receiver<Result<(), String>>,
+        mpsc::Receiver<()>,
+        mpsc::Sender<()>,
+    );
+
+    fn stalled(max_bytes: usize, max_items: usize) -> StalledBatcher {
+        let (started_tx, started_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let mut first = true;
+        let (tx, drained) = spawn_output_batcher_with_limits(max_bytes, max_items, move |_| {
+            if first {
+                first = false;
+                started_tx.send(()).unwrap();
+                resume_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+            Ok(())
+        });
+        (tx, drained, started_rx, resume_tx)
+    }
+
+    #[test]
+    fn stalled_consumer_keeps_inflight_and_queued_bytes_within_budget() {
+        let (tx, drained, started, resume) = stalled(8, 8);
+        tx.send("éé".into()).unwrap(); // four UTF-8 bytes, held in emit
+        started.recv_timeout(Duration::from_secs(5)).unwrap();
+        tx.send("four".into()).unwrap();
+        for _ in 0..1000 {
+            assert!(tx.send("x".into()).unwrap_err().contains("queue exceeded"));
+        }
+        let usage = tx.usage.lock().unwrap();
+        assert_eq!((usage.bytes, usage.items), (8, 2));
+        drop(usage);
+        let usage = tx.usage.clone();
+        drop(tx);
+        resume.send(()).unwrap();
+        drained
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        let usage = usage.lock().unwrap();
+        assert_eq!((usage.bytes, usage.items), (0, 0));
+    }
+
+    #[test]
+    fn empty_records_use_item_capacity_and_full_queue_does_not_block_stop() {
+        let (tx, drained, started, resume) = stalled(8, 2);
+        tx.send(String::new()).unwrap();
+        started.recv_timeout(Duration::from_secs(5)).unwrap();
+        tx.send(String::new()).unwrap();
+        assert!(tx
+            .send(String::new())
+            .unwrap_err()
+            .contains("queue exceeded"));
+        let (stopped_tx, stopped_rx) = mpsc::channel();
+        thread::spawn(move || {
+            drop(tx);
+            stopped_tx.send(()).unwrap();
+        });
+        // Dropping the producer is the output side of cancellation. It must
+        // finish even though the full queue's consumer is still stalled.
+        stopped_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        resume.send(()).unwrap();
+        drained
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+    }
+
+    #[test]
+    fn cancelling_full_queue_drains_admitted_prefix_without_waiting_for_reader_eof() {
+        let (tx, drained, started, resume) = stalled(4, 2);
+        tx.send("aa".into()).unwrap();
+        started.recv_timeout(Duration::from_secs(5)).unwrap();
+        tx.send("bb".into()).unwrap();
+        assert!(tx.send("cc".into()).is_err());
+        tx.usage.lock().unwrap().closed = true;
+        assert!(tx.send("dd".into()).unwrap_err().contains("stopped"));
+        resume.send(()).unwrap();
+        // The producer is deliberately alive, just like a pipe reader held by
+        // an escaped descendant. Cancellation must still finish the batcher.
+        drained
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        assert_eq!(tx.usage.lock().unwrap().bytes, 0);
+    }
+
+    #[test]
+    fn oversized_admission_and_disappeared_consumer_release_reservations() {
+        let (tx, drained) = spawn_output_batcher_with_limits(4, 2, |_| Err("window closed".into()));
+        assert!(tx.send("12345".into()).unwrap_err().contains("exceeds"));
+        tx.send("ok".into()).unwrap();
+        assert_eq!(
+            drained.recv_timeout(Duration::from_secs(5)).unwrap(),
+            Err("window closed".into())
+        );
+        assert!(tx.send("late".into()).unwrap_err().contains("disconnected"));
+        let usage = tx.usage.lock().unwrap();
+        assert_eq!((usage.bytes, usage.items), (0, 0));
+    }
+
+    #[test]
+    fn framing_rejects_multibyte_or_unterminated_oversized_records_before_delivery() {
+        for input in ["ééé", "123456", "123456\n"] {
+            let mut lines = Vec::new();
+            let result =
+                read_output_lines(BufReader::with_capacity(2, input.as_bytes()), 5, |line| {
+                    lines.push(line);
+                    Ok(())
+                });
+            assert!(result.unwrap_err().contains("5 byte limit"));
+            assert!(lines.is_empty());
+        }
+    }
+
+    #[test]
+    fn approval_completion_and_final_tail_flush_in_order_before_exit_barrier() {
+        let (tx, drained, batches) = collect();
+        read_output_lines(
+            BufReader::with_capacity(2, "approval\r\ncompletion\nfinal tail".as_bytes()),
+            32,
+            |line| tx.send(line),
+        )
+        .unwrap();
+        drop(tx);
+        drained
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            batches
+                .lock()
+                .unwrap()
+                .iter()
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec!["approval", "completion", "final tail"]
+        );
     }
 }
 

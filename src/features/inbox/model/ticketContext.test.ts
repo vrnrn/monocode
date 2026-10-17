@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   applyTicketContextToTurn,
+  hasTicketContextLinks,
   parseTicketContextLink,
   supportsTicketContext,
   ticketContextLink,
@@ -9,6 +10,7 @@ import {
 } from "./ticketContext";
 import { clearInboxCache, type InboxItem } from "./githubTasks";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+afterEach(() => vi.unstubAllGlobals());
 
 const urls = {
   jira: "https://demo.atlassian.net/browse/DEMO-42",
@@ -217,6 +219,23 @@ it("emits vorkspace links while accepting legacy monocode references", async () 
   const current = link("jira");
   const legacy = current.replace("vorkspace:", "monocode:");
   expect(current).toMatch(/^vorkspace:\/\/context\//);
-  expect(parseTicketContextLink(legacy)).toEqual(parseTicketContextLink(current));
-  expect(await applyTicketContextToTurn(`Review ${legacy}`, "/tmp/demo")).toContain("Initial description");
+  expect(parseTicketContextLink(legacy)).toEqual(
+    parseTicketContextLink(current),
+  );
+  expect(
+    await applyTicketContextToTurn(`Review ${legacy}`, "/tmp/demo"),
+  ).toContain("Initial description");
+});
+
+it("generates and resolves development links using the actual native profile", async () => {
+  vi.stubGlobal("__VORKSPACE_DEVELOPMENT__", true);
+  const development = link("jira");
+  expect(development).toMatch(/^vorkspace-dev:\/\/context\//);
+  expect(hasTicketContextLinks(`Review ${development}`)).toBe(true);
+  expect(parseTicketContextLink(development)?.key).toBe("DEMO-42");
+  expect(
+    await applyTicketContextToTurn(`Review ${development}`, "/tmp/demo"),
+  ).toContain("Initial description");
+  vi.stubGlobal("__VORKSPACE_DEVELOPMENT__", false);
+  expect(link("jira")).toMatch(/^vorkspace:\/\/context\//);
 });

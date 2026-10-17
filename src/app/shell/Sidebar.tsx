@@ -63,7 +63,6 @@ import { copyText } from "../../platform/tauri/clipboard";
 import { resolveModel } from "../../features/sessions/model/models";
 import type { OpenFileFn } from "../../features/search/model/search";
 import { sessionDisplayTitle } from "../../features/sessions/model/session";
-import { ParticleText } from "../../shared/ui/ParticleText";
 import { nextUnseenFinishedSessions } from "../../features/sessions/model/sessionDone";
 import { orchestrationTaskLabel } from "../../features/orchestration/model/orchestrationSummary";
 import {
@@ -1900,7 +1899,7 @@ function SidebarComponent({
               ) : visibleSessions.length === 0 ? (
                 // A narrowed-down result is a transient answer to what the user
                 // just typed, so it stays a quiet line of text. Only the genuine
-                // "this project has nothing in it" case earns the illustration.
+                // empty project uses the guidance below.
                 narrowedByUser ? (
                   <p className="px-3 py-2 text-[12px] text-content/50">
                     {searchNarrowed
@@ -3757,10 +3756,9 @@ export const SessionCard = memo(function SessionCard({
                 strokeWidth={1.75}
               />
             ) : null}
-            <ParticleText
-              text={title}
-              className="line-clamp-1 text-[13px] font-semibold leading-snug text-content"
-            />
+            <span className="line-clamp-1 text-[13px] font-semibold leading-snug text-content">
+              {title}
+            </span>
             {headerRow ? null : (
               <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
                 {linkedUpdateDot}

@@ -51,9 +51,10 @@ import {
   gitFileDiff,
   gitStageContents,
   notifyGitChanged,
-  readTextFile,
+  readEditorTextFile,
   subscribeGitChanged,
-  writeTextFile,
+  writeEditorTextFile,
+  type EditorTextFile,
   type GitFileDiffKind,
 } from "../../../platform/tauri/fs";
 import { syncWatchedMtime, watchFile } from "../model/fileWatch";
@@ -122,7 +123,16 @@ type LoadState =
 
 type SaveState =
   | { status: "idle" | "saving" | "saved" }
+  | { status: "conflict"; message?: string }
   | { status: "error"; message: string };
+
+type DiskBaseline = { path: string; hash: string; lineEnding: LineEnding };
+
+class EditorSaveConflict extends Error {
+  constructor() {
+    super("File changed on disk");
+  }
+}
 
 export function FileEditor({
   path,
@@ -137,7 +147,11 @@ export function FileEditor({
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [saveState, setSaveState] = useState<SaveState>({ status: "idle" });
   const [reloadKey, setReloadKey] = useState(0);
+  const [forcedReloadKey, setForcedReloadKey] = useState(0);
+  const [saveRequest, setSaveRequest] = useState(0);
   const [draft, setDraft] = useState("");
+  const draftRef = useRef("");
+  const draftRevisionRef = useRef(0);
   const [gitBase, setGitBase] = useState<{
     path: string;
     original: string;
@@ -168,31 +182,39 @@ export function FileEditor({
   const loadGeneration = useRef(0);
   const dirtyRef = useRef(false);
   const pendingDiskRef = useRef(false);
-  const eolRef = useRef<LineEnding>("\n");
+  const baselineRef = useRef<DiskBaseline | null>(null);
   const onDirtyChangeRef = useRef(onDirtyChange);
   onDirtyChangeRef.current = onDirtyChange;
 
-  const applyDiskContent = useCallback((raw: string) => {
+  const applyDiskContent = useCallback((file: EditorTextFile) => {
     // CodeMirror documents are LF-only; keep the editor in that convention
     // and restore the file's own line endings on save. Feeding CRLF text
     // into the LF document doubles every line (see editorDoc.ts).
-    eolRef.current = detectLineEnding(raw);
-    const content = normalizeLineBreaks(raw);
+    baselineRef.current = {
+      path: file.path,
+      hash: file.hash,
+      lineEnding: detectLineEnding(file.content),
+    };
+    const content = normalizeLineBreaks(file.content);
     setLoadState((current) => {
       if (current.status === "ready" && current.content === content) {
         return current;
       }
       return { status: "ready", content };
     });
+    draftRef.current = content;
+    ++draftRevisionRef.current;
     setDraft(content);
   }, []);
 
   const reloadFromDisk = useCallback(
     async (force = false) => {
       const generation = ++loadGeneration.current;
+      const draftRevision = draftRevisionRef.current;
       try {
-        const content = await readTextFile(path);
+        const content = await readEditorTextFile(path);
         if (generation !== loadGeneration.current) return;
+        if (force && draftRevision !== draftRevisionRef.current) return;
         if (dirtyRef.current && !force) {
           pendingDiskRef.current = true;
           return;
@@ -203,8 +225,21 @@ export function FileEditor({
           onDirtyChangeRef.current(path, false);
         }
         applyDiskContent(content);
+        setSaveState({ status: "idle" });
+        if (force) {
+          setForcedReloadKey((value) => value + 1);
+        }
       } catch (error: unknown) {
         if (generation !== loadGeneration.current) return;
+        if (force) {
+          if (draftRevision === draftRevisionRef.current) {
+            setSaveState({
+              status: "conflict",
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+          return;
+        }
         if (dirtyRef.current && !force) {
           pendingDiskRef.current = true;
           return;
@@ -221,11 +256,13 @@ export function FileEditor({
   useEffect(() => {
     dirtyRef.current = false;
     pendingDiskRef.current = false;
+    baselineRef.current = null;
+    ++saveGeneration.current;
     let cancelled = false;
     setLoadState({ status: "loading" });
     setSaveState({ status: "idle" });
     const generation = ++loadGeneration.current;
-    void readTextFile(path)
+    void readEditorTextFile(path)
       .then((content) => {
         if (cancelled || generation !== loadGeneration.current) return;
         applyDiskContent(content);
@@ -239,6 +276,9 @@ export function FileEditor({
       });
     return () => {
       cancelled = true;
+      ++loadGeneration.current;
+      ++saveGeneration.current;
+      baselineRef.current = null;
     };
   }, [applyDiskContent, path, reloadKey]);
 
@@ -338,23 +378,52 @@ export function FileEditor({
 
   const save = useCallback(
     async (content: string) => {
+      const baseline = baselineRef.current;
+      if (!baseline || baseline.path !== path)
+        throw new Error("File is still opening");
+      ++loadGeneration.current;
       const generation = ++saveGeneration.current;
       setSaveState({ status: "saving" });
-      const serializedContent = restoreLineEnding(content, eolRef.current);
-      const operation = saveQueue.current.then(() =>
-        writeTextFile(path, serializedContent),
-      );
+      const serializedContent = restoreLineEnding(content, baseline.lineEnding);
+      // Read the captured document's baseline when its queued write starts:
+      // a preceding successful save advances it, even after switching files.
+      const operation = saveQueue.current.then(async () => {
+        const receipt = await writeEditorTextFile(
+          path,
+          serializedContent,
+          baseline.hash,
+        );
+        if (receipt.path !== path)
+          throw new Error("Save receipt belongs to another file");
+        if (receipt.status === "conflict") {
+          if (baselineRef.current === baseline) {
+            pendingDiskRef.current = true;
+            setSaveState({ status: "conflict" });
+          }
+          throw new EditorSaveConflict();
+        }
+        baseline.hash = receipt.hash;
+      });
       saveQueue.current = operation.catch(() => {});
       try {
         await operation;
         await syncWatchedMtime(path);
         notifyGitChanged();
-        if (generation === saveGeneration.current) {
-          setSaveState({ status: "saved" });
+        if (
+          baselineRef.current === baseline &&
+          generation === saveGeneration.current
+        ) {
+          setSaveState({
+            status: draftRef.current !== content ? "idle" : "saved",
+          });
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (generation === saveGeneration.current) {
+        if (
+          !(error instanceof EditorSaveConflict) &&
+          baselineRef.current === baseline &&
+          generation === saveGeneration.current
+        ) {
           setSaveState({ status: "error", message });
         }
         throw error;
@@ -362,6 +431,41 @@ export function FileEditor({
     },
     [path],
   );
+
+  const docChange = (content: string) => {
+    draftRef.current = content;
+    ++draftRevisionRef.current;
+    if (markdown || svg) setDraft(content);
+  };
+
+  const retryLocalSave = async () => {
+    const baseline = baselineRef.current;
+    if (!baseline) return;
+    const generation = saveGeneration.current;
+    try {
+      // Explicit overwrite consent applies to the version observed here. A
+      // further external change still conflicts in the native/host command.
+      const latest = await readEditorTextFile(path);
+      if (
+        baselineRef.current !== baseline ||
+        generation !== saveGeneration.current
+      )
+        return;
+      baseline.hash = latest.hash;
+      pendingDiskRef.current = false;
+      setSaveRequest((value) => value + 1);
+    } catch (error) {
+      if (
+        baselineRef.current !== baseline ||
+        generation !== saveGeneration.current
+      )
+        return;
+      setSaveState({
+        status: "conflict",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
 
   const stageGit = useCallback(
     async (contents: string) => {
@@ -395,7 +499,9 @@ export function FileEditor({
       onDirtyChange(path, dirty);
       if (dirty) {
         setSaveState((current) =>
-          current.status === "saving" ? current : { status: "idle" },
+          current.status === "saving" || current.status === "conflict"
+            ? current
+            : { status: "idle" },
         );
         return;
       }
@@ -450,6 +556,31 @@ export function FileEditor({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
+      {saveState.status === "conflict" && (
+        <div
+          role="alert"
+          className="flex shrink-0 items-center gap-3 border-b border-stroke px-3 py-2 text-[12px] text-content/75"
+        >
+          <span className="flex-1">
+            This file changed on disk. Your unsaved changes are still in the
+            editor.{saveState.message && ` ${saveState.message}`}
+          </span>
+          <button
+            type="button"
+            onClick={() => void reloadFromDisk(true)}
+            className="shrink-0 underline"
+          >
+            Reload from disk
+          </button>
+          <button
+            type="button"
+            onClick={() => void retryLocalSave()}
+            className="shrink-0 underline"
+          >
+            Save my changes
+          </button>
+        </div>
+      )}
       {showDiff && gitDiff?.eolOnly && (
         <p
           role="status"
@@ -487,7 +618,7 @@ export function FileEditor({
           source={
             <div className="flex h-full min-h-0 min-w-0 flex-col">
               <CodeMirrorEditor
-                key={`${path}:${reloadKey}`}
+                key={`${path}:${reloadKey}:${forcedReloadKey}`}
                 path={path}
                 commentPath={relativePath}
                 value={loadState.content}
@@ -498,20 +629,21 @@ export function FileEditor({
                 onDirtyChange={dirtyChange}
                 onErrorCountChange={errorCountChange}
                 onSave={save}
+                saveRequest={saveRequest}
                 canAutosave={() => !pendingDiskRef.current}
                 onStageGit={
                   showDiff && gitDiff?.kind === "unstaged"
                     ? stageGit
                     : undefined
                 }
-                onDocChange={setDraft}
+                onDocChange={docChange}
               />
             </div>
           }
         />
       ) : (
         <CodeMirrorEditor
-          key={`${path}:${reloadKey}`}
+          key={`${path}:${reloadKey}:${forcedReloadKey}`}
           path={path}
           commentPath={relativePath}
           value={loadState.content}
@@ -522,6 +654,8 @@ export function FileEditor({
           onDirtyChange={dirtyChange}
           onErrorCountChange={errorCountChange}
           onSave={save}
+          saveRequest={saveRequest}
+          onDocChange={docChange}
           canAutosave={() => !pendingDiskRef.current}
           onStageGit={
             showDiff && gitDiff?.kind === "unstaged" ? stageGit : undefined
@@ -560,6 +694,7 @@ export function CodeMirrorEditor({
   onDirtyChange,
   onErrorCountChange,
   onSave,
+  saveRequest = 0,
   canAutosave,
   onStageGit,
   onDocChange,
@@ -575,6 +710,7 @@ export function CodeMirrorEditor({
   onDirtyChange: (dirty: boolean) => void;
   onErrorCountChange: (count: number) => void;
   onSave: (content: string) => Promise<void>;
+  saveRequest?: number;
   canAutosave: () => boolean;
   onStageGit?: (contents: string) => Promise<void>;
   onDocChange?: (content: string) => void;
@@ -593,6 +729,9 @@ export function CodeMirrorEditor({
   const canStage = onStageGit !== undefined;
   const onDocChangeRef = useRef(onDocChange);
   const valueRef = useRef(value);
+  const requestSaveRef = useRef<(() => void) | null>(null);
+  const lastSaveRequestRef = useRef(saveRequest);
+  const documentEpochRef = useRef(0);
   const navigationTokenRef = useRef<number | undefined>(undefined);
   const pendingNavigationRef = useRef<EditorNavigationRequest | null>(null);
   const gitOriginalRef = useRef(gitOriginal);
@@ -713,6 +852,7 @@ export function CodeMirrorEditor({
       const retryPendingAutosave = autosaveTimer !== 0 && loadAutosave();
       window.clearTimeout(autosaveTimer);
       const generation = ++saveGeneration;
+      const documentEpoch = documentEpochRef.current;
       void (async () => {
         const before = view.state.doc.toString();
         if (formatOnSave && loadFormatOnSave()) {
@@ -721,7 +861,12 @@ export function CodeMirrorEditor({
             before,
             view.state.selection.main.head,
           );
-          if (disposed || generation !== saveGeneration) return;
+          if (
+            disposed ||
+            generation !== saveGeneration ||
+            documentEpoch !== documentEpochRef.current
+          )
+            return;
 
           if (
             result &&
@@ -754,11 +899,19 @@ export function CodeMirrorEditor({
           }
           return;
         }
-        if (disposed || generation !== saveGeneration) return;
+        if (
+          disposed ||
+          generation !== saveGeneration ||
+          documentEpoch !== documentEpochRef.current
+        )
+          return;
         savedDocumentRef.current = document;
         markDirty();
       })();
       return true;
+    };
+    requestSaveRef.current = () => {
+      save();
     };
 
     function scheduleAutosave() {
@@ -766,11 +919,7 @@ export function CodeMirrorEditor({
       if (!loadAutosave()) return;
       autosaveTimer = window.setTimeout(() => {
         autosaveTimer = 0;
-        if (
-          dirtyRef.current &&
-          loadAutosave() &&
-          canAutosaveRef.current()
-        ) {
+        if (dirtyRef.current && loadAutosave() && canAutosaveRef.current()) {
           save(true);
         }
       }, FILE_EDITOR_AUTOSAVE_DELAY_MS);
@@ -884,6 +1033,7 @@ export function CodeMirrorEditor({
 
     return () => {
       disposed = true;
+      requestSaveRef.current = null;
       window.clearTimeout(autosaveTimer);
       onErrorCountChangeRef.current(0);
       lockOverscroll(null);
@@ -894,6 +1044,12 @@ export function CodeMirrorEditor({
       view.destroy();
     };
   }, [formatOnSave, lockOverscroll, path, showDiff, syncChunkNav]);
+
+  useEffect(() => {
+    if (lastSaveRequestRef.current === saveRequest) return;
+    lastSaveRequestRef.current = saveRequest;
+    if (saveRequest) requestSaveRef.current?.();
+  }, [saveRequest]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -938,6 +1094,7 @@ export function CodeMirrorEditor({
     const view = viewRef.current;
     if (!view || dirtyRef.current) return;
     if (view.state.doc.toString() === value) return;
+    ++documentEpochRef.current;
     replaceEditorDoc(view, value, {
       annotations: [Transaction.addToHistory.of(false), diskReload.of(true)],
     });

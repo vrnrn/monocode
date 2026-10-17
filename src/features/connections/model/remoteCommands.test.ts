@@ -14,7 +14,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeLocal }));
 
 import { runRemoteCommand } from "./remoteCommands";
 import { parseRemotePath, remotePath } from "./remoteProjects";
-import { gitCommit, gitLocateFiles, gitStagedContext, listDir, readBinaryFile, readTextFile, statFiles, writeTextFile } from "../../../platform/tauri/fs";
+import { gitCommit, gitLocateFiles, gitStagedContext, listDir, readBinaryFile, readEditorTextFile, readTextFile, statFiles, writeEditorTextFile, writeTextFile } from "../../../platform/tauri/fs";
 
 beforeEach(() => {
   remoteRequest.mockReset();
@@ -174,4 +174,23 @@ it("refuses what the host cannot do and explains outdated hosts", async () => {
     runRemoteCommand("list_dir", { path: "remote://env/home/me" }),
   ).rejects.toThrow("Update vorkspace Host");
   expect(remoteRequest).toHaveBeenCalledTimes(1);
+});
+
+it("carries exact editor baselines and maps read/save receipt identity for remote files", async () => {
+  const path = "remote://env/home/me/a.txt";
+  const hostPath = "/home/me/a.txt";
+  const content = "remote://literal/content\r\n";
+  remoteRequest.mockResolvedValueOnce({ path: hostPath, content, hash: "read-digest" });
+  expect(await readEditorTextFile(path)).toEqual({ path, content, hash: "read-digest" });
+  expect(remoteRequest).toHaveBeenLastCalledWith("machine", "workspace.run", {
+    command: "read_editor_text_file", args: { path: hostPath },
+  });
+  remoteRequest.mockResolvedValueOnce({ status: "saved", path: hostPath, hash: "saved-digest" });
+  expect(await writeEditorTextFile(path, content, "read-digest")).toEqual({ status: "saved", path, hash: "saved-digest" });
+  expect(remoteRequest).toHaveBeenLastCalledWith("machine", "workspace.run", {
+    command: "write_editor_text_file", args: { path: hostPath, content, expectedHash: "read-digest" },
+  });
+  remoteRequest.mockResolvedValueOnce({ status: "conflict", path: hostPath, hash: null });
+  expect(await writeEditorTextFile(path, content, "saved-digest")).toEqual({ status: "conflict", path, hash: null });
+  expect(invokeLocal).not.toHaveBeenCalled();
 });

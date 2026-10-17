@@ -3,6 +3,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   realpath,
   rename,
@@ -14,7 +15,8 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { FileMtime, FsEntry, GitPr, ProjectFile } from "../src/platform/tauri/fs";
+import { createHash, randomUUID } from "node:crypto";
+import type { EditorTextFile, EditorTextSaveResult, FileMtime, FsEntry, GitPr, ProjectFile } from "../src/platform/tauri/fs";
 import { hostWorktrees } from "./git-worktrees";
 import { createHostBranch, hostBranches, switchHostBranch } from "./git-branches";
 import type { HostStore } from "./store";
@@ -40,9 +42,11 @@ export const WORKSPACE_COMMANDS = [
   "list_dir",
   "list_project_files",
   "read_text_file",
+  "read_editor_text_file",
   "read_binary_file",
   "read_file_preview",
   "write_text_file",
+  "write_editor_text_file",
   "stat_files",
   "create_path",
   "rename_path",
@@ -100,6 +104,7 @@ type Located = { root: string; relative: string };
 export class WorkspaceCommands {
   private roots = new Map<string, { at: number; roots: string[] }>();
   private rootsGeneration = 0;
+  private editorWrites: Promise<unknown> = Promise.resolve();
 
   invalidateRoots(): void {
     this.rootsGeneration++;
@@ -125,12 +130,21 @@ export class WorkspaceCommands {
         return this.listProjectFiles(input.cwd);
       case "read_text_file":
         return this.readText(input.path);
+      case "read_editor_text_file":
+        return this.readEditorText(input.path);
       case "read_binary_file":
         return this.readBinary(input.path);
       case "read_file_preview":
         return this.preview(input.path, input.maxLines, input.startLine);
       case "write_text_file":
         return this.writeText(input.path, input.content);
+      case "write_editor_text_file": {
+        const operation = this.editorWrites.then(() =>
+          this.writeEditorText(input.path, input.content, input.expectedHash),
+        );
+        this.editorWrites = operation.catch(() => {});
+        return operation;
+      }
       case "stat_files":
         return this.statFiles(input.paths);
       case "create_path":
@@ -308,6 +322,116 @@ export class WorkspaceCommands {
       return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     } catch {
       throw new Error("File is not valid UTF-8.");
+    }
+  }
+
+  private async readEditorText(input: unknown): Promise<EditorTextFile> {
+    // Hash bytes rather than decoded text: TextDecoder consumes a UTF-8 BOM.
+    const bytes = await this.file(input, MAX_TEXT_FILE, "edit");
+    if (bytes.includes(0)) throw new Error("Binary files cannot be edited.");
+    let content: string;
+    try {
+      content = new TextDecoder("utf-8", {
+        fatal: true,
+        ignoreBOM: true,
+      }).decode(bytes);
+    } catch {
+      throw new Error("File is not valid UTF-8.");
+    }
+    return {
+      path: input as string,
+      content,
+      hash: createHash("sha256").update(bytes).digest("hex"),
+    };
+  }
+
+  private async writeEditorText(
+    input: unknown,
+    content: unknown,
+    expectedHash: unknown,
+  ): Promise<EditorTextSaveResult> {
+    if (typeof content !== "string" || typeof expectedHash !== "string")
+      throw new Error("Invalid editor save");
+    if (Buffer.byteLength(content, "utf8") > MAX_TEXT_FILE)
+      throw new Error(
+        `File is too large to save (maximum ${MAX_TEXT_FILE / 1024 / 1024} MB).`,
+      );
+    const { root, relative: rel } = await this.locate(input);
+    const path = workspacePath(root, rel);
+    const observe = async (target = path) => {
+      // A deleted/replaced target conflicts; it does not become a create.
+      const file = await open(target, "r").catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT" || error.code === "EISDIR") return null;
+          throw error;
+        },
+      );
+      if (!file) return null;
+      try {
+        if (!(await file.stat()).isFile()) return null;
+        const digest = createHash("sha256");
+        for await (const bytes of file.createReadStream({ autoClose: false }))
+          digest.update(bytes);
+        return digest.digest("hex");
+      } finally {
+        await file.close();
+      }
+    };
+    let hash = await observe();
+    const conflict = (): EditorTextSaveResult => ({
+      status: "conflict",
+      path: input as string,
+      hash,
+    });
+    if (hash !== expectedHash) return conflict();
+    const permissions = await stat(path).catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      },
+    );
+    if (!permissions) {
+      hash = null;
+      return conflict();
+    }
+
+    const temporary = join(
+      dirname(path),
+      `.${basename(path)}.monocode-${randomUUID()}.tmp`,
+    );
+    const file = await open(temporary, "wx");
+    try {
+      await file.writeFile(content, "utf8");
+      await file.sync();
+      await file.chmod(permissions.mode);
+      await file.close();
+      hash = await observe();
+      const latest = await this.locate(input);
+      const latestPath = workspacePath(latest.root, latest.relative);
+      if (latestPath !== path) {
+        hash = await observe(latestPath);
+        return conflict();
+      }
+      if (hash !== expectedHash) return conflict();
+      // Our own editor writes are serialized, but external writers can still
+      // race this last observation and rename. This is not filesystem CAS.
+      await rename(temporary, path);
+      const directory = await open(dirname(path), "r").catch(() => null);
+      if (directory) {
+        try {
+          await directory.sync().catch(() => {});
+        } finally {
+          await directory.close();
+        }
+      }
+      return {
+        status: "saved",
+        path: input as string,
+        hash: createHash("sha256").update(content, "utf8").digest("hex"),
+      };
+    } finally {
+      await file.close().catch(() => {});
+      await rm(temporary, { force: true });
     }
   }
 

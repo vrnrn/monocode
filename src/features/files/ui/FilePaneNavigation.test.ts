@@ -9,8 +9,8 @@ import { FilePane } from "./FilePane";
 
 const disk = vi.hoisted(() => ({ content: "" }));
 const invoke = vi.hoisted(() =>
-  vi.fn(async (command: string) => {
-    if (command === "read_text_file") return disk.content;
+  vi.fn(async (command: string, args?: Record<string, unknown>) => {
+    if (command === "read_editor_text_file") return { path: args?.path, content: disk.content, hash: disk.content };
     if (command === "git_diff_files")
       return {
         files: [{ relative: "review.txt", staged: false, unstaged: true }],

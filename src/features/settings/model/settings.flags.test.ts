@@ -46,13 +46,6 @@ describe.each([
     undefined,
   ],
   [
-    "monocode.composerRunner",
-    settings.loadComposerRunner,
-    settings.saveComposerRunner,
-    true,
-    "monocode:composer-runner-change",
-  ],
-  [
     "monocode.notesEnabled",
     settings.loadNotesEnabled,
     settings.saveNotesEnabled,
@@ -79,13 +72,6 @@ describe.each([
     settings.saveCloseToTray,
     true,
     undefined,
-  ],
-  [
-    "monocode.gridArcadeEnabled",
-    settings.loadGridArcadeEnabled,
-    settings.saveGridArcadeEnabled,
-    true,
-    "monocode:grid-arcade-enabled-change",
   ],
   [
     "monocode.claudeHooks",

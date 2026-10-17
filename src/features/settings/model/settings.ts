@@ -382,12 +382,6 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     keywords: "spelling spell check autocorrect typo macos composer",
   },
   {
-    id: "composer-mascot",
-    section: "chat",
-    label: "Composer mascot",
-    keywords: "runner animation coin fun",
-  },
-  {
     id: "format-on-save",
     section: "chat",
     label: "Format on save",
@@ -398,12 +392,6 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     section: "chat",
     label: "Diff view",
     keywords: "unified editor review changes working tree",
-  },
-  {
-    id: "empty-session-games",
-    section: "chat",
-    label: "Empty session games",
-    keywords: "pacman snake arcade grid fun",
   },
   {
     id: "agent-clis",
@@ -583,8 +571,6 @@ export function saveSettingsSection(id: SettingsSectionId) {
   }
 }
 
-const COMPOSER_RUNNER_KEY = "monocode.composerRunner";
-
 const FOLLOW_UP_BEHAVIOR_KEY = "monocode.followUpBehavior";
 
 const COMPOSER_EFFORT_VISIBLE_KEY = "monocode.composerEffortVisible";
@@ -742,23 +728,6 @@ export function subscribeModelControls(onStoreChange: () => void) {
     window.removeEventListener(MODEL_CONTROLS_CHANGE_EVENT, onStoreChange);
 }
 
-export const COMPOSER_RUNNER_DEFAULT = true;
-
-/** Fired on `window` when the composer mascot setting flips. */
-export const COMPOSER_RUNNER_CHANGE_EVENT = "monocode:composer-runner-change";
-
-export function loadComposerRunner(): boolean {
-  return readFlag(COMPOSER_RUNNER_KEY) ?? COMPOSER_RUNNER_DEFAULT;
-}
-
-export function saveComposerRunner(value: boolean) {
-  writeFlag(COMPOSER_RUNNER_KEY, value);
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(
-    new CustomEvent<boolean>(COMPOSER_RUNNER_CHANGE_EVENT, { detail: value }),
-  );
-}
-
 const NOTES_ENABLED_KEY = "monocode.notesEnabled";
 
 export const NOTES_ENABLED_DEFAULT = true;
@@ -911,35 +880,6 @@ export function loadCloseToTray(): boolean {
 
 export function saveCloseToTray(value: boolean) {
   writeFlag(CLOSE_TO_TRAY_KEY, value);
-}
-
-const GRID_ARCADE_ENABLED_KEY = "monocode.gridArcadeEnabled";
-
-export const GRID_ARCADE_ENABLED_DEFAULT = true;
-
-/** Fired on `window` when the empty-session games setting flips. */
-export const GRID_ARCADE_ENABLED_CHANGE_EVENT =
-  "monocode:grid-arcade-enabled-change";
-
-export function loadGridArcadeEnabled(): boolean {
-  return readFlag(GRID_ARCADE_ENABLED_KEY) ?? GRID_ARCADE_ENABLED_DEFAULT;
-}
-
-export function saveGridArcadeEnabled(value: boolean) {
-  writeFlag(GRID_ARCADE_ENABLED_KEY, value);
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(
-    new CustomEvent<boolean>(GRID_ARCADE_ENABLED_CHANGE_EVENT, {
-      detail: value,
-    }),
-  );
-}
-
-export function subscribeGridArcadeEnabled(onStoreChange: () => void) {
-  if (typeof window === "undefined") return () => {};
-  window.addEventListener(GRID_ARCADE_ENABLED_CHANGE_EVENT, onStoreChange);
-  return () =>
-    window.removeEventListener(GRID_ARCADE_ENABLED_CHANGE_EVENT, onStoreChange);
 }
 
 const DIFF_VIEWER_KEY = "monocode.diffViewer";

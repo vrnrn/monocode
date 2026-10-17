@@ -21,6 +21,7 @@ import { setHomeDir } from "./shared/lib/paths";
 import { installNativeContextMenuGuard } from "./shared/lib/nativeContextMenu";
 import { consumeInstalledUpdate } from "./app/model/updateNotice";
 import { initializeProviderBinaryPaths } from "./features/providers/model/providerBinaryPaths";
+import { markBootWorkspaceReady } from "./bootSplash";
 // Lets file commands reach a connected machine for `remote://` paths.
 import "./features/connections/model/remoteCommands";
 import "./styles/index.css";
@@ -46,6 +47,7 @@ function dismissBootSplash() {
   const splash = document.getElementById("boot-splash");
   if (!splash || splash.dataset.dismissed === "1") return;
   splash.dataset.dismissed = "1";
+  markBootWorkspaceReady(splash);
   const fade = () => {
     activateWindowAppearance();
     splash.classList.add("boot-splash-out");

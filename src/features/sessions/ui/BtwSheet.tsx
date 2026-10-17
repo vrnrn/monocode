@@ -4,7 +4,6 @@ import { ChevronDown, Plus, RefreshCw, X } from "../../../shared/ui/icons";
 import { Composer } from "./Composer";
 import { AgentTranscript } from "./AgentTranscript";
 import { GlassBackdrop } from "../../../app/shell/GlassBackdrop";
-import { BtwQuestionBurst, type BurstRect } from "./BtwQuestionBurst";
 import { preferredModelSettings, resolveModel } from "../model/models";
 import {
   btwOpenTargetTurnId,
@@ -21,6 +20,13 @@ import {
   type BtwThread,
   type HarnessId,
 } from "../model/session";
+
+type SheetRect = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
 
 type Options = {
   /** False when this session cannot take side questions right now. */
@@ -427,7 +433,7 @@ const CLOSE_MOTION = {
 };
 
 /** An element's box relative to a host element. */
-function rectIn(el: HTMLElement, host: HTMLElement): BurstRect {
+function rectIn(el: HTMLElement, host: HTMLElement): SheetRect {
   const rect = el.getBoundingClientRect();
   const frame = host.getBoundingClientRect();
   return {
@@ -438,7 +444,7 @@ function rectIn(el: HTMLElement, host: HTMLElement): BurstRect {
   };
 }
 
-function box(rect: BurstRect) {
+function box(rect: SheetRect) {
   return {
     left: `${rect.left}px`,
     top: `${rect.top}px`,
@@ -497,9 +503,6 @@ export function BtwSheet({
   // The session composer stays hidden under an open sheet, past the morph.
   const homeFadeRef = useRef<Animation | null>(null);
   const startRef = useRef<number[]>([]);
-  const [burst, setBurst] = useState<(BurstRect & { key: number }) | null>(
-    null,
-  );
   const { open, rendered, tabs, activeTabId, messages, persisted, running } =
     btw;
   const harness = btw.harness;
@@ -530,8 +533,8 @@ export function BtwSheet({
   // of the session composer's box and folds back into it; a frame in the
   // composer's shape carries the input from one box to the other while the
   // two composers cross-fade inside it, so the input itself reads as
-  // reshaping. Opening also sets off a burst of question marks. Starting
-  // from the current frame lets a quick reopen or close reverse mid-flight.
+  // reshaping. Starting from the current frame lets a quick reopen or
+  // close reverse mid-flight.
   // Like popovers, the glass layer is never inside an animating ancestor:
   // it and the content each run the same morph.
   useLayoutEffect(() => {
@@ -609,7 +612,6 @@ export function BtwSheet({
             timing,
           ),
         );
-        if (!running) setBurst({ key: Date.now(), ...away });
       }
     }
 
@@ -859,13 +861,6 @@ export function BtwSheet({
         </div>
       </section>
       <div ref={frameRef} aria-hidden className="btw-morph-frame" />
-      {burst ? (
-        <BtwQuestionBurst
-          key={burst.key}
-          rect={burst}
-          onDone={() => setBurst(null)}
-        />
-      ) : null}
     </div>
   );
 }

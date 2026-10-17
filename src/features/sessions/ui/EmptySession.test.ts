@@ -3,23 +3,17 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { EmptySession } from "./EmptySession";
 
-describe("empty session background", () => {
-  it("renders the arcade when no chat background is selected", () => {
-    const markup = renderToStaticMarkup(
-      createElement(EmptySession, { cwd: "/work/demo" }),
-    );
-
-    expect(markup).toContain("<canvas");
-  });
-
-  it("does not render the arcade over a selected chat background", () => {
+describe("empty session", () => {
+  it("keeps the prompt and composer in a still workspace", () => {
     const markup = renderToStaticMarkup(
       createElement(EmptySession, {
         cwd: "/work/demo",
-        hasChatBackground: true,
+        composer: createElement("textarea", { "aria-label": "Message" }),
       }),
     );
 
+    expect(markup).toContain("What should we work on");
+    expect(markup).toContain('aria-label="Message"');
     expect(markup).not.toContain("<canvas");
   });
 });

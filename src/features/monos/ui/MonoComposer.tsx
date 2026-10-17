@@ -27,6 +27,8 @@ import {
   getComposerDraft,
   setComposerDraft,
 } from "../../sessions/model/draftCache";
+import { useDurableComposerDraft } from "../../sessions/hooks/useDurableComposerDraft";
+import { ComposerDraftRecovery } from "../../sessions/ui/ComposerDraftRecovery";
 import { useFileDrop } from "../../sessions/hooks/useFileDrop";
 import { resizeComposer } from "../../sessions/model/composerResize";
 import { useComposerAutocorrect } from "../../settings/model/displayPrefs";
@@ -55,6 +57,8 @@ const FIELD_CLASSES =
 
 type Props = {
   sessionId: string;
+  cwd?: string;
+  persistDraft?: boolean;
   name: string;
   inboxCard?: InboxComposerCard;
   onInboxCardDismiss?: () => void;
@@ -88,6 +92,8 @@ type Props = {
  */
 export function MonoComposer({
   sessionId,
+  cwd,
+  persistDraft = true,
   name,
   inboxCard,
   onInboxCardDismiss,
@@ -174,6 +180,43 @@ export function MonoComposer({
     setComposerDraft(sessionId, next);
     onDraftChange?.(next);
   };
+  const durableDraft = useDurableComposerDraft({
+    sessionId: persistDraft ? sessionId : undefined,
+    cwd,
+    enabled,
+    read: () => {
+      const value = textRef.current;
+      return {
+        cwd: cwd ?? "",
+        text: value,
+        selectionStart: Math.min(
+          field.current?.selectionStart ?? value.length,
+          value.length,
+        ),
+        selectionEnd: Math.min(
+          field.current?.selectionEnd ?? value.length,
+          value.length,
+        ),
+        attachments: attachmentsRef.current,
+        mcpTags: [],
+      };
+    },
+    restore: (payload) => {
+      readGeneration.current++;
+      textRef.current = payload.text;
+      attachmentsRef.current = payload.attachments;
+      if (field.current) {
+        field.current.value = payload.text;
+        field.current.setSelectionRange(
+          payload.selectionStart,
+          payload.selectionEnd,
+        );
+      }
+      setText(payload.text);
+      setAttachments(payload.attachments);
+      onDraftChange?.(payload.text);
+    },
+  });
   const emojiButton = useRef<HTMLButtonElement>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   // Where the pick goes: the field's selection when the picker opened.
@@ -285,10 +328,13 @@ export function MonoComposer({
     const clear = (accepted: boolean | void) => {
       if (accepted === false) return;
       if (generation !== readGeneration.current) {
-        if (getComposerDraft(sessionId) === draft)
+        if (getComposerDraft(sessionId) === draft) {
+          durableDraft.clear();
           setComposerDraft(sessionId, "");
+        }
         return;
       }
+      durableDraft.clear();
       update("");
       attachmentsRef.current = [];
       setAttachments([]);
@@ -342,7 +388,11 @@ export function MonoComposer({
       disabled={!enabled || submitting}
       value={text}
       onFocus={onFocus}
-      onChange={(event) => update(event.target.value)}
+      onChange={(event) => {
+        update(event.target.value);
+        durableDraft.capture();
+      }}
+      onSelect={() => durableDraft.capture()}
       onKeyDown={(event) => {
         if (
           event.key !== "Enter" ||
@@ -400,6 +450,11 @@ export function MonoComposer({
             {dropError}
           </p>
         ) : null}
+        <ComposerDraftRecovery
+          sessionId={sessionId}
+          issue={durableDraft.issue}
+          current={text}
+        />
         {attachments.length > 0 ? (
           <div className="flex flex-wrap gap-1.5 px-2.5 pt-2">
             {attachments.map((file) => (

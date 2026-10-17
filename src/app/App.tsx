@@ -1,3 +1,4 @@
+import { submissionUserTurn } from "../integrations/harness/core/localSubmissions";
 import { sessionConversationPage } from "../features/agent-app/model/sessionConversation";
 import { readMonoConversation } from "../features/monos/model/monoConversation";
 import {
@@ -1190,15 +1191,14 @@ function Workspace({
   const onShowMonoActivity = useCallback(
     (sessionId: string, turnId: string, blocks: Block[]) => {
       const shown =
-        monoOverviewOpenRef.current && monoOverviewTabRef.current === "activity";
+        monoOverviewOpenRef.current &&
+        monoOverviewTabRef.current === "activity";
       setMonoShownSession(null);
       setMonoOverviewDocument(null);
       setMonoOverviewTab("activity");
       setMonoOverviewOpen(true);
       setMonoActivity((previous) =>
-        shown &&
-        previous?.sessionId === sessionId &&
-        previous.turnId === turnId
+        shown && previous?.sessionId === sessionId && previous.turnId === turnId
           ? null
           : { sessionId, turnId, blocks },
       );
@@ -7424,7 +7424,13 @@ function Workspace({
           : card
             ? SECOND_OPINION_TITLE
             : submittedText;
+      const userTurnId =
+        queuedMonoMessage?.blockId ??
+        queuedMonoMessage?.id ??
+        draftBlock?.id ??
+        crypto.randomUUID();
       const cards = {
+        id: userTurnId,
         ...(rawCommand ? undefined : userTurnCards(noteCard, card)),
         ...(ciContext ? { ciContext } : {}),
         ...(operatorCommand.matched ? { monocode: true } : {}),
@@ -7445,6 +7451,12 @@ function Workspace({
           ? { monoPeerMessage: options.monoPeerMessage }
           : {}),
       };
+      const receiptUserTurn = submissionUserTurn({
+        role: "user",
+        text: visibleText,
+        ...(visible.length ? { attachments: visible } : {}),
+        ...cards,
+      });
       const live = isLiveHarness(current.harness);
       const queuedHandoff =
         live && !pendingSwitch ? pendingHandoff(current) : null;
@@ -7519,7 +7531,6 @@ function Workspace({
                     ? []
                     : [
                         {
-                          id: crypto.randomUUID(),
                           role: "user",
                           text: visibleText,
                           ...(visible.length > 0
@@ -7580,6 +7591,34 @@ function Workspace({
       if (!options?.resendEdited) {
         flushSync(commitSubmittedTurn);
       }
+
+      const persistAcceptedSession = async (finalize = false) => {
+        if (
+          turnGen.current.get(sessionId) !== gen ||
+          removingSessionIds.current.has(sessionId)
+        )
+          throw new Error(
+            "Local send was cancelled before its session could be saved",
+          );
+        const snapshot = sessionsRef.current.find(
+          (session) => session.id === sessionId,
+        );
+        if (!snapshot) throw new Error("Local send session no longer exists");
+        if (
+          shouldPersistSession(snapshot) &&
+          !(await upsertSession(finalize ? stopStreaming(snapshot) : snapshot))
+        )
+          throw new Error(
+            "The local send session could not be saved; it was not dispatched",
+          );
+        if (
+          turnGen.current.get(sessionId) !== gen ||
+          removingSessionIds.current.has(sessionId)
+        )
+          throw new Error(
+            "Local send was cancelled while its session was being saved",
+          );
+      };
 
       const launchTitleGeneration = (workCwd: string) => {
         if (
@@ -7767,7 +7806,18 @@ function Workspace({
             isLiveHarness(pendingSwitch.from)
           ) {
             try {
+              await persistAcceptedSession();
               agentText = await requestOutgoingHandoff({
+                persist: !current.ephemeral && !current.inboxAsk,
+                afterDispatch: async () => {
+                  flushHarnessEvents();
+                  await persistAcceptedSession(true);
+                },
+                userTurnId,
+                userTurn: receiptUserTurn,
+                isCurrent: () =>
+                  turnGen.current.get(sessionId) === gen &&
+                  !removingSessionIds.current.has(sessionId),
                 harness: pendingSwitch.from,
                 sessionId,
                 cwd: workCwd,
@@ -7929,63 +7979,108 @@ function Workspace({
           const earlier = queuedHandoff
             ? userMessagesAfterHandoff(current)
             : [];
-          if (editedResend && canRewindHarnessLastTurn(current.harness)) {
-            try {
-              await rewindHarnessLastTurn({
-                harness: current.harness,
-                sessionId,
-                cwd: workCwd,
-                model: current.model,
-                modelSettings: current.modelSettings,
-                providerAccountId,
-                runtimeMode: current.runtimeMode,
-                ephemeral: current.ephemeral === true,
-                codexStore: mono ? "mono" : undefined,
-                controlsAgents:
-                  operatorAccess ||
-                  orchestrator.run(sessionId)?.status === "active",
-                ...(editedProviderTurnId
-                  ? { providerTurnId: editedProviderTurnId }
-                  : {}),
-                onEvent: (event) => {
-                  if (turnGen.current.get(sessionId) !== gen) return;
-                  enqueueHarnessEvent(sessionId, event);
-                },
-              });
-            } catch (error) {
-              flushHarnessEvents();
-              editedResend.reject();
-              throw error;
-            }
-            editedResend.markProviderRewound();
-            flushHarnessEvents();
-            if (turnGen.current.get(sessionId) !== gen) {
-              const latest = sessionsRef.current.find(
-                (session) => session.id === sessionId,
-              );
-              if (
-                !latest ||
-                (!latest.busy &&
-                  latest.providerSessionId === current.providerSessionId)
-              ) {
-                await forgetHarnessSession(current.harness, sessionId);
-                if (latest) {
-                  setSessions((prev) =>
-                    prev.map((session) =>
-                      session.id === sessionId &&
-                      session.providerSessionId === current.providerSessionId
-                        ? { ...session, providerSessionId: undefined }
-                        : session,
-                    ),
-                  );
+          const rewindBeforeDispatch =
+            editedResend && canRewindHarnessLastTurn(current.harness)
+              ? async () => {
+                  try {
+                    await rewindHarnessLastTurn({
+                      harness: current.harness,
+                      sessionId,
+                      cwd: workCwd,
+                      model: current.model,
+                      modelSettings: current.modelSettings,
+                      providerAccountId,
+                      runtimeMode: current.runtimeMode,
+                      ephemeral: current.ephemeral === true,
+                      codexStore: mono ? "mono" : undefined,
+                      controlsAgents:
+                        operatorAccess ||
+                        orchestrator.run(sessionId)?.status === "active",
+                      ...(editedProviderTurnId
+                        ? { providerTurnId: editedProviderTurnId }
+                        : {}),
+                      onEvent: (event) => {
+                        if (turnGen.current.get(sessionId) !== gen) return;
+                        enqueueHarnessEvent(sessionId, event);
+                      },
+                    });
+                  } catch (error) {
+                    flushHarnessEvents();
+                    editedResend.reject();
+                    throw error;
+                  }
+                  editedResend.markProviderRewound();
+                  flushHarnessEvents();
+                  if (turnGen.current.get(sessionId) !== gen) {
+                    const latest = sessionsRef.current.find(
+                      (session) => session.id === sessionId,
+                    );
+                    if (
+                      !latest ||
+                      (!latest.busy &&
+                        latest.providerSessionId === current.providerSessionId)
+                    ) {
+                      await forgetHarnessSession(current.harness, sessionId);
+                      if (latest) {
+                        setSessions((prev) =>
+                          prev.map((session) =>
+                            session.id === sessionId &&
+                            session.providerSessionId ===
+                              current.providerSessionId
+                              ? { ...session, providerSessionId: undefined }
+                              : session,
+                          ),
+                        );
+                      }
+                    }
+                    recoverEditedResend();
+                    throw new Error(
+                      "Edited resend was cancelled before dispatch",
+                    );
+                  }
                 }
-              }
-              recoverEditedResend();
-              return;
-            }
-          }
-          const sendTurn = (text: string, turnAttachments = prepared) =>
-            sendHarnessTurn({
+              : undefined;
+          const beforeDispatch = async () => {
+            await persistAcceptedSession();
+            await rewindBeforeDispatch?.();
+          };
+          let dispatchIndex = 0;
+          const sendTurn = (text: string, turnAttachments = prepared) => {
+            const index = dispatchIndex++;
+            return sendHarnessTurn({
+              isCurrent: () =>
+                turnGen.current.get(sessionId) === gen &&
+                !removingSessionIds.current.has(sessionId),
+              submission: {
+                attemptId: index ? `${userTurnId}:repair:${index}` : userTurnId,
+                userTurnId,
+                userTurn: receiptUserTurn,
+                persist: !current.ephemeral && !current.inboxAsk,
+              },
+              ...(index === 0
+                ? {
+                    beforeDispatch,
+                    submissionScope: { providerTurnId: editedProviderTurnId },
+                  }
+                : { beforeDispatch: () => persistAcceptedSession() }),
+              afterDispatch: async (completed: boolean, error?: string) => {
+                if (completed) acceptEditedResend();
+                else if (
+                  error &&
+                  !providerFailureSeen &&
+                  turnGen.current.get(sessionId) === gen
+                ) {
+                  recoverEditedResend();
+                  enqueueHarnessEvent(sessionId, {
+                    type: "session.error",
+                    message: error,
+                  });
+                  providerFailureSeen = true;
+                  controlOutcome.error = error;
+                }
+                flushHarnessEvents();
+                await persistAcceptedSession(true);
+              },
               harness: current.harness,
               sessionId,
               cwd: workCwd,
@@ -8007,6 +8102,7 @@ function Workspace({
               ...(editedResend ? { onAccepted: acceptEditedResend } : {}),
               onEvent: routeTurnEvent,
             });
+          };
           let sendText = orchestrator.prompt(
             sessionId,
             inboxAskPrompt(
@@ -9102,8 +9198,7 @@ function Workspace({
                                 nextHop > MAX_PEER_AUTONOMOUS_HOPS
                               )
                                 return;
-                              const gen =
-                                turnGen.current.get(session.id) ?? 0;
+                              const gen = turnGen.current.get(session.id) ?? 0;
                               if (
                                 peerSentInTurnRef.current.has(
                                   `${responderMono.id}->${peerMeta.fromMonoId}:${gen}`,
@@ -10920,7 +11015,9 @@ function Workspace({
         const sourceMono =
           monoForSession(source.id) ??
           findMono(habitRunMono(source.id) ?? "") ??
-          (sourceChannelMember ? findMono(sourceChannelMember.monoId) : undefined);
+          (sourceChannelMember
+            ? findMono(sourceChannelMember.monoId)
+            : undefined);
         const canAccessProject = (cwd: string) =>
           canAccessAgentAppProject(source, cwd, sourceMono?.projects);
         const sourceTurn = turnGen.current.get(source.id) ?? 0;
@@ -13112,9 +13209,7 @@ function Workspace({
           : undefined
       }
       onToggleMonoOverview={
-        monoCovers
-          ? () => setMonoOverviewOpen(!monoOverviewOpen)
-          : undefined
+        monoCovers ? () => setMonoOverviewOpen(!monoOverviewOpen) : undefined
       }
       monoOverviewOpen={monoOverviewOpen}
       onOpenMonoSettings={

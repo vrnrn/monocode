@@ -6,12 +6,13 @@ use tauri_plugin_deep_link::DeepLinkExt;
 pub struct PendingTicketLinks(Mutex<Vec<String>>);
 
 impl PendingTicketLinks {
-    fn append(&self, urls: Vec<url::Url>) {
+    fn append(&self, urls: Vec<url::Url>, development: bool) {
         if let Ok(mut pending) = self.0.lock() {
             pending.extend(
                 urls.into_iter()
                     .filter(|url| {
-                        matches!(url.scheme(), "vorkspace" | "monocode")
+                        (matches!(url.scheme(), "vorkspace" | "monocode")
+                            || (development && url.scheme() == crate::development::LINK_SCHEME))
                             && url.host_str() == Some("context")
                     })
                     .map(String::from),
@@ -28,12 +29,15 @@ impl PendingTicketLinks {
 }
 
 pub fn init(app: &AppHandle) {
+    let development = app.config().identifier == crate::development::APP_IDENTIFIER;
     if let Ok(Some(urls)) = app.deep_link().get_current() {
-        app.state::<PendingTicketLinks>().append(urls);
+        app.state::<PendingTicketLinks>().append(urls, development);
     }
     let handle = app.clone();
     app.deep_link().on_open_url(move |event| {
-        handle.state::<PendingTicketLinks>().append(event.urls());
+        handle
+            .state::<PendingTicketLinks>()
+            .append(event.urls(), development);
         let reveal = handle.clone();
         tauri::async_runtime::spawn_blocking(move || {
             let _ = crate::window::show_hidden_or_open_new(&reveal);
@@ -70,20 +74,38 @@ mod tests {
             "monocode://context/jira?url=https%3A%2F%2Fdemo.atlassian.net%2Fbrowse%2FDEMO-42",
         )
         .unwrap();
-        queue.append(vec![url.clone()]);
+        queue.append(vec![url.clone()], false);
         assert_eq!(queue.take(), vec![url.to_string()]);
         assert!(queue.take().is_empty());
-        queue.append(vec![url.clone()]);
+        queue.append(vec![url.clone()], false);
         assert_eq!(queue.take(), vec![url.to_string()]);
     }
 
     #[test]
     fn keeps_links_received_before_a_workspace_opens() {
         let queue = PendingTicketLinks::default();
-        queue.append(vec![
-            url::Url::parse("https://example.com").unwrap(),
-            url::Url::parse("monocode://context/github?url=x").unwrap(),
-        ]);
+        queue.append(
+            vec![
+                url::Url::parse("https://example.com").unwrap(),
+                url::Url::parse("monocode://context/github?url=x").unwrap(),
+            ],
+            false,
+        );
         assert_eq!(queue.take().len(), 1);
+    }
+
+    #[test]
+    fn development_ticket_links_are_queued_only_by_the_development_profile() {
+        let queue = PendingTicketLinks::default();
+        let url = url::Url::parse("vorkspace-dev://context/jira?url=x").unwrap();
+        queue.append(vec![url.clone()], false);
+        assert!(queue.take().is_empty());
+        queue.append(vec![url.clone()], true);
+        assert_eq!(queue.take(), vec![url.to_string()]);
+        queue.append(
+            vec![url::Url::parse("vorkspace-dev://other/jira?url=x").unwrap()],
+            true,
+        );
+        assert!(queue.take().is_empty());
     }
 }

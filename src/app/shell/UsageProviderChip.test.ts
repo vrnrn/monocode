@@ -5,8 +5,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import type { ProviderRateLimits } from "../../features/providers/model/rateLimits";
-import { projectKey } from "../../shared/lib/paths";
-import { saveTabGroupMascot } from "../../features/workspace/model/tabGroups";
 import { needsProviderLogin, UsageProviderChip } from "./UsageProviderChip";
 import {
   saveMaskEmails,
@@ -472,9 +470,6 @@ describe("UsageProviderChip", () => {
 
     await act(async () => button("Codex usage details").click());
     expect(document.body.textContent).toContain("2 resets available");
-    expect(
-      document.querySelector('[data-reset-mascot-mood="happy"]'),
-    ).not.toBeNull();
     expect(document.body.textContent).toContain("Referral reward");
     expect(document.body.textContent).toContain("Backup reset");
     expect(document.body.textContent).toContain("Expires in 12d");
@@ -493,24 +488,6 @@ describe("UsageProviderChip", () => {
 
     expect(onConsumeReset).toHaveBeenCalledWith("reset-2");
     expect(document.body.textContent).toContain("Codex usage was reset.");
-  });
-
-  it("uses the project's picked mascot when banked resets are available", async () => {
-    const project = "/repo/mascot-lab";
-    saveTabGroupMascot(projectKey(project), "cat");
-    act(() =>
-      root.render(
-        createElement(UsageProviderChip, {
-          limits: codexLimits(),
-          now,
-          project,
-        }),
-      ),
-    );
-
-    await act(async () => button("Codex usage details").click());
-    const mascot = document.querySelector('[data-reset-mascot-mood="happy"]');
-    expect(mascot?.getAttribute("data-mascot-name")).toBe("cat");
   });
 
   it("hides the banked resets card when no resets are available", async () => {

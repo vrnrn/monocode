@@ -14,13 +14,14 @@ it.each([
     url: "https://demo.atlassian.net/browse/DEMO-42",
   });
   const legacy = current.replace("vorkspace:", "monocode:");
+  const development = current.replace("vorkspace:", "vorkspace-dev:");
   const markup = renderToStaticMarkup(
     createElement(AgentMarkdown, {
       ...props,
-      text: `[Ticket](${current}) [Legacy ticket](${legacy}) [Bad](javascript:alert%281%29)`,
+      text: `[Ticket](${current}) [Legacy ticket](${legacy}) [Development ticket](${development}) [Bad](javascript:alert%281%29)`,
     }),
   );
-  for (const link of [current, legacy]) {
+  for (const link of [current, legacy, development]) {
     expect(markup).toContain(`href="${link.replace(/&/g, "&amp;")}"`);
   }
   expect(markup).not.toContain('href="javascript:');

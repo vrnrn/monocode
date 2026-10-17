@@ -663,6 +663,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
       cwd={session.cwd}
       executionCwd={workCwd}
       sessionId={session.id}
+      persistDraft={!session.ephemeral && !session.inboxAsk}
       compactSupported={canCompactHarnessContext(session.harness)}
       recents={recents}
       hideProjectPicker={
@@ -910,9 +911,6 @@ const LocalSessionPane = memo(function LocalSessionPane({
               ) : (
                 <EmptySession
                   cwd={session.cwd}
-                  hasChatBackground={Boolean(
-                    projectBackground || globalBackgroundPath,
-                  )}
                   composer={
                     dockComposer ? undefined : (
                       <div
@@ -1176,6 +1174,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
                   <MonoComposer
                     key={session.id}
                     sessionId={session.id}
+                    cwd={session.cwd}
+                    persistDraft={!session.ephemeral && !session.inboxAsk}
                     name={agent.name}
                     inboxCard={session.inboxCard}
                     onInboxCardDismiss={() => onInboxCardDismiss?.(session.id)}
