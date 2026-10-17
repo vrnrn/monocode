@@ -79,6 +79,17 @@ fn configure_session_window(config: &mut tauri::utils::config::WindowConfig, rev
 }
 
 pub fn open_session_window(app: &AppHandle, reveal: bool) -> Result<WebviewWindow, String> {
+    #[cfg(target_os = "macos")]
+    if objc2::MainThreadMarker::new().is_none() {
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let handle = app.clone();
+        app.run_on_main_thread(move || {
+            let _ = send.send(open_session_window(&handle, reveal));
+        })
+        .map_err(|err| err.to_string())?;
+        return receive.recv().map_err(|err| err.to_string())?;
+    }
+
     let mut config = app
         .config()
         .app
@@ -97,10 +108,13 @@ pub fn open_session_window(app: &AppHandle, reveal: bool) -> Result<WebviewWindo
     };
 
     let build = || {
-        WebviewWindowBuilder::from_config(app, &config)
-            .map_err(|err| err.to_string())?
-            .build()
-            .map_err(|err| err.to_string())
+        let builder =
+            WebviewWindowBuilder::from_config(app, &config).map_err(|err| err.to_string())?;
+        #[cfg(target_os = "macos")]
+        let builder = builder.with_webview_configuration(
+            crate::macos::webview_configuration(app).map_err(|err| err.to_string())?,
+        );
+        builder.build().map_err(|err| err.to_string())
     };
     #[cfg(target_os = "macos")]
     let window = if reveal {

@@ -607,6 +607,7 @@ fn build(app: &AppHandle, mono_id: &str) -> tauri::Result<WebviewWindow> {
         label(mono_id),
         WebviewUrl::App("mono-chat.html".into()),
     )
+    .with_webview_configuration(crate::macos::webview_configuration(app)?)
     .title("Mono chat")
     .inner_size(WIDTH, height)
     .min_inner_size(370.0, 420.0)

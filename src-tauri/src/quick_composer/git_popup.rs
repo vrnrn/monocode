@@ -287,6 +287,7 @@ pub(super) fn prepare(app: &AppHandle, parent: &WebviewWindow) -> tauri::Result<
         QUICK_COMPOSER_GIT_LABEL,
         WebviewUrl::App("quick-composer.html?popup=git".into()),
     )
+    .with_webview_configuration(crate::macos::webview_configuration(app)?)
     .title("Choose workspace")
     .inner_size(WIDTH, 1.0)
     .decorations(false)
