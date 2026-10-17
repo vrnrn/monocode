@@ -83,7 +83,7 @@ fn now() -> i64 {
         .as_millis() as i64
 }
 
-fn pid_alive(pid: u32) -> bool {
+pub(crate) fn pid_alive(pid: u32) -> bool {
     if pid == std::process::id() {
         return true;
     }
@@ -268,9 +268,10 @@ fn reserve(conn: &Connection, input: SubmissionInput) -> Result<SubmissionReserv
         .map(|turn| sanitize_user_turn(turn, &input.user_turn_id))
         .transpose()?;
     let signature = format!("{:x}", Sha256::digest(input.payload_json.as_bytes()));
-    let created = conn.execute("INSERT INTO local_submissions (attempt_id,user_turn_id,session_id,signature,phase,owner_pid,owner_instance,created_at,updated_at,user_turn_json) SELECT ?1,?2,?3,?4,'reserved',?5,?6,?7,?7,?8 WHERE NOT EXISTS (SELECT 1 FROM local_submission_deleted_sessions WHERE session_id=?3) ON CONFLICT(attempt_id) DO NOTHING", params![input.attempt_id,input.user_turn_id,input.session_id,signature,std::process::id(),instance(),now(),user_turn.as_ref().map(serde_json::Value::to_string)]).map_err(|e| e.to_string())? == 1;
-    let receipt = get(conn, &input.attempt_id)?
-        .ok_or("This session was deleted; the local send was not dispatched")?;
+    let created = conn.execute("INSERT INTO local_submissions (attempt_id,user_turn_id,session_id,signature,phase,owner_pid,owner_instance,created_at,updated_at,user_turn_json) SELECT ?1,?2,?3,?4,'reserved',?5,?6,?7,?7,?8 WHERE NOT EXISTS (SELECT 1 FROM local_submission_deleted_sessions WHERE session_id=?3) AND EXISTS (SELECT 1 FROM sessions WHERE id=?3) ON CONFLICT(attempt_id) DO NOTHING", params![input.attempt_id,input.user_turn_id,input.session_id,signature,std::process::id(),instance(),now(),user_turn.as_ref().map(serde_json::Value::to_string)]).map_err(|e| e.to_string())? == 1;
+    let receipt = get(conn, &input.attempt_id)?.ok_or(
+        "The local send session has not been saved or was deleted; the send was not reserved",
+    )?;
     if receipt.session_id != input.session_id
         || receipt.user_turn_id != input.user_turn_id
         || receipt.signature != signature
@@ -372,9 +373,17 @@ mod tests {
     use std::sync::{Arc, Barrier};
     use std::thread;
 
+    fn saved_owner(conn: &Connection) {
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY);")
+            .unwrap();
+        conn.execute("INSERT INTO sessions(id) VALUES (?1)", ["mono/chat.中国"])
+            .unwrap();
+    }
+
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         ensure_table(&conn).unwrap();
+        saved_owner(&conn);
         conn
     }
     fn input(id: &str) -> SubmissionInput {
@@ -386,6 +395,17 @@ mod tests {
                 .into(),
             user_turn: Some(json!({"id":id,"role":"user","text":"hello"})),
         }
+    }
+
+    #[test]
+    fn a_missing_session_owner_cannot_create_an_unreachable_receipt() {
+        let conn = db();
+        conn.execute("DELETE FROM sessions", []).unwrap();
+        assert!(reserve(&conn, input("orphan"))
+            .unwrap_err()
+            .contains("has not been saved"));
+        assert!(get(&conn, "orphan").unwrap().is_none());
+        assert!(dispatch(&conn, "orphan").is_err());
     }
 
     #[test]
@@ -432,6 +452,7 @@ mod tests {
             std::env::temp_dir().join(format!("local-submission-{}.db", uuid::Uuid::new_v4()));
         let first = Connection::open(&path).unwrap();
         ensure_table(&first).unwrap();
+        saved_owner(&first);
         drop(first);
         let barrier = Arc::new(Barrier::new(2));
         let threads: Vec<_> = (0..2)
@@ -464,6 +485,7 @@ mod tests {
         ));
         let conn = Connection::open(&path).unwrap();
         ensure_table(&conn).unwrap();
+        saved_owner(&conn);
         for id in ["before", "after", "live-owner", "this-owner"] {
             reserve(&conn, input(id)).unwrap();
         }

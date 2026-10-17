@@ -10,6 +10,7 @@ import {
 } from "../model/connections";
 import {
   REMOTE_PROVIDERS,
+  WORKSPACE_EDITOR_SAVE_CAPABILITY,
   type HostDescriptor,
   type RemoteMachine,
   type SshSetup,
@@ -134,12 +135,19 @@ export function ConnectionsSettings() {
                 throw new Error("Host identity changed");
               if (!host.providers.length)
                 label = "Connected · install a supported provider on the host";
-              const update =
+              const workspaceUpdate =
                 !host.capabilities?.includes("workspace.run") ||
                 !host.capabilities?.includes("git.worktreeCreate");
-              if (update)
+              const editorUpdate = !host.capabilities?.includes(
+                WORKSPACE_EDITOR_SAVE_CAPABILITY,
+              );
+              const update = workspaceUpdate || editorUpdate;
+              if (workspaceUpdate)
                 label =
                   "Connected · host update needed for Explorer and Changes";
+              else if (editorUpdate)
+                label =
+                  "Connected · host update needed for file editing (read-only)";
               if (!disposed)
                 setNeedsUpdate((current) => ({
                   ...current,
@@ -286,6 +294,12 @@ export function ConnectionsSettings() {
                       turns.
                     </div>
                   ) : null}
+                  {!machine.ssh && needsUpdate[machine.id] ? (
+                    <p className="mt-1 text-[11px] text-content/45">
+                      Install a newer vorkspace Host on this machine, then
+                      reconnect.
+                    </p>
+                  ) : null}
                 </div>
                 {machine.ssh && (
                   <div className="flex shrink-0 items-center gap-2">
@@ -347,8 +361,8 @@ export function ConnectionsSettings() {
                     </code>{" "}
                     on that machine (
                     <code className="rounded bg-content/10 px-1">
-                      %USERPROFILE%\.monocode-host\bin\vorkspace-host.cmd service
-                      uninstall
+                      %USERPROFILE%\.monocode-host\bin\vorkspace-host.cmd
+                      service uninstall
                     </code>{" "}
                     on Windows). Its sessions and history are kept.
                   </p>

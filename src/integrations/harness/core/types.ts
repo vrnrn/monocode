@@ -191,6 +191,9 @@ export type SendTurnInput = HarnessSessionInput & {
     /** Temporary Inbox/ephemeral conversations stay only in memory. */
     persist?: boolean;
   };
+  /** Save the recoverable session owner before reserving a local receipt.
+   * This hook must not perform provider I/O. */
+  beforeAdmission?: () => Promise<void>;
   /** Provider rewind belongs inside the same durable dispatch boundary. */
   beforeDispatch?: () => Promise<void>;
   /** Checkpoint provider effects before the durable receipt settles. */

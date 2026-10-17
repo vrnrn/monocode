@@ -3,6 +3,13 @@
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Manager, State};
 
 use crate::session_store::{now_millis, SessionStore};
@@ -11,6 +18,9 @@ const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PAYLOAD_BYTES: usize = 10 * 1024 * 1024;
 const MAX_ITEMS: usize = 128;
 const MAX_SAFE_REVISION: u64 = 9_007_199_254_740_991;
+const ATTACHMENT_DIRECTORY: &str = "composer-attachments";
+const ATTACHMENT_PUBLICATION_GRACE: Duration = Duration::from_secs(60 * 60);
+const ATTACHMENT_COLLECTION_BUDGET: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -132,8 +142,359 @@ pub(crate) fn ensure_table(conn: &Connection) -> rusqlite::Result<()> {
            payload_json TEXT NOT NULL,
            deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
            updated_at INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS composer_attachment_processes (
+           owner_instance TEXT PRIMARY KEY,
+           owner_pid INTEGER NOT NULL
          );",
     )
+}
+
+/// Reclaim removed/cleared/deleted draft files on the next cold app start.
+///
+/// An active renderer can retain a path after its draft was cleared, before a
+/// send/checkpoint/CAS retry has durably published the next owner. A process
+/// lease therefore defers *all* collection while any previous store owner is
+/// alive, including another store in this process. Leases retire only after
+/// their process has exited. Never run this sweep on typing or session deletes.
+/// Files younger than one hour also survive a crash during copy/publication.
+/// Only lease admission runs on startup's first-paint path. The background
+/// scan defers until a later cold start if foreground writes begin, another
+/// owner appears, any read fails, or its 250ms collection budget is exhausted.
+pub(crate) fn initialize_attachment_cache(
+    conn: &Connection,
+    database: &Path,
+) -> rusqlite::Result<()> {
+    let instance = uuid::Uuid::new_v4().to_string();
+    if !register_attachment_process(
+        conn,
+        &instance,
+        std::process::id(),
+        crate::local_submissions::pid_alive,
+    )? {
+        return Ok(());
+    }
+    let activity = Arc::new(AtomicBool::new(false));
+    let changed = Arc::clone(&activity);
+    conn.update_hook(Some(
+        move |_: rusqlite::hooks::Action, _: &str, _: &str, _: i64| {
+            changed.store(true, Ordering::SeqCst);
+        },
+    ))?;
+    let database = database.to_path_buf();
+    let cutoff = SystemTime::now();
+    // Never scan transcripts on the first-paint path. Any foreground write
+    // before the worker's transaction cancels this cold-start attempt instead
+    // of deleting a path handed from a cleared draft to an uncheckpointed send.
+    let _ = std::thread::Builder::new()
+        .name("composer-attachment-gc".into())
+        .spawn(move || {
+            let result = (|| {
+                let conn = Connection::open(&database)?;
+                if let Some(root) = database.parent() {
+                    collect_cached_attachments(
+                        &conn,
+                        root,
+                        cutoff,
+                        &instance,
+                        &activity,
+                        crate::local_submissions::pid_alive,
+                    )?;
+                }
+                Ok::<_, rusqlite::Error>(())
+            })();
+            if let Err(error) = result {
+                eprintln!("Composer attachment cleanup deferred: {error}");
+            }
+        });
+    Ok(())
+}
+
+fn register_attachment_process(
+    conn: &Connection,
+    instance: &str,
+    pid: u32,
+    alive: impl Fn(u32) -> bool,
+) -> rusqlite::Result<bool> {
+    // Every store gets an independent lease, including same-process opens.
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let owners = tx
+        .prepare("SELECT owner_instance, owner_pid FROM composer_attachment_processes")?
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut live_owner = false;
+    for (owner, owner_pid) in owners {
+        if alive(owner_pid) {
+            live_owner = true;
+        } else {
+            tx.execute(
+                "DELETE FROM composer_attachment_processes WHERE owner_instance = ?1",
+                [owner],
+            )?;
+        }
+    }
+    tx.execute(
+        "INSERT INTO composer_attachment_processes(owner_instance, owner_pid) VALUES (?1, ?2)
+         ON CONFLICT(owner_instance) DO UPDATE SET owner_pid = excluded.owner_pid",
+        params![instance, pid],
+    )?;
+    tx.commit()?;
+    Ok(!live_owner)
+}
+
+fn collect_cached_attachments(
+    conn: &Connection,
+    root: &Path,
+    cutoff: SystemTime,
+    instance: &str,
+    activity: &AtomicBool,
+    alive: impl Fn(u32) -> bool,
+) -> rusqlite::Result<usize> {
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let other_owners = tx
+        .prepare("SELECT owner_pid FROM composer_attachment_processes WHERE owner_instance != ?1")?
+        .query_map([instance], |row| row.get::<_, u32>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let removed = if activity.load(Ordering::SeqCst) || other_owners.into_iter().any(alive) {
+        0
+    } else {
+        match sweep_unreferenced_attachments(&tx, root, cutoff, activity) {
+            Ok(removed) => removed,
+            Err(error) => {
+                eprintln!("Composer attachment cleanup deferred: {error}");
+                0
+            }
+        }
+    };
+    tx.commit()?;
+    Ok(removed)
+}
+
+struct AttachmentCandidate {
+    path: PathBuf,
+    uuid: String,
+}
+
+fn sweep_unreferenced_attachments(
+    conn: &Connection,
+    root: &Path,
+    now: SystemTime,
+    activity: &AtomicBool,
+) -> Result<usize, String> {
+    sweep_unreferenced_attachments_with_budget(
+        conn,
+        root,
+        now,
+        activity,
+        ATTACHMENT_COLLECTION_BUDGET,
+    )
+}
+
+fn sweep_unreferenced_attachments_with_budget(
+    conn: &Connection,
+    root: &Path,
+    now: SystemTime,
+    activity: &AtomicBool,
+    budget: Duration,
+) -> Result<usize, String> {
+    let deadline = Instant::now() + budget;
+    struct ProgressBudget<'a>(&'a Connection);
+    impl Drop for ProgressBudget<'_> {
+        fn drop(&mut self) {
+            let _ = self.0.progress_handler(0, None::<fn() -> bool>);
+        }
+    }
+    conn.progress_handler(1000, Some(move || Instant::now() >= deadline))
+        .map_err(|error| error.to_string())?;
+    let _progress = ProgressBudget(conn);
+    let directory = root.join(ATTACHMENT_DIRECTORY);
+    match std::fs::symlink_metadata(&directory) {
+        Ok(metadata) if !metadata.is_dir() || metadata.file_type().is_symlink() => return Ok(0),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error.to_string()),
+    }
+    let entries = match std::fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error.to_string()),
+    };
+    let mut candidates = Vec::new();
+    for entry in entries {
+        check_collection_budget(deadline)?;
+        let entry = entry.map_err(|error| error.to_string())?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Some(uuid) = name
+            .get(..36)
+            .filter(|uuid| uuid::Uuid::parse_str(uuid).is_ok())
+        else {
+            continue;
+        };
+        if name.as_bytes().get(36) != Some(&b'-') {
+            continue;
+        }
+        // Never follow directory entries or symlinks outside this owned cache.
+        if !entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_file()
+        {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .map_err(|error| error.to_string())?;
+        if now.duration_since(modified).unwrap_or_default() < ATTACHMENT_PUBLICATION_GRACE {
+            continue;
+        }
+        candidates.push(AttachmentCandidate {
+            path: entry.path(),
+            uuid: uuid.to_owned(),
+        });
+    }
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+    let ids = candidates
+        .iter()
+        .map(|candidate| candidate.uuid.as_str())
+        .collect::<HashSet<_>>();
+    let mut referenced = HashSet::new();
+    // One streaming pass, independent of candidate count. All durable text
+    // owners participate, including ordinary/queued/saved turns, Mono blocks,
+    // receipts, snapshots, notes/artifacts and automation/orchestration state.
+    // Scanning raw strings also retains references in malformed recovery rows.
+    // New durable tables/columns are covered without a fragile ownership list.
+    let tables = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'composer_attachment_processes'")
+        .map_err(|error| error.to_string())?
+        .query_map([], |row| row.get::<_, String>(0)).map_err(|error| error.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>().map_err(|error| error.to_string())?;
+    for table in tables {
+        check_collection_budget(deadline)?;
+        let columns = conn
+            .prepare(&format!("PRAGMA table_info({})", quote_identifier(&table)))
+            .map_err(|error| error.to_string())?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .filter(|(_, kind)| {
+                let kind = kind.to_ascii_uppercase();
+                kind.contains("TEXT") || kind.contains("CHAR") || kind.is_empty()
+            })
+            .map(|(name, _)| quote_identifier(&name))
+            .collect::<Vec<_>>();
+        if columns.is_empty() {
+            continue;
+        }
+        let mut statement = conn
+            .prepare(&format!(
+                "SELECT {} FROM {}",
+                columns.join(","),
+                quote_identifier(&table)
+            ))
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement.query([]).map_err(|error| error.to_string())?;
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            check_collection_budget(deadline)?;
+            for index in 0..columns.len() {
+                match row.get_ref(index).map_err(|error| error.to_string())? {
+                    rusqlite::types::ValueRef::Text(bytes) => {
+                        let raw = std::str::from_utf8(bytes).map_err(|error| error.to_string())?;
+                        collect_attachment_references(raw, &ids, &mut referenced, deadline)?;
+                    }
+                    rusqlite::types::ValueRef::Blob(_) => {
+                        return Err("Invalid blob in durable text column".into())
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    // No files are removed until every reference source has been inspected.
+    check_collection_budget(deadline)?;
+    let metadata = std::fs::symlink_metadata(&directory).map_err(|error| error.to_string())?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Ok(0);
+    }
+    let mut removed = 0;
+    for candidate in candidates {
+        if activity.load(Ordering::SeqCst) || Instant::now() >= deadline {
+            break;
+        }
+        if referenced.contains(&candidate.uuid) {
+            continue;
+        }
+        match std::fs::remove_file(&candidate.path) {
+            Ok(()) => removed += 1,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => eprintln!(
+                "Composer attachment cleanup deferred for {}: {error}",
+                candidate.path.display()
+            ),
+        }
+    }
+    Ok(removed)
+}
+
+fn quote_identifier(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+fn collect_attachment_references(
+    raw: &str,
+    candidates: &HashSet<&str>,
+    referenced: &mut HashSet<String>,
+    deadline: Instant,
+) -> Result<(), String> {
+    let mut start = 0;
+    while start < raw.len() {
+        check_collection_budget(deadline)?;
+        let mut end = (start + 64 * 1024).min(raw.len());
+        while !raw.is_char_boundary(end) {
+            end -= 1;
+        }
+        let chunk = &raw[start..end];
+        for (offset, _) in chunk.match_indices(ATTACHMENT_DIRECTORY) {
+            let tail = &raw.as_bytes()[start + offset + ATTACHMENT_DIRECTORY.len()..];
+            // Paths emitted by this module have a UUID immediately after the cache
+            // directory. Also tolerate JSON-escaped separators and URL separators.
+            for token in tail[..tail.len().min(64)].windows(36) {
+                if token[8] != b'-' || token[13] != b'-' || token[18] != b'-' || token[23] != b'-' {
+                    continue;
+                }
+                if let Ok(uuid) = std::str::from_utf8(token) {
+                    if candidates.contains(uuid) {
+                        referenced.insert(uuid.to_owned());
+                    }
+                }
+            }
+        }
+        if end == raw.len() {
+            break;
+        }
+        start = end - 64;
+        while !raw.is_char_boundary(start) {
+            start += 1;
+        }
+    }
+    Ok(())
+}
+
+fn check_collection_budget(deadline: Instant) -> Result<(), String> {
+    if Instant::now() >= deadline {
+        Err("Attachment cleanup scan budget exceeded; all files preserved".into())
+    } else {
+        Ok(())
+    }
 }
 
 #[tauri::command(async)]
@@ -540,6 +901,372 @@ mod tests {
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::{Arc, Barrier};
+
+    struct CacheDirectory(PathBuf);
+
+    impl CacheDirectory {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("composer-gc-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn file(&self, name: &str, age: Duration) -> PathBuf {
+            let path = PathBuf::from(cache_attachment(&self.0, name, "Ynl0ZXM=").unwrap());
+            std::fs::File::open(&path)
+                .unwrap()
+                .set_times(std::fs::FileTimes::new().set_modified(SystemTime::now() - age))
+                .unwrap();
+            path
+        }
+    }
+
+    impl Drop for CacheDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn cold_collect(conn: &Connection, directory: &CacheDirectory) -> usize {
+        let instance = uuid::Uuid::new_v4().to_string();
+        assert!(register_attachment_process(conn, &instance, 1, |_| false).unwrap());
+        collect_cached_attachments(
+            conn,
+            &directory.0,
+            SystemTime::now(),
+            &instance,
+            &AtomicBool::new(false),
+            |_| false,
+        )
+        .unwrap()
+    }
+
+    fn with_file(path: &Path) -> ComposerDraftPayload {
+        let mut draft = payload("Unsent files");
+        draft.attachments.push(ComposerDraftAttachment {
+            id: "file".into(),
+            name: "image.png".into(),
+            mime_type: "image/png".into(),
+            kind: ComposerDraftAttachmentKind::Image,
+            size: 5,
+            path: Some(path.to_string_lossy().into_owned()),
+        });
+        draft
+    }
+
+    fn persist_history(conn: &Connection, id: &str, path: &Path, queued: bool) {
+        let blocks = json!([{"id":"turn", "role":"user", "text":"Saved input", "attachments":[{"id":"file", "path":path.to_string_lossy()}]}]).to_string();
+        conn.execute("INSERT INTO sessions(id,cwd,harness,model,runtime_mode,title,created_at,updated_at,blocks_json,queued_messages_json) VALUES (?1,'/projects/example','codex','test','supervised','History',1,1,?2,?3)", params![id, if queued { "[]" } else { &blocks }, if queued { &blocks } else { "[]" }]).unwrap();
+    }
+
+    #[test]
+    fn composer_attachment_gc_reclaims_removed_cleared_and_deleted_draft_files() {
+        let store = SessionStore::open_in_memory().unwrap();
+        let conn = store.lock_conn().unwrap();
+        let directory = CacheDirectory::new();
+        for id in ["removed", "cleared", "deleted"] {
+            let file = directory.file(id, Duration::from_secs(7200));
+            let first = set_draft(&conn, &write(id, 0, with_file(&file))).unwrap();
+            assert_eq!(cold_collect(&conn, &directory), 0);
+            if id == "deleted" {
+                delete_session_draft(&conn, id).unwrap();
+            } else {
+                set_draft(
+                    &conn,
+                    &write(
+                        id,
+                        first.revision,
+                        payload(if id == "removed" { "Text remains" } else { "" }),
+                    ),
+                )
+                .unwrap();
+            }
+            assert_eq!(cold_collect(&conn, &directory), 1);
+            assert!(!file.exists());
+        }
+    }
+
+    #[test]
+    fn composer_attachment_gc_preserves_transferred_history_and_all_durable_owners() {
+        let store = SessionStore::open_in_memory().unwrap();
+        let conn = store.lock_conn().unwrap();
+        let directory = CacheDirectory::new();
+        let history = directory.file("history", Duration::from_secs(7200));
+        set_draft(&conn, &write("history", 0, with_file(&history))).unwrap();
+        persist_history(&conn, "history", &history, false);
+        set_draft(&conn, &write("history", 1, payload(""))).unwrap();
+        let mono = directory.file("mono", Duration::from_secs(7200));
+        persist_history(&conn, "mono", &mono, false);
+        crate::mono_transcript::migrate_transcript(&conn, "mono").unwrap();
+        let queued = directory.file("queued", Duration::from_secs(7200));
+        persist_history(&conn, "queued", &queued, true);
+        let receipt = directory.file("receipt", Duration::from_secs(7200));
+        conn.execute("INSERT INTO local_submissions(attempt_id,user_turn_id,session_id,signature,user_turn_json,phase,owner_pid,owner_instance,created_at,updated_at) VALUES ('attempt','turn','history','hash',?1,'uncertain',1,'old',1,1)", [json!({"attachments":[{"path":receipt.to_string_lossy()}]}).to_string()]).unwrap();
+        let snapshot = directory.file("snapshot", Duration::from_secs(7200));
+        conn.execute(
+            "INSERT INTO workspace_snapshot(id,snapshot_json,updated_at) VALUES (1,?1,1)",
+            [json!({"attachments":[{"path":snapshot.to_string_lossy()}]}).to_string()],
+        )
+        .unwrap();
+        let note = directory.file("note", Duration::from_secs(7200));
+        conn.execute("INSERT INTO notes(id,slug,title,body,created_at,updated_at) VALUES ('note','note','Note',?1,1,1)", [format!("[file]({})", note.display())]).unwrap();
+        let future = directory.file("future", Duration::from_secs(7200));
+        conn.execute_batch("CREATE TABLE \"future\"\"store\" (\"reference\"\"field\" TEXT);")
+            .unwrap();
+        // Raw malformed rows are still retained for recovery, without relying
+        // on a particular JSON schema or parsing a whole transcript in memory.
+        conn.execute(
+            "INSERT INTO \"future\"\"store\" VALUES (?1)",
+            [format!("{{broken {}", future.display())],
+        )
+        .unwrap();
+        assert_eq!(cold_collect(&conn, &directory), 0);
+        for file in [history, mono, queued, receipt, snapshot, note, future] {
+            assert!(file.exists());
+        }
+    }
+
+    #[test]
+    fn composer_attachment_gc_keeps_publication_grace_and_never_follows_symlinks() {
+        let store = SessionStore::open_in_memory().unwrap();
+        let conn = store.lock_conn().unwrap();
+        let directory = CacheDirectory::new();
+        let fresh = directory.file("in-flight", Duration::from_secs(1800));
+        let old = directory.file("orphan", Duration::from_secs(7200));
+        #[cfg(unix)]
+        {
+            let external = directory.0.join("outside-cache");
+            std::fs::write(&external, "keep").unwrap();
+            let link = directory
+                .0
+                .join(ATTACHMENT_DIRECTORY)
+                .join(format!("{}-link", uuid::Uuid::new_v4()));
+            std::os::unix::fs::symlink(&external, &link).unwrap();
+        }
+        assert_eq!(cold_collect(&conn, &directory), 1);
+        assert!(fresh.exists());
+        assert!(!old.exists());
+        #[cfg(unix)]
+        assert!(directory.0.join("outside-cache").exists());
+    }
+
+    #[test]
+    fn composer_attachment_gc_live_and_same_process_store_leases_fence_collection() {
+        let store = SessionStore::open_in_memory().unwrap();
+        let conn = store.lock_conn().unwrap();
+        let directory = CacheDirectory::new();
+        let file = directory.file("live-unsaved-after-conflict", Duration::from_secs(7200));
+        assert!(register_attachment_process(&conn, "first", 100, |_| true).unwrap());
+        assert!(
+            !register_attachment_process(&conn, "same-process-second-store", 100, |_| true)
+                .unwrap()
+        );
+        assert!(!register_attachment_process(&conn, "another-process", 200, |_| true).unwrap());
+        assert_eq!(
+            collect_cached_attachments(
+                &conn,
+                &directory.0,
+                SystemTime::now(),
+                "first",
+                &AtomicBool::new(false),
+                |_| true
+            )
+            .unwrap(),
+            0
+        );
+        assert!(file.exists());
+        // Once prior owners have exited, a later cold process can reclaim it.
+        assert!(register_attachment_process(&conn, "cold", 300, |_| false).unwrap());
+        assert_eq!(
+            collect_cached_attachments(
+                &conn,
+                &directory.0,
+                SystemTime::now(),
+                "cold",
+                &AtomicBool::new(false),
+                |_| false
+            )
+            .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn composer_attachment_gc_foreground_mutation_cancels_pending_transfer_collection() {
+        let store = SessionStore::open_in_memory().unwrap();
+        let conn = store.lock_conn().unwrap();
+        let directory = CacheDirectory::new();
+        let file = directory.file("pending-send", Duration::from_secs(7200));
+        set_draft(&conn, &write("sending", 0, with_file(&file))).unwrap();
+        assert!(register_attachment_process(&conn, "cold", 100, |_| false).unwrap());
+        let activity = Arc::new(AtomicBool::new(false));
+        let hook = Arc::clone(&activity);
+        conn.update_hook(Some(
+            move |_: rusqlite::hooks::Action, _: &str, _: &str, _: i64| {
+                hook.store(true, Ordering::SeqCst);
+            },
+        ))
+        .unwrap();
+        // Send clears the draft before the subsequent history write; the
+        // activity fence protects this now-only-in-memory attachment path.
+        set_draft(&conn, &write("sending", 1, payload(""))).unwrap();
+        assert!(activity.load(Ordering::SeqCst));
+        assert_eq!(
+            collect_cached_attachments(
+                &conn,
+                &directory.0,
+                SystemTime::now(),
+                "cold",
+                &activity,
+                |_| false
+            )
+            .unwrap(),
+            0
+        );
+        assert!(file.exists());
+        persist_history(&conn, "sending", &file, false);
+        assert_eq!(cold_collect(&conn, &directory), 0);
+        assert!(file.exists());
+    }
+
+    #[test]
+    fn composer_attachment_gc_streams_history_once_and_preserves_everything_on_read_error() {
+        use rusqlite::hooks::{AuthAction, Authorization};
+        use std::sync::atomic::AtomicUsize;
+        let store = SessionStore::open_in_memory().unwrap();
+        let conn = store.lock_conn().unwrap();
+        let directory = CacheDirectory::new();
+        let kept = directory.file("history", Duration::from_secs(7200));
+        persist_history(&conn, "history", &kept, false);
+        for _ in 0..20 {
+            directory.file("orphan", Duration::from_secs(7200));
+        }
+        let reads = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&reads);
+        conn.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+            if matches!(
+                context.action,
+                AuthAction::Read {
+                    table_name: "sessions",
+                    column_name: "blocks_json"
+                }
+            ) {
+                observed.fetch_add(1, Ordering::SeqCst);
+            }
+            Authorization::Allow
+        }))
+        .unwrap();
+        assert_eq!(cold_collect(&conn, &directory), 20);
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        assert!(kept.exists());
+        let orphan = directory.file("keep-on-read-error", Duration::from_secs(7200));
+        conn.authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
+            if matches!(
+                context.action,
+                AuthAction::Read {
+                    table_name: "sessions",
+                    column_name: "blocks_json"
+                }
+            ) {
+                Authorization::Deny
+            } else {
+                Authorization::Allow
+            }
+        }))
+        .unwrap();
+        assert_eq!(cold_collect(&conn, &directory), 0);
+        assert!(orphan.exists());
+    }
+
+    #[test]
+    fn composer_attachment_gc_parallel_openers_register_one_cold_start_atomically() {
+        let directory = CacheDirectory::new();
+        let database = directory.0.join("fixture.db");
+        let conn = Connection::open(&database).unwrap();
+        ensure_table(&conn).unwrap();
+        drop(conn);
+        let file = directory.file("unpublished", Duration::from_secs(7200));
+        let barrier = Arc::new(Barrier::new(2));
+        let threads = ["one", "two"]
+            .into_iter()
+            .map(|instance| {
+                let database = database.clone();
+                let root = directory.0.clone();
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    let conn = Connection::open(database).unwrap();
+                    conn.busy_timeout(Duration::from_secs(5)).unwrap();
+                    barrier.wait();
+                    let eligible =
+                        register_attachment_process(&conn, instance, 100, |_| true).unwrap();
+                    let removed = if eligible {
+                        collect_cached_attachments(
+                            &conn,
+                            &root,
+                            SystemTime::now(),
+                            instance,
+                            &AtomicBool::new(false),
+                            |_| true,
+                        )
+                        .unwrap()
+                    } else {
+                        0
+                    };
+                    (eligible, removed)
+                })
+            })
+            .collect::<Vec<_>>();
+        let results = threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(results.iter().filter(|(eligible, _)| *eligible).count(), 1);
+        let removed: usize = results.iter().map(|(_, count)| count).sum();
+        assert!(removed <= 1);
+        assert_eq!(file.exists(), removed == 0);
+        let conn = Connection::open(database).unwrap();
+        let owners: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM composer_attachment_processes",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owners, 2);
+    }
+
+    #[test]
+    fn composer_attachment_gc_expired_scan_budget_preserves_all_candidates() {
+        let store = SessionStore::open_in_memory().unwrap();
+        let conn = store.lock_conn().unwrap();
+        let directory = CacheDirectory::new();
+        let first = directory.file("first", Duration::from_secs(7200));
+        let second = directory.file("second", Duration::from_secs(7200));
+        let result = sweep_unreferenced_attachments_with_budget(
+            &conn,
+            &directory.0,
+            SystemTime::now(),
+            &AtomicBool::new(false),
+            Duration::ZERO,
+        );
+        assert!(result.unwrap_err().contains("budget exceeded"));
+        assert!(first.exists());
+        assert!(second.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn composer_attachment_gc_never_collects_through_a_symlink_cache_root() {
+        let store = SessionStore::open_in_memory().unwrap();
+        let conn = store.lock_conn().unwrap();
+        let directory = CacheDirectory::new();
+        let file = directory.file("outside-owned-cache", Duration::from_secs(7200));
+        let target = directory.0.join("different-directory");
+        std::fs::rename(directory.0.join(ATTACHMENT_DIRECTORY), &target).unwrap();
+        std::os::unix::fs::symlink(&target, directory.0.join(ATTACHMENT_DIRECTORY)).unwrap();
+        assert_eq!(cold_collect(&conn, &directory), 0);
+        assert!(target.join(file.file_name().unwrap()).exists());
+    }
 
     struct Database(PathBuf);
 

@@ -61,8 +61,12 @@ async function flushDraftsBeforeQuit(): Promise<void> {
   try {
     await flushComposerDrafts();
   } catch (error) {
+    const detail =
+      error && typeof error === "object" && "message" in error
+        ? String(error.message)
+        : String(error);
     await message(
-      `An unsent message could not be saved. Open its chat and resolve the draft notice before quitting.\n\n${error instanceof Error ? error.message : String(error)}`,
+      `An unsent message could not be saved. Open its chat and resolve the draft notice before quitting.\n\n${detail}`,
       { title: "Message not saved", kind: "error" },
     ).catch(() => undefined);
     throw error;

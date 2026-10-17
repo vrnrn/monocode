@@ -365,6 +365,7 @@ export function sendHarnessTurn(
   const {
     onEvent: _onEvent,
     onAccepted: _onAccepted,
+    beforeAdmission: _beforeAdmission,
     beforeDispatch: _beforeDispatch,
     afterDispatch: _afterDispatch,
     isCurrent: _isCurrent,
@@ -372,16 +373,23 @@ export function sendHarnessTurn(
   } = input;
   const userTurnId = input.submission?.userTurnId ?? crypto.randomUUID();
   const attemptId = input.submission?.attemptId ?? userTurnId;
-  return runLocalSubmission(
-    {
-      attemptId,
-      userTurnId,
-      sessionId: input.sessionId,
-      payloadJson: submissionPayload(payload),
-      userTurn: input.submission?.userTurn,
-    },
-    dispatch,
-  ).then(() => undefined);
+  return (async () => {
+    // A receipt must always have a persisted session through which recovery
+    // can find it, even if the app closes immediately after reservation.
+    assertCurrent();
+    await input.beforeAdmission?.();
+    assertCurrent();
+    return runLocalSubmission(
+      {
+        attemptId,
+        userTurnId,
+        sessionId: input.sessionId,
+        payloadJson: submissionPayload(payload),
+        userTurn: input.submission?.userTurn,
+      },
+      dispatch,
+    );
+  })().then(() => undefined);
 }
 
 export function canCompactHarnessContext(id: HarnessId): boolean {

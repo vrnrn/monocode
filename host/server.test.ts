@@ -17,6 +17,7 @@ import { createHostServer } from "./server";
 import { HostChildBackend } from "./child-backend";
 import { configureChildBackend } from "../src/integrations/harness/core/child";
 import type { SendTurnInput } from "../src/integrations/harness/core/types";
+import { WORKSPACE_EDITOR_SAVE_CAPABILITY } from "../src/features/connections/model/protocol";
 import type { RemoteProvider } from "../src/features/connections/model/protocol";
 
 const modelProbe = vi.hoisted(() => vi.fn());
@@ -116,6 +117,23 @@ async function setup(providers: RemoteProvider[] = ["codex"]) {
 }
 
 describe("remote host API", () => {
+  it("advertises checked editor saves and serves their read/write contract", async () => {
+    const s = await setup();
+    const descriptor = (await s.call("environment.describe")).value.result;
+    expect(descriptor.capabilities).toContain(WORKSPACE_EDITOR_SAVE_CAPABILITY);
+    const path = join(s.project.cwd, "editor.txt");
+    writeFileSync(path, "before\r\n");
+    const run = async (command: string, args: Record<string, unknown>) =>
+      (await s.call("workspace.run", { command, args })).value.result;
+    const baseline = await run("read_editor_text_file", { path });
+    expect(baseline.content).toBe("before\r\n");
+    const saved = await run("write_editor_text_file", { path, content: "after\r\n", expectedHash: baseline.hash });
+    expect(saved).toMatchObject({ status: "saved", path });
+    writeFileSync(path, "external\n");
+    expect(await run("write_editor_text_file", { path, content: "local\n", expectedHash: saved.hash })).toMatchObject({ status: "conflict", path });
+    expect((await run("read_text_file", { path }))).toBe("external\n");
+  });
+
   it("rejects a credential revoked while its request body is arriving", async () => {
     const s = await setup();
     const authenticated = vi.spyOn(s.store, "authenticated");

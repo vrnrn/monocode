@@ -4,6 +4,8 @@ import type { AgentModel } from "../../sessions/model/models";
 import type { LinkedWorkItem } from "../../sessions/model/session";
 
 export const HOST_PROTOCOL_VERSION = 1;
+/** The host understands exact-byte editor baselines and checked save receipts. */
+export const WORKSPACE_EDITOR_SAVE_CAPABILITY = "workspace.editorSavePrecondition";
 import { HARNESSES } from "../../sessions/model/harnessIds";
 export const REMOTE_PROVIDERS = HARNESSES;
 export type RemoteProvider = (typeof REMOTE_PROVIDERS)[number];

@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - File saves detect external edits and preserve the unsaved draft for an explicit reload or overwrite decision. Typing during a save remains unsaved until the newer revision is written.
+- Older remote hosts keep files readable and show an update requirement before editing and saving.
+- Abandoned clipboard attachment copies are reclaimed on eligible cold starts, while saved history and active sends retain their files.
 
 ## [0.13.5] - 2026-10-16
 

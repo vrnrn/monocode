@@ -7806,8 +7806,8 @@ function Workspace({
             isLiveHarness(pendingSwitch.from)
           ) {
             try {
-              await persistAcceptedSession();
               agentText = await requestOutgoingHandoff({
+                beforeAdmission: () => persistAcceptedSession(),
                 persist: !current.ephemeral && !current.inboxAsk,
                 afterDispatch: async () => {
                   flushHarnessEvents();
@@ -8040,14 +8040,11 @@ function Workspace({
                   }
                 }
               : undefined;
-          const beforeDispatch = async () => {
-            await persistAcceptedSession();
-            await rewindBeforeDispatch?.();
-          };
           let dispatchIndex = 0;
           const sendTurn = (text: string, turnAttachments = prepared) => {
             const index = dispatchIndex++;
             return sendHarnessTurn({
+              beforeAdmission: () => persistAcceptedSession(),
               isCurrent: () =>
                 turnGen.current.get(sessionId) === gen &&
                 !removingSessionIds.current.has(sessionId),
@@ -8059,10 +8056,10 @@ function Workspace({
               },
               ...(index === 0
                 ? {
-                    beforeDispatch,
+                    beforeDispatch: rewindBeforeDispatch,
                     submissionScope: { providerTurnId: editedProviderTurnId },
                   }
-                : { beforeDispatch: () => persistAcceptedSession() }),
+                : {}),
               afterDispatch: async (completed: boolean, error?: string) => {
                 if (completed) acceptEditedResend();
                 else if (

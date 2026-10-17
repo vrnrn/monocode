@@ -44,6 +44,8 @@ impl SessionStore {
         migrate(&conn).map_err(|e| e.to_string())?;
         crate::local_submissions::recover_unresolved(&conn).map_err(|e| e.to_string())?;
         crate::worktrees::reconcile_removals(&conn)?;
+        crate::composer_drafts::initialize_attachment_cache(&conn, &path)
+            .map_err(|e| e.to_string())?;
         let read_conn = Connection::open(&path).map_err(|e| e.to_string())?;
         read_conn
             .execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")

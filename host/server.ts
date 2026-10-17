@@ -9,6 +9,7 @@ import { realpath, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import {
   HOST_PROTOCOL_VERSION,
+  WORKSPACE_EDITOR_SAVE_CAPABILITY,
   type HostModelCatalog,
   type RemoteProvider,
 } from "../src/features/connections/model/protocol";
@@ -268,6 +269,7 @@ export function createHostServer(
                 "files.list",
                 "files.index",
                 "workspace.run",
+                WORKSPACE_EDITOR_SAVE_CAPABILITY,
                 "files.search",
                 "files.searchContent",
                 "files.create",

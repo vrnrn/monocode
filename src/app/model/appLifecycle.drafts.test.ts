@@ -33,3 +33,15 @@ it("still preserves unsaved work when displaying the error fails", async () => {
   vi.mocked(message).mockRejectedValue(new Error("Dialog unavailable"));
   expect(await handleQuitRequested()).toBe(false);
 });
+
+it("shows serialized native storage errors in the quit explanation", async () => {
+  vi.mocked(flushComposerDrafts).mockRejectedValue({
+    code: "storageUnavailable",
+    message: "The draft database could not be opened",
+  });
+  expect(await handleQuitRequested()).toBe(false);
+  expect(message).toHaveBeenCalledWith(
+    expect.stringContaining("The draft database could not be opened"),
+    expect.any(Object),
+  );
+});

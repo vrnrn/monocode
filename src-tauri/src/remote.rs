@@ -519,19 +519,7 @@ fn start_ssh_job(
                 );
             }
             if upgrade {
-                let capabilities = descriptor.get("capabilities").and_then(Value::as_array);
-                let supports = |name: &str| {
-                    capabilities.is_some_and(|entries| {
-                        entries.iter().any(|entry| entry.as_str() == Some(name))
-                    })
-                };
-                if !supports("git.index")
-                    || !supports("files.list")
-                    || !supports("files.create")
-                    || !supports("files.searchContent")
-                {
-                    return Err("The installed host package still lacks Explorer and Changes. Install a newer vorkspace release with updated host packages.".into());
-                }
+                require_upgraded_host_capabilities(&descriptor)?;
             }
             if machine.name.trim().is_empty() {
                 machine.name = descriptor
@@ -647,9 +635,51 @@ pub fn remote_ssh_cancel(
     Ok(())
 }
 
+fn require_upgraded_host_capabilities(descriptor: &Value) -> Result<(), String> {
+    let capabilities = descriptor.get("capabilities").and_then(Value::as_array);
+    let supports = |name: &str| {
+        capabilities.is_some_and(|entries| entries.iter().any(|entry| entry.as_str() == Some(name)))
+    };
+    if [
+        "git.index",
+        "files.list",
+        "files.create",
+        "files.searchContent",
+        "workspace.run",
+        "git.worktreeCreate",
+    ]
+    .iter()
+    .any(|name| !supports(name))
+    {
+        return Err("The installed host package still lacks Explorer and Changes. Install a newer vorkspace release with updated host packages.".into());
+    }
+    if !supports("workspace.editorSavePrecondition") {
+        return Err("The installed host package still lacks conflict-aware editor saves. Install a newer vorkspace release with updated host packages.".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn upgraded_hosts_require_checked_editor_saves() {
+        let mut descriptor = json!({"capabilities": ["git.index", "files.list", "files.create", "files.searchContent", "workspace.run", "git.worktreeCreate"]});
+        assert!(require_upgraded_host_capabilities(&descriptor)
+            .unwrap_err()
+            .contains("conflict-aware editor saves"));
+        descriptor["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("workspace.editorSavePrecondition"));
+        assert!(require_upgraded_host_capabilities(&descriptor).is_ok());
+        assert!(
+            require_upgraded_host_capabilities(&json!({"capabilities": []}))
+                .unwrap_err()
+                .contains("Explorer and Changes")
+        );
+    }
+
     #[test]
     fn a_slow_host_does_not_look_like_a_dead_tunnel() {
         use std::{net::TcpListener, thread, time::Duration};

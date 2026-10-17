@@ -322,3 +322,130 @@ it("keeps a failed final checkpoint uncertain and blocks replay after reopen", a
   );
   expect(send).not.toHaveBeenCalled();
 });
+
+it("checkpoints a recoverable session owner before the receipt crash boundary", async () => {
+  const implementation = mocks.invoke.getMockImplementation()!;
+  let saved: Session | undefined;
+  const turn = input("crash-after-reserve");
+  const user = {
+    id: turn.submission.userTurnId,
+    role: "user" as const,
+    text: "hello",
+  };
+  mocks.invoke.mockImplementation(
+    async (command: string, args: Record<string, unknown>) => {
+      if (command === "local_submission_reserve") {
+        expect(saved?.blocks).toEqual([user]);
+        expect(trace).toEqual(["owner-checkpoint"]);
+      }
+      if (command === "local_submission_dispatch")
+        throw new Error("simulated crash after reservation");
+      return implementation(command, args);
+    },
+  );
+  const send = vi.fn(async () => undefined);
+  const rewind = vi.fn(async () => undefined);
+  registerHarness(adapter(send));
+  await expect(
+    sendHarnessTurn({
+      ...turn,
+      submission: { ...turn.submission, userTurn: user },
+      beforeAdmission: async () => {
+        saved = {
+          id: turn.sessionId,
+          cwd: "/repo",
+          harness: "pi",
+          model: "pi:test",
+          modelSettings: {},
+          runtimeMode: "supervised",
+          title: "Test",
+          blocks: [user],
+        };
+        trace.push("owner-checkpoint");
+      },
+      beforeDispatch: rewind,
+    }),
+  ).rejects.toThrow("simulated crash after reservation");
+  const receipt = receipts.get(turn.submission.attemptId)!;
+  expect(receipt.phase).toBe("reserved");
+  expect(saved).toBeDefined();
+  const restored = restoreLocalSubmissions(saved!, [receipt]);
+  expect(restored.localSubmissionUncertain).toBe(true);
+  expect(restored.blocks.filter((block) => block.id === user.id)).toHaveLength(
+    1,
+  );
+  expect(restored.blocks.at(-1)?.text).toContain("not replayed");
+  expect(rewind).not.toHaveBeenCalled();
+  expect(send).not.toHaveBeenCalled();
+});
+
+it("does not reserve a receipt or call a provider when the owner checkpoint fails", async () => {
+  const send = vi.fn(async () => undefined);
+  const rewind = vi.fn(async () => undefined);
+  const afterDispatch = vi.fn(async () => undefined);
+  registerHarness(adapter(send));
+  await expect(
+    sendHarnessTurn({
+      ...input("owner-checkpoint-failed"),
+      beforeAdmission: async () => {
+        throw new Error("owner database unavailable");
+      },
+      beforeDispatch: rewind,
+      afterDispatch,
+    }),
+  ).rejects.toThrow("owner database unavailable");
+  expect(receipts.size).toBe(0);
+  expect(mocks.invoke).not.toHaveBeenCalled();
+  expect(rewind).not.toHaveBeenCalled();
+  expect(afterDispatch).not.toHaveBeenCalled();
+  expect(send).not.toHaveBeenCalled();
+});
+
+it.each(["stop", "replacement"])(
+  "does not reserve after %s while the owner checkpoint awaits",
+  async (change) => {
+    let release!: () => void;
+    let current = true;
+    const checkpoint = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const beforeAdmission = vi.fn(async () => {
+      await checkpoint;
+    });
+    const send = vi.fn(async () => undefined);
+    const rewind = vi.fn(async () => undefined);
+    registerHarness(adapter(send));
+    const sending = sendHarnessTurn({
+      ...input(`owner-checkpoint-${change}`),
+      beforeAdmission,
+      beforeDispatch: rewind,
+      isCurrent: () => current,
+    });
+    const rejected = expect(sending).rejects.toThrow("cancelled or replaced");
+    await vi.waitFor(() => expect(beforeAdmission).toHaveBeenCalledOnce());
+    if (change === "stop") await stopHarnessSession("pi", "registry-session");
+    else current = false;
+    release();
+    await rejected;
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(receipts.size).toBe(0);
+    expect(rewind).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  },
+);
+
+it("validates cancellation before starting the owner checkpoint", async () => {
+  const beforeAdmission = vi.fn(async () => undefined);
+  const send = vi.fn(async () => undefined);
+  registerHarness(adapter(send));
+  await expect(
+    sendHarnessTurn({
+      ...input("already-replaced"),
+      beforeAdmission,
+      isCurrent: () => false,
+    }),
+  ).rejects.toThrow("cancelled or replaced");
+  expect(beforeAdmission).not.toHaveBeenCalled();
+  expect(mocks.invoke).not.toHaveBeenCalled();
+  expect(send).not.toHaveBeenCalled();
+});

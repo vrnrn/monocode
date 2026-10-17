@@ -11,10 +11,10 @@ import {
   Compartment,
   countColumn,
   EditorSelection,
+  EditorState,
   Prec,
   StateField,
   Transaction,
-  type EditorState,
   type Text,
 } from "@codemirror/state";
 import {
@@ -47,6 +47,7 @@ import { loadAutosave, loadFormatOnSave } from "../../settings/model/settings";
 import { formatText } from "../../../shared/lib/format";
 import {
   basename,
+  EditorSaveUnavailableError,
   gitDiffFiles,
   gitFileDiff,
   gitStageContents,
@@ -97,6 +98,7 @@ import { editorLint } from "../editor/editorLint";
 import { editorSearch } from "../editor/editorSearch";
 import { editorScrollbar } from "../editor/editorScrollbar";
 import { FilePreviewSearch } from "./FilePreviewSearch";
+import { OPEN_CONNECTIONS_EVENT } from "../../connections/model/connections";
 
 type EditorNavigationRequest = EditorNavigation & { token: number };
 
@@ -104,6 +106,7 @@ export const FILE_EDITOR_AUTOSAVE_DELAY_MS = 1_000;
 
 const editorScheme = new Compartment();
 const editorGitConfig = new Compartment();
+const editorReadOnly = new Compartment();
 
 type Props = {
   path: string;
@@ -126,7 +129,12 @@ type SaveState =
   | { status: "conflict"; message?: string }
   | { status: "error"; message: string };
 
-type DiskBaseline = { path: string; hash: string; lineEnding: LineEnding };
+type DiskBaseline = {
+  path: string;
+  hash: string | null;
+  lineEnding: LineEnding;
+  saveDisabledReason?: string;
+};
 
 class EditorSaveConflict extends Error {
   constructor() {
@@ -193,6 +201,7 @@ export function FileEditor({
     baselineRef.current = {
       path: file.path,
       hash: file.hash,
+      saveDisabledReason: file.saveDisabledReason,
       lineEnding: detectLineEnding(file.content),
     };
     const content = normalizeLineBreaks(file.content);
@@ -388,6 +397,8 @@ export function FileEditor({
       // Read the captured document's baseline when its queued write starts:
       // a preceding successful save advances it, even after switching files.
       const operation = saveQueue.current.then(async () => {
+        if (baseline.hash === null || baseline.saveDisabledReason)
+          throw new EditorSaveUnavailableError();
         const receipt = await writeEditorTextFile(
           path,
           serializedContent,
@@ -419,6 +430,8 @@ export function FileEditor({
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        if (error instanceof EditorSaveUnavailableError)
+          baseline.saveDisabledReason = message;
         if (
           !(error instanceof EditorSaveConflict) &&
           baselineRef.current === baseline &&
@@ -436,6 +449,29 @@ export function FileEditor({
     draftRef.current = content;
     ++draftRevisionRef.current;
     if (markdown || svg) setDraft(content);
+  };
+
+  const checkHostUpdate = async () => {
+    const baseline = baselineRef.current;
+    if (!baseline) return;
+    try {
+      const file = await readEditorTextFile(path);
+      if (baselineRef.current !== baseline) return;
+      if (dirtyRef.current) {
+        // Re-enable a retained draft without rebasing it onto external edits.
+        // Its next save must still check the original exact-byte baseline.
+        baseline.saveDisabledReason = file.saveDisabledReason;
+      } else {
+        applyDiskContent(file);
+      }
+      setSaveState({ status: "idle" });
+    } catch (error) {
+      if (baselineRef.current === baseline)
+        setSaveState({
+          status: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+    }
   };
 
   const retryLocalSave = async () => {
@@ -521,6 +557,10 @@ export function FileEditor({
   const relativePath = path.startsWith(`${cwd}/`)
     ? path.slice(cwd.length + 1)
     : path;
+  const saveDisabledReason =
+    baselineRef.current?.path === path
+      ? baselineRef.current.saveDisabledReason
+      : undefined;
 
   if (loadState.status === "loading") {
     return (
@@ -556,6 +596,30 @@ export function FileEditor({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
+      {saveDisabledReason && (
+        <div
+          role="status"
+          className="flex shrink-0 flex-wrap items-center gap-3 border-b border-stroke px-3 py-2 text-[12px] text-content/75"
+        >
+          <span className="flex-1">{saveDisabledReason}</span>
+          <button
+            type="button"
+            className="shrink-0 underline"
+            onClick={() =>
+              window.dispatchEvent(new Event(OPEN_CONNECTIONS_EVENT))
+            }
+          >
+            Open Connections
+          </button>
+          <button
+            type="button"
+            className="shrink-0 underline"
+            onClick={() => void checkHostUpdate()}
+          >
+            Check host update
+          </button>
+        </div>
+      )}
       {saveState.status === "conflict" && (
         <div
           role="alert"
@@ -629,8 +693,12 @@ export function FileEditor({
                 onDirtyChange={dirtyChange}
                 onErrorCountChange={errorCountChange}
                 onSave={save}
+                readOnly={!!saveDisabledReason}
                 saveRequest={saveRequest}
-                canAutosave={() => !pendingDiskRef.current}
+                canAutosave={() =>
+                  !pendingDiskRef.current &&
+                  !baselineRef.current?.saveDisabledReason
+                }
                 onStageGit={
                   showDiff && gitDiff?.kind === "unstaged"
                     ? stageGit
@@ -654,9 +722,12 @@ export function FileEditor({
           onDirtyChange={dirtyChange}
           onErrorCountChange={errorCountChange}
           onSave={save}
+          readOnly={!!saveDisabledReason}
           saveRequest={saveRequest}
           onDocChange={docChange}
-          canAutosave={() => !pendingDiskRef.current}
+          canAutosave={() =>
+            !pendingDiskRef.current && !baselineRef.current?.saveDisabledReason
+          }
           onStageGit={
             showDiff && gitDiff?.kind === "unstaged" ? stageGit : undefined
           }
@@ -694,6 +765,7 @@ export function CodeMirrorEditor({
   onDirtyChange,
   onErrorCountChange,
   onSave,
+  readOnly = false,
   saveRequest = 0,
   canAutosave,
   onStageGit,
@@ -710,6 +782,7 @@ export function CodeMirrorEditor({
   onDirtyChange: (dirty: boolean) => void;
   onErrorCountChange: (count: number) => void;
   onSave: (content: string) => Promise<void>;
+  readOnly?: boolean;
   saveRequest?: number;
   canAutosave: () => boolean;
   onStageGit?: (contents: string) => Promise<void>;
@@ -721,6 +794,7 @@ export function CodeMirrorEditor({
   const savedDocumentRef = useRef<Text | null>(null);
   const dirtyRef = useRef(false);
   const activeRef = useRef(active);
+  const readOnlyRef = useRef(readOnly);
   const onDirtyChangeRef = useRef(onDirtyChange);
   const onErrorCountChangeRef = useRef(onErrorCountChange);
   const onSaveRef = useRef(onSave);
@@ -755,6 +829,7 @@ export function CodeMirrorEditor({
     onComment: setCommentTarget,
   };
   activeRef.current = active;
+  readOnlyRef.current = readOnly;
   onDirtyChangeRef.current = onDirtyChange;
   onErrorCountChangeRef.current = onErrorCountChange;
   onSaveRef.current = onSave;
@@ -849,6 +924,7 @@ export function CodeMirrorEditor({
     };
 
     const save = (automatic = false) => {
+      if (readOnlyRef.current) return true;
       const retryPendingAutosave = autosaveTimer !== 0 && loadAutosave();
       window.clearTimeout(autosaveTimer);
       const generation = ++saveGeneration;
@@ -930,6 +1006,10 @@ export function CodeMirrorEditor({
       parent: host,
       extensions: [
         minimalSetup,
+        editorReadOnly.of([
+          EditorState.readOnly.of(readOnlyRef.current),
+          EditorView.editable.of(!readOnlyRef.current),
+        ]),
         showDiff ? editorGitConfig.of(editorGit(gitOptions)) : [],
         // Diff tabs put the fold arrows first so each line number sits right
         // beside its +/- glyph.
@@ -1050,6 +1130,15 @@ export function CodeMirrorEditor({
     lastSaveRequestRef.current = saveRequest;
     if (saveRequest) requestSaveRef.current?.();
   }, [saveRequest]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: editorReadOnly.reconfigure([
+        EditorState.readOnly.of(readOnly),
+        EditorView.editable.of(!readOnly),
+      ]),
+    });
+  }, [readOnly]);
 
   useEffect(() => {
     const view = viewRef.current;

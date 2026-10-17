@@ -22,6 +22,12 @@ bash migrate-monocode-to-vorkspace.sh --apply
 
 The helper preserves the originals and includes the app profile, WebKit storage, preferences, and compatibility data. Run it with `--help` for recovery into an empty profile. Keychain credentials stay on the same Mac; external provider installations and project checkouts remain in place.
 
+## Unsent messages and attachments
+
+Ordinary unsent input recovers after restart, separately from the **Save draft** turns in history. If another window saved a different version, the recovery notice lets you compare both before choosing one. Temporary and Inbox Ask conversations remain memory-only. Unsent input for remote sessions is saved on this desktop.
+
+Clipboard attachments are copied into private app-data storage. On an eligible cold start, background cleanup can remove copies older than one hour that no saved data references. Cleanup defers during concurrent activity or a failed scan; removing an attachment does not immediately delete its cached file. Attachments still referenced by saved history are retained.
+
 ## Linux source builds
 
 This fork publishes Apple Silicon macOS builds. The Linux instructions below apply to packages you [build from source](building.md).

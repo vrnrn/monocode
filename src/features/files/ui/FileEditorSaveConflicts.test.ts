@@ -7,9 +7,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveAutosave } from "../../settings/model/settings";
 import { FileEditor } from "./FileEditor";
+import {
+  EDITOR_HOST_UPDATE_MESSAGE,
+  EditorSaveUnavailableError,
+} from "../../../platform/tauri/fs";
 
 const native = vi.hoisted(() => ({
   files: new Map<string, string>(),
+  legacyHost: false,
   beforeRead: undefined as undefined | (() => Promise<void>),
   beforeWrite: undefined as undefined | (() => Promise<void>),
 }));
@@ -22,9 +27,17 @@ const invoke = vi.hoisted(() =>
       const content = native.files.get(path);
       if (content === undefined) throw new Error("File was deleted");
       await native.beforeRead?.();
-      return { path, content, hash: digest(content) };
+      return native.legacyHost
+        ? {
+            path,
+            content,
+            hash: null,
+            saveDisabledReason: EDITOR_HOST_UPDATE_MESSAGE,
+          }
+        : { path, content, hash: digest(content) };
     }
     if (command === "write_editor_text_file") {
+      if (native.legacyHost) throw new EditorSaveUnavailableError();
       await native.beforeWrite?.();
       const current = native.files.get(path);
       const hash = current === undefined ? null : digest(current);
@@ -69,6 +82,7 @@ describe("ordinary editor save conflicts", () => {
     vi.stubGlobal("localStorage", new Storage());
     saveAutosave(false);
     native.files.clear();
+    native.legacyHost = false;
     native.files.set(path, "original\r\n");
     native.files.set(otherPath, "other\n");
     native.beforeWrite = undefined;
@@ -317,5 +331,43 @@ describe("ordinary editor save conflicts", () => {
     expect(view.state.doc.toString()).toBe("external\n");
     expect(dirty).toHaveBeenLastCalledWith(path, false);
     expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("opens old-host files read-only and restores checked saving after a host update", async () => {
+    native.legacyHost = true;
+    const view = await render();
+    expect(view.state.doc.toString()).toBe("original\n");
+    expect(view.state.readOnly).toBe(true);
+    expect(view.contentDOM.contentEditable).toBe("false");
+    expect(container.textContent).toContain(EDITOR_HOST_UPDATE_MESSAGE);
+    await save(view);
+    expect(writes()).toHaveLength(0);
+    native.legacyHost = false;
+    await click("Check host update");
+    expect(view.state.readOnly).toBe(false);
+    await type(view, "updated host ");
+    await save(view);
+    expect(native.files.get(path)).toBe("updated host original\r\n");
+    expect(dirty).toHaveBeenLastCalledWith(path, false);
+  });
+
+  it("retains a draft across a host downgrade and does not rebase it when saving becomes available", async () => {
+    const view = await render();
+    await type(view, "local ");
+    native.legacyHost = true;
+    await save(view);
+    expect(view.state.readOnly).toBe(true);
+    expect(view.state.doc.toString()).toBe("local original\n");
+    expect(native.files.get(path)).toBe("original\r\n");
+    expect(dirty).toHaveBeenLastCalledWith(path, true);
+    native.legacyHost = false;
+    native.files.set(path, "external while downgraded\n");
+    await click("Check host update");
+    expect(view.state.readOnly).toBe(false);
+    expect(view.state.doc.toString()).toBe("local original\n");
+    await save(view);
+    expect(writes().at(-1)?.expectedHash).toBe(digest("original\r\n"));
+    expect(native.files.get(path)).toBe("external while downgraded\n");
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
   });
 });

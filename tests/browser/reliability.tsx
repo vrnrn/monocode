@@ -24,7 +24,17 @@ Object.assign(window, {
     unregisterCallback: () => {},
     invoke: async (command: string, args?: Record<string, unknown>) => {
       if (command === "read_editor_text_file")
-        return { path: filePath, content: disk, hash: await hash(disk) };
+        return {
+          path: filePath,
+          content: disk,
+          hash: view === "legacy-editor" ? null : await hash(disk),
+          ...(view === "legacy-editor"
+            ? {
+                saveDisabledReason:
+                  "Update this host in Connections to enable checked file saves. You can still read this file.",
+              }
+            : {}),
+        };
       if (command === "write_editor_text_file") {
         const baseline = await hash(disk);
         if (baseline !== args?.expectedHash)

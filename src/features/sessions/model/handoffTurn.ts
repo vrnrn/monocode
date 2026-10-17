@@ -15,6 +15,7 @@ export async function requestOutgoingHandoff(input: {
   userTurn?: Block;
   isCurrent?: () => boolean;
   persist?: boolean;
+  beforeAdmission?: () => Promise<void>;
   afterDispatch?: () => Promise<void>;
   harness: HarnessId;
   sessionId: string;
@@ -31,6 +32,7 @@ export async function requestOutgoingHandoff(input: {
   try {
     await sendHarnessTurn({
       isCurrent: input.isCurrent,
+      beforeAdmission: input.beforeAdmission,
       afterDispatch: input.afterDispatch,
       ...(input.userTurnId
         ? {

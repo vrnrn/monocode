@@ -1,6 +1,27 @@
 import { expect, test } from "@playwright/test";
 
 for (const theme of ["dark", "light"]) {
+  test(`older hosts keep files readable without allowing unchecked edits (${theme})`, async ({
+    page,
+  }) => {
+    await page.goto(
+      `/tests/browser/reliability.html?view=legacy-editor&theme=${theme}`,
+    );
+    const editor = page.locator(".cm-content");
+    await expect(editor).toHaveText("original");
+    await expect(editor).toHaveAttribute("contenteditable", "false");
+    await expect(
+      page.getByRole("button", { name: "Open Connections" }),
+    ).toBeVisible();
+    await editor.press("ControlOrMeta+s");
+    expect(
+      await page.evaluate(() => Reflect.get(window, "reliability").disk()),
+    ).toBe("original\r\n");
+    await page.screenshot({
+      path: test.info().outputPath("older-host-editor.png"),
+    });
+  });
+
   test(`editor preserves the disk and draft on conflict (${theme})`, async ({
     page,
   }) => {
